@@ -1,0 +1,9 @@
+{
+  "features": [
+    { "id": "calibration", "title": "Calibration", "enabled": true,  "order": 1 },
+    { "id": "autoeq",      "title": "AutoEQ presets", "enabled": true,  "order": 2 },
+    { "id": "routing",     "title": "Routing",      "enabled": true,  "order": 3 },
+    { "id": "settings",    "title": "Settings",     "enabled": true,  "order": 4 },
+    { "id": "visualizer",  "title": "Visualizer",   "enabled": true,  "order": 5 }
+  ]
+}

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "2600"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Run Script"
+               scriptText = "#!/bin/bash&#10;set -euo pipefail&#10;&#10;# 1) &#x417;&#x430;&#x431;&#x43e;&#x440;&#x43e;&#x43d;&#x44f;&#x454;&#x43c;&#x43e; #Preview &#x432; app-&#x442;&#x430;&#x440;&#x433;&#x435;&#x442;&#x456; (&#x43f;&#x440;&#x43e;&#x432;&#x43e;&#x43a;&#x443;&#x454; &apos;@main&apos; top-level code &#x43f;&#x43e;&#x43c;&#x438;&#x43b;&#x43a;&#x438;)&#10;SRC_DIR=&quot;SystemEQ for Mac/SystemEQ for Mac&quot;&#10;if grep -R --include=&quot;*.swift&quot; -n &quot;#Preview&quot; &quot;$SRC_DIR&quot; &gt;/dev/null 2&gt;&amp;1; then&#10;  echo &quot;Error: #Preview blocks detected in app target. Remove or move them to a preview-only target.&quot; &gt;&amp;2&#10;  grep -R --include=&quot;*.swift&quot; -n &quot;#Preview&quot; &quot;$SRC_DIR&quot; || true&#10;  exit 1&#10;fi&#10;&#10;# 2) &#x41e;&#x43f;&#x446;&#x456;&#x439;&#x43d;&#x43e;: &#x43b;&#x43e;&#x432;&#x438;&#x43c;&#x43e; &#x456;&#x43d;&#x448;&#x456; &#x44f;&#x432;&#x43d;&#x456; &#x43f;&#x43e;&#x43f;&#x435;&#x440;&#x435;&#x434;&#x43d;&#x456; &#x443;&#x43c;&#x43e;&#x432;&#x438;, &#x449;&#x43e; &#x43c;&#x43e;&#x436;&#x443;&#x442;&#x44c; &#x434;&#x430;&#x432;&#x430;&#x442;&#x438; top-level code&#10;if grep -R --include=&quot;*.swift&quot; -n &quot;PreviewProvider&quot; &quot;$SRC_DIR&quot; &gt;/dev/null 2&gt;&amp;1; then&#10;  echo &quot;Warning: PreviewProvider found. Ensure it isn&apos;t compiled into app target.&quot; &gt;&amp;2&#10;fi&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "C06457242E959CD100CF1B0E"
+                     BuildableName = "SystemEQ for Mac.app"
+                     BlueprintName = "SystemEQ for Mac"
+                     ReferencedContainer = "container:SystemEQ for Mac.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Run Script"
+               scriptText = "#!/bin/bash&#10;set -euo pipefail&#10;&#10;# &#x41f;&#x435;&#x440;&#x435;&#x432;&#x456;&#x440;&#x44f;&#x454;&#x43c;&#x43e;, &#x449;&#x43e; &#x432; .app &#x454; &#x432;&#x438;&#x43a;&#x43e;&#x43d;&#x443;&#x432;&#x430;&#x43d;&#x438;&#x439; &#x444;&#x430;&#x439;&#x43b;&#10;APP_BIN=&quot;$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME&quot;&#10;if [ ! -x &quot;$APP_BIN&quot; ]; then&#10;  echo &quot;No executable in app bundle. Purging DerivedData and stopping (no auto-rebuild to avoid DB locks).&quot; &gt;&amp;2&#10;  rm -rf &quot;$HOME/Library/Developer/Xcode/DerivedData/SystemEQ_for_Mac-&quot;* || true&#10;  exit 1&#10;fi&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "C06457242E959CD100CF1B0E"
+                     BuildableName = "SystemEQ for Mac.app"
+                     BlueprintName = "SystemEQ for Mac"
+                     ReferencedContainer = "container:SystemEQ for Mac.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C06457242E959CD100CF1B0E"
+               BuildableName = "SystemEQ for Mac.app"
+               BlueprintName = "SystemEQ for Mac"
+               ReferencedContainer = "container:SystemEQ for Mac.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "YES">
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "C06457242E959CD100CF1B0E"
+            BuildableName = "SystemEQ for Mac.app"
+            BlueprintName = "SystemEQ for Mac"
+            ReferencedContainer = "container:SystemEQ for Mac.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "C06457242E959CD100CF1B0E"
+            BuildableName = "SystemEQ for Mac.app"
+            BlueprintName = "SystemEQ for Mac"
+            ReferencedContainer = "container:SystemEQ for Mac.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

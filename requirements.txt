@@ -1,0 +1,6 @@
+flask>=3.0.0
+flask-cors>=4.0.0
+autoeq>=2.2.0
+numpy~=1.23.1
+scipy>=1.10.0
+matplotlib~=3.5.2
