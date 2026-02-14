@@ -205,6 +205,10 @@ final class ComputeShaderEngine {
 
         // Set feedback texture if needed
         if needsFeedback(shaderType) {
+            // Ensure feedback textures exist before using them
+            if feedbackTextureA == nil || feedbackTextureB == nil {
+                ensureTextures(width: outputTexture.width, height: outputTexture.height)
+            }
             let feedbackTexture = useFeedbackA ? feedbackTextureA : feedbackTextureB
             computeEncoder.setTexture(feedbackTexture, index: 1)
         }
