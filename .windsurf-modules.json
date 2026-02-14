@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "project": "SystemEQ for Mac",
+  "language": "Swift",
+  "modules": {
+    "AudioEngine": {
+      "path": "SystemEQ for Mac/AudioEngine.swift",
+      "exports": ["AudioEngine", "EQBandMode", "EQBand"]
+    },
+    "CoreAudioEngine": {
+      "path": "SystemEQ for Mac/CoreAudioEngine.swift",
+      "exports": ["CoreAudioEngine"]
+    },
+    "AudioRouter": {
+      "path": "SystemEQ for Mac/AudioRouter.swift",
+      "exports": ["AudioRouter", "AudioDevice"]
+    },
+    "AutoEQServer": {
+      "path": "SystemEQ for Mac/AutoEQServer.swift",
+      "exports": ["AutoEQServer", "ValidationError"]
+    },
+    "PresetPersistence": {
+      "path": "SystemEQ for Mac/PresetPersistence.swift",
+      "exports": ["PresetPersistence"]
+    },
+    "BiquadFilter": {
+      "path": "SystemEQ for Mac/AutoEQ/BiquadFilter.swift",
+      "exports": ["BiquadFilter", "BiquadFilterChain", "FilterType"]
+    },
+    "AutoEQModels": {
+      "path": "SystemEQ for Mac/AutoEQ/AutoEQModels.swift",
+      "exports": ["ParametricBand", "EQPreset", "AutoEQConstants"]
+    }
+  },
+  "note": "This file helps Windsurf IDE understand Swift module structure. Swift compiler doesn't need this - it uses objectVersion 77 automatic file synchronization."
+}

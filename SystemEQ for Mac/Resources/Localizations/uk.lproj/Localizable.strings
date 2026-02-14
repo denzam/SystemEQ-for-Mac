@@ -1,0 +1,77 @@
+/* General */
+"main_window_title" = "SystemEQ для Mac";
+"settings_title" = "Налаштування";
+"calibration" = "Калібрування";
+"autoeq_presets" = "Пресети AutoEQ";
+"personalized" = "Персоналізоване";
+"routing" = "Маршрутизація";
+"equalizer" = "Еквалайзер";
+"visualizer" = "Візуалізатор";
+"room_calibration" = "Калібрування кімнати";
+
+/* Language */
+"language" = "Мова";
+"english" = "Англійська";
+"italian" = "Італійська";
+"ukrainian" = "Українська";
+
+/* Common */
+"save" = "Зберегти";
+"cancel" = "Скасувати";
+"apply" = "Застосувати";
+"reset" = "Скинути";
+"close" = "Закрити";
+"back" = "Назад";
+"next" = "Далі";
+"done" = "Готово";
+
+/* Settings */
+"general" = "Загальні";
+"links" = "Посилання";
+"about" = "Про програму";
+"version" = "Версія";
+"build" = "Збірка";
+"check_for_updates" = "Перевірити оновлення";
+
+/* Audio */
+"enable_eq" = "Увімкнути EQ";
+"master_gain" = "Основне посилення";
+"preamp" = "Передпідсилювач";
+"output_device" = "Пристрій виводу";
+"input_device" = "Пристрій вводу";
+"sample_rate" = "Частота дискретизації";
+"buffer_size" = "Розмір буфера";
+
+/* EQ Bands */
+"band_10" = "10 смуг";
+"band_31" = "31 смуга";
+"frequency_hz" = "Частота (Гц)";
+"gain" = "Підсилення";
+"q_factor" = "Фактор Q";
+
+/* Calibration */
+"start_calibration" = "Почати калібрування";
+"calibration_complete" = "Калібрування завершено";
+"test_tone" = "Тестовий тон";
+"volume_warning" = "Попередження про гучність";
+"set_volume_to_50" = "Встановіть гучність 50%";
+
+/* AutoEQ */
+"search_headphones" = "Пошук навушників...";
+"no_results" = "Результатів не знайдено";
+"loading_presets" = "Завантаження пресетів...";
+"import_preset" = "Імпортувати пресет";
+"export_preset" = "Експортувати пресет";
+
+/* Errors */
+"error" = "Помилка";
+"warning" = "Попередження";
+"success" = "Успіх";
+"device_not_found" = "Пристрій не знайдено";
+"connection_failed" = "Помилка з'єднання";
+
+/* Menu Bar */
+"systemeq" = "SystemEQ";
+"show_main_window" = "Показати головне вікно";
+"hide_main_window" = "Сховати головне вікно";
+"quit" = "Вийти з SystemEQ";

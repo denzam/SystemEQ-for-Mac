@@ -1,0 +1,77 @@
+/* General */
+"main_window_title" = "SystemEQ for Mac";
+"settings_title" = "Settings";
+"calibration" = "Calibration";
+"autoeq_presets" = "AutoEQ Presets";
+"personalized" = "Personalized";
+"routing" = "Routing";
+"equalizer" = "Equalizer";
+"visualizer" = "Visualizer";
+"room_calibration" = "Room Calibration";
+
+/* Language */
+"language" = "Language";
+"english" = "English";
+"italian" = "Italian";
+"ukrainian" = "Ukrainian";
+
+/* Common */
+"save" = "Save";
+"cancel" = "Cancel";
+"apply" = "Apply";
+"reset" = "Reset";
+"close" = "Close";
+"back" = "Back";
+"next" = "Next";
+"done" = "Done";
+
+/* Settings */
+"general" = "General";
+"links" = "Links";
+"about" = "About";
+"version" = "Version";
+"build" = "Build";
+"check_for_updates" = "Check for Updates";
+
+/* Audio */
+"enable_eq" = "Enable EQ";
+"master_gain" = "Master Gain";
+"preamp" = "Preamp";
+"output_device" = "Output Device";
+"input_device" = "Input Device";
+"sample_rate" = "Sample Rate";
+"buffer_size" = "Buffer Size";
+
+/* EQ Bands */
+"band_10" = "10 Bands";
+"band_31" = "31 Bands";
+"frequency_hz" = "Frequency (Hz)";
+"gain" = "Gain";
+"q_factor" = "Q Factor";
+
+/* Calibration */
+"start_calibration" = "Start Calibration";
+"calibration_complete" = "Calibration Complete";
+"test_tone" = "Test Tone";
+"volume_warning" = "Volume Warning";
+"set_volume_to_50" = "Set volume to 50%";
+
+/* AutoEQ */
+"search_headphones" = "Search headphones...";
+"no_results" = "No results found";
+"loading_presets" = "Loading presets...";
+"import_preset" = "Import Preset";
+"export_preset" = "Export Preset";
+
+/* Errors */
+"error" = "Error";
+"warning" = "Warning";
+"success" = "Success";
+"device_not_found" = "Device not found";
+"connection_failed" = "Connection failed";
+
+/* Menu Bar */
+"systemeq" = "SystemEQ";
+"show_main_window" = "Show Main Window";
+"hide_main_window" = "Hide Main Window";
+"quit" = "Quit SystemEQ";

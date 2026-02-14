@@ -1,9 +1,11 @@
 {
   "features": [
-    { "id": "calibration", "title": "Calibration", "enabled": true,  "order": 1 },
-    { "id": "autoeq",      "title": "AutoEQ presets", "enabled": true,  "order": 2 },
-    { "id": "routing",     "title": "Routing",      "enabled": true,  "order": 3 },
-    { "id": "settings",    "title": "Settings",     "enabled": true,  "order": 4 },
-    { "id": "visualizer",  "title": "Visualizer",   "enabled": true,  "order": 5 }
+    { "id": "calibration",           "title": "Calibration",            "enabled": true,  "order": 1 },
+    { "id": "subjectiveRoomTuning",  "title": "Subjective Room Tuning", "enabled": true,  "order": 2 },
+    { "id": "resonanceFinder",       "title": "Resonance Finder",       "enabled": true,  "order": 3 },
+    { "id": "autoeq",                "title": "AutoEQ presets",         "enabled": true,  "order": 4 },
+    { "id": "routing",               "title": "Routing",                "enabled": true,  "order": 5 },
+    { "id": "settings",              "title": "Settings",               "enabled": true,  "order": 6 },
+    { "id": "visualizer",            "title": "Visualizer",             "enabled": true,  "order": 7 }
   ]
 }

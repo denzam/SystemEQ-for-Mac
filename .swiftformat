@@ -1,0 +1,56 @@
+# SwiftFormat Configuration for SystemEQ for Mac
+# https://github.com/nicklockwood/SwiftFormat
+
+# File options
+--exclude .build,DerivedData,.swiftpm,Pods,Carthage,Scripts
+
+# Format options
+--swiftversion 6.2
+--indent 4
+--indentcase false
+--trimwhitespace always
+--voidtype void
+--nospaceoperators ..<,...
+--ifdef indent
+--stripunusedargs closure-only
+--maxwidth 120
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--closingparen balanced
+--funcattributes prev-line
+--typeattributes prev-line
+--varattributes same-line
+--extensionacl on-declarations
+--patternlet hoist
+--self remove
+--importgrouping alpha
+--commas always
+--decimalgrouping 3,6
+--binarygrouping 4,8
+--octalgrouping 4,8
+--hexgrouping 4,8
+--fractiongrouping disabled
+--exponentgrouping disabled
+--hexliteralcase uppercase
+--exponentcase lowercase
+--operatorfunc spaced
+--elseposition same-line
+--guardelse auto
+--emptybraces no-space
+--ranges spaced
+--semicolons inline
+--header ignore
+--modifierorder nonisolated,override,private,fileprivate,internal,public,open,final,static,class,required,convenience,lazy,dynamic,mutating,nonmutating,weak,unowned
+
+# Enabled rules (default + some extras)
+--enable isEmpty
+--enable sortSwitchCases
+--enable wrapEnumCases
+--enable wrapSwitchCases
+--enable preferForLoop
+
+# Disabled rules
+--disable redundantSelf
+--disable trailingCommas
+--disable wrapMultilineStatementBraces

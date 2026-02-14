@@ -1,0 +1,125 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0, v1.2.3
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.0.0)'
+        required: true
+
+jobs:
+  build-and-release:
+    name: Build DMG & Create Release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Extract version from tag (v1.0.0 → 1.0.0)
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build & Archive
+        run: |
+          xcodebuild archive \
+            -project "SystemEQ for Mac.xcodeproj" \
+            -scheme "SystemEQ for Mac" \
+            -configuration Release \
+            -archivePath build/SystemEQ.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+
+      - name: Export .app
+        run: |
+          mkdir -p build/export
+          cp -R "build/SystemEQ.xcarchive/Products/Applications/SystemEQ for Mac.app" build/export/
+
+      - name: Create DMG
+        run: |
+          mkdir -p build/dmg_content
+          cp -R "build/export/SystemEQ for Mac.app" build/dmg_content/
+          ln -s /Applications build/dmg_content/Applications
+
+          create-dmg \
+            --volname "SystemEQ for Mac" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "SystemEQ for Mac.app" 150 200 \
+            --icon "Applications" 450 200 \
+            --hide-extension "SystemEQ for Mac.app" \
+            --app-drop-link 450 200 \
+            --no-internet-enable \
+            "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
+            build/dmg_content \
+            || {
+              # Fallback if create-dmg fails
+              hdiutil create -volname "SystemEQ for Mac" \
+                -srcfolder build/dmg_content \
+                -ov -format UDZO \
+                "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg"
+            }
+
+      - name: Create ZIP
+        run: |
+          cd build/export
+          zip -r "../SystemEQ-v${{ steps.version.outputs.version }}.zip" "SystemEQ for Mac.app"
+
+      - name: Get file sizes
+        id: sizes
+        run: |
+          DMG_SIZE=$(ls -lh "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" | awk '{print $5}')
+          ZIP_SIZE=$(ls -lh "build/SystemEQ-v${{ steps.version.outputs.version }}.zip" | awk '{print $5}')
+          echo "dmg_size=$DMG_SIZE" >> $GITHUB_OUTPUT
+          echo "zip_size=$ZIP_SIZE" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "SystemEQ for Mac v${{ steps.version.outputs.version }}"
+          tag_name: "v${{ steps.version.outputs.version }}"
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## SystemEQ for Mac v${{ steps.version.outputs.version }}
+
+            ### Downloads
+            | Format | Size | Description |
+            |--------|------|-------------|
+            | 💿 `.dmg` | ${{ steps.sizes.outputs.dmg_size }} | Recommended — drag to Applications |
+            | 📦 `.zip` | ${{ steps.sizes.outputs.zip_size }} | Alternative — unzip and move to Applications |
+
+            ### Installation
+            1. Download `.dmg` file below
+            2. Open the DMG
+            3. Drag **SystemEQ for Mac** to **Applications**
+            4. Launch from Applications
+            5. If macOS blocks it: System Settings → Privacy & Security → Open Anyway
+
+            ### Requirements
+            - macOS 13 (Ventura) or later
+            - Apple Silicon or Intel Mac
+
+            ---
+            *Also available via Homebrew: `brew install --cask systemeq`*
+          files: |
+            build/SystemEQ-v${{ steps.version.outputs.version }}.dmg
+            build/SystemEQ-v${{ steps.version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
