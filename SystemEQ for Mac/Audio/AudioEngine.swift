@@ -92,7 +92,7 @@ public final class AudioEngine: ObservableObject {
         didSet {
             if bandMode != oldValue {
                 setupEQBands()
-                syncToCoreAudioEngine()
+                syncToCoreAudioEngineImmediate()
             }
         }
     }
@@ -105,6 +105,12 @@ public final class AudioEngine: ObservableObject {
     @Published var outputPeakLevel: Float = 0.0
 
     private var cancellables = Set<AnyCancellable>()
+
+    // Debounces rapid slider drags so we rebuild the filter chain at most
+    // ~every 20 ms instead of once per UI event (60+ Hz). Final gesture
+    // value is always applied via the trailing edge of the work item.
+    private var syncDebounceWorkItem: DispatchWorkItem?
+    private let syncDebounceInterval: DispatchTimeInterval = .milliseconds(20)
 
     // MARK: - Singleton
 
@@ -132,13 +138,13 @@ public final class AudioEngine: ObservableObject {
 
         // ⚡ CRITICAL OPTIMIZATION: Throttle peak meters to reduce Main Thread UI updates
         // From 23 updates/sec (~43ms) to 10 updates/sec (100ms) = 50-60% less UI overhead
-        CoreAudioEngine.shared.$inputPeakLevel
+        CoreAudioEngine.shared.peakMeter.$inputPeakLevel
             .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
             .receive(on: RunLoop.main)
             .assign(to: \.inputPeakLevel, on: self)
             .store(in: &cancellables)
 
-        CoreAudioEngine.shared.$outputPeakLevel
+        CoreAudioEngine.shared.peakMeter.$outputPeakLevel
             .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
             .receive(on: RunLoop.main)
             .assign(to: \.outputPeakLevel, on: self)
@@ -156,22 +162,32 @@ public final class AudioEngine: ObservableObject {
     }
 
     private func syncToCoreAudioEngine() {
-        let gains = bands.map(\.gain)
-        let startTime = CFAbsoluteTimeGetCurrent()
+        syncDebounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let gains = self.bands.map(\.gain)
+            switch self.bandMode {
+            case .tenBand:
+                CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: self.preampGain)
+            case .thirtyOneBand:
+                CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: self.preampGain)
+            }
+        }
+        syncDebounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + syncDebounceInterval, execute: work)
+    }
 
+    /// Immediate sync (for preset loads, band mode switches — cases where a
+    /// caller needs the change applied synchronously).
+    private func syncToCoreAudioEngineImmediate() {
+        syncDebounceWorkItem?.cancel()
+        syncDebounceWorkItem = nil
+        let gains = bands.map(\.gain)
         switch bandMode {
         case .tenBand:
             CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: preampGain)
         case .thirtyOneBand:
             CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: preampGain)
-        }
-
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        if elapsed > 0.001 { // Log if takes more than 1ms
-            engineLog(
-                "syncToCoreAudioEngine took \(String(format: "%.3f", elapsed * 1000))ms for \(bandMode.rawValue)",
-                level: .warning
-            )
         }
     }
 
@@ -182,8 +198,9 @@ public final class AudioEngine: ObservableObject {
 
         // Enable/disable routing based on EQ state
         if enabled {
-            // First sync EQ bands to create filters
-            syncToCoreAudioEngine()
+            // First sync EQ bands to create filters (must be synchronous
+            // so filters exist before routing starts pulling audio).
+            syncToCoreAudioEngineImmediate()
             // Then enable routing
             AudioRouter.shared.enableEQRouting()
         } else {
@@ -212,7 +229,7 @@ public final class AudioEngine: ObservableObject {
         for index in bands.indices {
             bands[index].gain = 0.0
         }
-        syncToCoreAudioEngine()
+        syncToCoreAudioEngineImmediate()
     }
 
     func applyEQValues(_ values: [Float]) {
@@ -224,7 +241,7 @@ public final class AudioEngine: ObservableObject {
         for (index, gain) in values.enumerated() {
             bands[index].gain = gain
         }
-        syncToCoreAudioEngine()
+        syncToCoreAudioEngineImmediate()
     }
 
     // MARK: - Legacy / Helpers

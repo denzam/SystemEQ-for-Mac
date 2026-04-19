@@ -78,8 +78,13 @@ struct WindowAccessor: NSViewRepresentable {
         // Enable fullscreen support - remove transient behavior
         window.collectionBehavior = [.fullScreenPrimary, .managed]
 
-        // Force immediate layout update to prevent title bar glitch
-        window.layoutIfNeeded()
+        // Force a layout pass after style-mask changes to avoid title-bar
+        // glitch, but defer it: this method runs inside viewDidMoveToWindow,
+        // which is part of AppKit's active layout pass. Calling
+        // layoutIfNeeded synchronously triggers NSDetectedLayoutRecursion.
+        DispatchQueue.main.async { [weak window] in
+            window?.layoutIfNeeded()
+        }
 
         // Set localized title (hidden but used for accessibility)
         if let key = localizationKey {

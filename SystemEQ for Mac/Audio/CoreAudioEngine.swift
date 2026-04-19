@@ -21,8 +21,19 @@ public final class CoreAudioEngine: ObservableObject {
 
     @Published public var isRunning: Bool = false
     @Published public var isEnabled: Bool = true
-    @Published public var inputPeakLevel: Float = 0.0
-    @Published public var outputPeakLevel: Float = 0.0
+
+    /// Peak meter (extracted for modularity)
+    let peakMeter = PeakMeter()
+
+    /// Convenience accessors for SwiftUI bindings (delegates to peakMeter)
+    public var inputPeakLevel: Float {
+        get { peakMeter.inputPeakLevel }
+        set { peakMeter.inputPeakLevel = newValue }
+    }
+    public var outputPeakLevel: Float {
+        get { peakMeter.outputPeakLevel }
+        set { peakMeter.outputPeakLevel = newValue }
+    }
 
     // MARK: - Private Properties
 
@@ -41,40 +52,66 @@ public final class CoreAudioEngine: ObservableObject {
         outputDeviceID
     }
 
-    // EQ processing - BiquadFilter based
-    // 🔧 THREAD SAFETY: Use lock to protect filterChain access
-    private var _filterChain: BiquadFilterChain?
-    private let filterChainLock = NSLock()
+    // EQ processing — lock-free filter swap.
+    //
+    // The audio thread reads `vdspFilterPtr` (an UnsafeRawPointer) with a single
+    // atomic load. The UI thread publishes a new filter by retaining it into
+    // `pendingFilter`, storing its pointer atomically, then releasing the old
+    // one on the next main-queue tick. This avoids any lock on the audio path.
+    //
+    // Pointer-sized loads/stores are atomic on 64-bit Darwin, and we pair them
+    // with acquire/release fences via `OSMemoryBarrier` to establish ordering
+    // of the BiquadFilterVDSP internals relative to the pointer publish.
 
-    // ⚡ OPTIMIZED: vDSP-based filter chain (5-10x faster, ~5-10% CPU vs 80%+)
-    private var _vdspFilter: BiquadFilterVDSP?
-    private let vdspFilterLock = NSLock()
+    private var _filterChain: BiquadFilterChain?
+    var filterChain: BiquadFilterChain? {
+        get { _filterChain }
+        set { _filterChain = newValue }
+    }
+
     private var useVDSPFilter: Bool = true // Always use optimized version
 
-    var filterChain: BiquadFilterChain? {
-        get {
-            filterChainLock.lock()
-            defer { filterChainLock.unlock() }
-            return _filterChain
-        }
-        set {
-            filterChainLock.lock()
-            defer { filterChainLock.unlock() }
-            _filterChain = newValue
-        }
+    // Owning reference: UI thread holds this; ARC keeps the instance alive.
+    private var _vdspFilterStrong: BiquadFilterVDSP?
+    // Previously-published filter, retained for at least one main-queue tick
+    // after being replaced so the audio thread never reads a dangling object.
+    private var _vdspFilterRetiredStrong: BiquadFilterVDSP?
+    // Raw pointer that the audio thread reads. Written on UI thread.
+    private var _vdspFilterPtr: UnsafeMutableRawPointer?
+
+    /// Audio-thread-safe accessor: returns the currently-published filter
+    /// without any locking or retain traffic. The returned reference is
+    /// guaranteed valid only for the duration of this callback; the UI thread
+    /// defers release of the old filter, preserving the object lifetime.
+    @inline(__always)
+    fileprivate func currentVDSPFilter() -> BiquadFilterVDSP? {
+        guard let p = _vdspFilterPtr else { return nil }
+        return Unmanaged<BiquadFilterVDSP>.fromOpaque(p).takeUnretainedValue()
     }
 
     var vdspFilter: BiquadFilterVDSP? {
-        get {
-            vdspFilterLock.lock()
-            defer { vdspFilterLock.unlock() }
-            return _vdspFilter
+        get { _vdspFilterStrong }
+        set { setVDSPFilter(newValue) }
+    }
+
+    /// UI-thread: publish a new filter atomically.
+    private func setVDSPFilter(_ filter: BiquadFilterVDSP?) {
+        // Retire the previously-published filter one main-queue tick later so
+        // any in-flight audio callback completes before ARC releases it.
+        if let prev = _vdspFilterStrong {
+            _vdspFilterRetiredStrong = prev
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
+                self?._vdspFilterRetiredStrong = nil
+            }
         }
-        set {
-            vdspFilterLock.lock()
-            defer { vdspFilterLock.unlock() }
-            _vdspFilter = newValue
+        _vdspFilterStrong = filter
+        let newPtr: UnsafeMutableRawPointer? = filter.map {
+            Unmanaged.passUnretained($0).toOpaque()
         }
+        // Release fence so audio thread sees fully-initialized filter state
+        // once it observes the new pointer.
+        OSMemoryBarrier()
+        _vdspFilterPtr = newPtr
     }
 
     private var currentPreset: EQPreset?
@@ -99,39 +136,40 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate var outputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var outputABL: UnsafeMutableAudioBufferListPointer?
 
-    // Peak level tracking (lock-free atomic)
-    fileprivate var peakUpdateCounter: Int = 0
-    fileprivate var peakUpdateInterval: Int =
-        4096 // ⚡ OPTIMIZED: Update meters every ~85ms (48kHz) to reduce Main Thread load
-    fileprivate var rtInputPeak: Float = 0.0
-    fileprivate var rtOutputPeak: Float = 0.0
     fileprivate var renderFramesAccum: UInt64 = 0
 
     // Visualizer callback (called from audio thread)
     public var visualizerCallback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?
     fileprivate var visualizerCounter: Int = 0
-    fileprivate var visualizerInterval: Int = 512 // ⚡ Update visualizer every ~10.7ms (48kHz) instead of every callback
+    fileprivate var visualizerInterval: Int = 1024 // ⚡ Update visualizer every ~21ms (48kHz) - halved frequency to reduce CPU
 
     // Test tone
     fileprivate var testToneEnabled: Bool = false
     fileprivate var testTonePhase: Float = 0.0
     fileprivate var testToneFrequency: Float = 440.0
     fileprivate var didLogRenderInfo: Bool = false
-    fileprivate var meterPending: Bool = false
     fileprivate var didLogInputInfo: Bool = false
     fileprivate var didLogToneWrite: Bool = false
     fileprivate var diagEvery: UInt64 = 480_000 // ⚡ OPTIMIZED: Log every ~10 seconds (48x less CPU overhead)
 
-    // Ring buffer (SPSC) for bridging input → output (deinterleaved stereo)
-    fileprivate var rbCapacity: Int = 16384 // power of two
-    fileprivate var rbMask: Int = 16384 - 1
-    fileprivate var rbLeft: UnsafeMutablePointer<Float>?
-    fileprivate var rbRight: UnsafeMutablePointer<Float>?
-    fileprivate var rbWriteIndex: Int = 0 // in frames
-    fileprivate var rbReadIndex: Int = 0 // in frames
+    // Ring buffer (extracted into SPSCRingBuffer for modularity)
+    let ringBuffer = SPSCRingBuffer()
     fileprivate var inputCallbackCounter: UInt64 = 0
     fileprivate var lastOutSampleTimes: [Double] = []
     fileprivate var lastInSampleTimes: [Double] = []
+
+    // Audio-thread health telemetry: max callback time + underrun/overrun
+    // counters, flushed every 30s on main queue. Kept for bug-report value.
+    fileprivate var maxInputCallbackNanos: UInt64 = 0
+    fileprivate var sumInputCallbackNanos: UInt64 = 0
+    fileprivate var countInputCallbacks: UInt64 = 0
+    fileprivate static let machTimebase: mach_timebase_info_data_t = {
+        var tb = mach_timebase_info_data_t()
+        mach_timebase_info(&tb)
+        return tb
+    }()
+    fileprivate var lastInputBufferFrames: UInt32 = 0
+    private var diagStatsTimer: DispatchSourceTimer?
 
     // MARK: - Singleton
 
@@ -144,17 +182,7 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private func allocateRingBuffer(capacityFrames: Int, channels: UInt32) {
-        let capPow2 = 1 << Int(ceil(log2(Double(max(capacityFrames, 1024)))))
-        rbCapacity = capPow2
-        rbMask = capPow2 - 1
-        rbLeft?.deallocate(); rbRight?.deallocate()
-        rbLeft = UnsafeMutablePointer<Float>.allocate(capacity: rbCapacity)
-        rbRight = UnsafeMutablePointer<Float>.allocate(capacity: rbCapacity)
-        rbLeft?.initialize(repeating: 0, count: rbCapacity)
-        rbRight?.initialize(repeating: 0, count: rbCapacity)
-        rbWriteIndex = 0
-        rbReadIndex = 0
-        dlog("🧱 Allocated ring buffer: cap=\(rbCapacity) frames, ch=\(channels)", category: .engine)
+        ringBuffer.allocate(capacityFrames: capacityFrames)
     }
 
     // MARK: - Device Sample Rate Helpers
@@ -173,6 +201,37 @@ public final class CoreAudioEngine: ObservableObject {
             return nil
         }
         return rate
+    }
+
+    // One-shot log of buffer frame size + allowed range at setup.
+    // Useful in bug reports to understand actual device latency.
+    private func logDeviceBufferInfo(_ deviceID: AudioDeviceID, label: String) {
+        var rangeAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSizeRange,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var range = AudioValueRange()
+        var rSize = UInt32(MemoryLayout<AudioValueRange>.size)
+        let rangeStatus = AudioObjectGetPropertyData(deviceID, &rangeAddr, 0, nil, &rSize, &range)
+
+        var sizeAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var current: UInt32 = 0
+        var cSize = UInt32(MemoryLayout<UInt32>.size)
+        let currentStatus = AudioObjectGetPropertyData(deviceID, &sizeAddr, 0, nil, &cSize, &current)
+
+        let rangeStr = rangeStatus == noErr
+            ? "\(Int(range.mMinimum))..\(Int(range.mMaximum))"
+            : "err=\(rangeStatus)"
+        let currentStr = currentStatus == noErr ? "\(current)" : "err=\(currentStatus)"
+        dlog(
+            "\(label) (\(deviceID)) buffer frames: current=\(currentStr), range=\(rangeStr)",
+            category: .engine
+        )
     }
 
     private func setDeviceSampleRate(_ deviceID: AudioDeviceID, rate: Double) -> Bool {
@@ -227,6 +286,9 @@ public final class CoreAudioEngine: ObservableObject {
         let finalOutRate = getDeviceSampleRate(outputDevice) ?? preferred
         self.currentSampleRate = finalOutRate
         dlog("📡 Final sample rates: input=\(finalInRate)Hz, output=\(finalOutRate)Hz", category: .engine)
+
+        logDeviceBufferInfo(inputDevice, label: "INPUT")
+        logDeviceBufferInfo(outputDevice, label: "OUTPUT")
 
         if abs(finalInRate - finalOutRate) >= 1.0 {
             dlog("⚠️ WARNING: Sample rate mismatch! This will cause audio quality degradation!", category: .engine)
@@ -670,7 +732,6 @@ public final class CoreAudioEngine: ObservableObject {
             filter.configure(bands: bands, preamp: preamp, sampleRate: Float(currentSampleRate))
             self.vdspFilter = filter
             self.filterChain = nil // Clear old filter chain
-            dlog("⚡ Applied 10-band EQ with vDSP optimization", category: .engine)
         } else {
             // Fallback to standard filter chain
             self.filterChain = BiquadFilterChain(filterCount: bands.count)
@@ -716,7 +777,6 @@ public final class CoreAudioEngine: ObservableObject {
             filter.configure(bands: bands, preamp: preamp, sampleRate: Float(currentSampleRate))
             self.vdspFilter = filter
             self.filterChain = nil // Clear old filter chain
-            dlog("⚡ Applied 31-band EQ with vDSP optimization", category: .engine)
         } else {
             // Fallback to standard filter chain (only non-zero bands)
             var activeBands: [ParametricBand] = []
@@ -776,9 +836,53 @@ public final class CoreAudioEngine: ObservableObject {
             isRunning = true
             dlog("✅ Core Audio Engine started", category: .engine)
             dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
+            startDiagStatsTimer()
         } else {
             dlog("❌ Failed to start Core Audio Engine: in=\(s1), out=\(s2)", category: .engine)
         }
+    }
+
+    // Audio-thread health timer. Flushes every 30s on main queue; only logs
+    // when something interesting happens (high max, underrun, overrun) so we
+    // don't pollute the console during normal operation.
+    private func startDiagStatsTimer() {
+        diagStatsTimer?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 30.0, repeating: 30.0)
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            let maxNs = self.maxInputCallbackNanos
+            let sumNs = self.sumInputCallbackNanos
+            let count = self.countInputCallbacks
+            self.maxInputCallbackNanos = 0
+            self.sumInputCallbackNanos = 0
+            self.countInputCallbacks = 0
+            let avgNs = count > 0 ? sumNs / count : 0
+            let diag = self.ringBuffer.snapshotAndResetDiag()
+
+            // Only log if the audio thread missed or came close to deadline,
+            // or if the ring buffer showed under/overrun in this window.
+            let bufFrames = self.lastInputBufferFrames
+            let deadlineNs: UInt64 = bufFrames > 0
+                ? UInt64(Double(bufFrames) / self.currentSampleRate * 1_000_000_000)
+                : 0
+            let nearDeadline = deadlineNs > 0 && maxNs > deadlineNs / 2
+            if nearDeadline || diag.underruns > 0 || diag.overruns > 0 {
+                dlog(
+                    "⚠️ Audio health: max=\(maxNs / 1000)µs avg=\(avgNs / 1000)µs " +
+                    "(deadline=\(deadlineNs / 1000)µs) under=\(diag.underruns) over=\(diag.overruns)",
+                    level: .warning,
+                    category: .engine
+                )
+            }
+        }
+        t.resume()
+        diagStatsTimer = t
+    }
+
+    private func stopDiagStatsTimer() {
+        diagStatsTimer?.cancel()
+        diagStatsTimer = nil
     }
 
     public func stop() {
@@ -792,13 +896,11 @@ public final class CoreAudioEngine: ObservableObject {
         if let ou = outputUnit { AudioOutputUnitStop(ou) }
         isRunning = false
 
-        // Reset peak meters to zero
-        rtInputPeak = 0.0
-        rtOutputPeak = 0.0
-        DispatchQueue.main.async { [weak self] in
-            self?.inputPeakLevel = 0.0
-            self?.outputPeakLevel = 0.0
-        }
+        // Reset peak meters and ring buffer
+        peakMeter.resetToZero()
+        ringBuffer.reset()
+
+        stopDiagStatsTimer()
 
         dlog("🛑 Core Audio Engine stopped", category: .engine)
     }
@@ -842,7 +944,7 @@ public final class CoreAudioEngine: ObservableObject {
             }
         }
         dlog(
-            "Buffers: inputABL capBytes=\(bufferCapacity), ring=\(rbCapacity) frames, rbRead=\(rbReadIndex), rbWrite=\(rbWriteIndex), avail=\(rbWriteIndex - rbReadIndex)",
+            "Buffers: inputABL capBytes=\(bufferCapacity), ring=\(ringBuffer.capacity) frames, rbRead=\(ringBuffer.readIndex), rbWrite=\(ringBuffer.writeIndex), avail=\(ringBuffer.availableForReading)",
             category: .engine
         )
         dlog("Engine running: \(isRunning)", category: .engine)
@@ -861,22 +963,19 @@ public final class CoreAudioEngine: ObservableObject {
         if lastInSampleTimes.count > 32 { lastInSampleTimes.removeFirst(lastInSampleTimes.count - 32) }
     }
 
-    // MARK: - Meter Publishing (Main Thread)
+    // MARK: - Meter Publishing (delegated to PeakMeter)
 
-    fileprivate func scheduleMeterUpdate() {
-        if meterPending { return }
-        meterPending = true
-        let inVal = rtInputPeak
-        let outVal = rtOutputPeak
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.inputPeakLevel = inVal
-            self.outputPeakLevel = outVal
-            self.meterPending = false
-        }
-    }
+    // 🔧 Thread safety: atomic flag prevents double-free if cleanup is called
+    // concurrently from deinit and stop() on different threads.
+    private let cleanupLock = NSLock()
+    private var isCleanedUp = false
 
     private func cleanup() {
+        cleanupLock.lock()
+        defer { cleanupLock.unlock() }
+        guard !isCleanedUp else { return }
+        isCleanedUp = true
+        
         if let iu = inputUnit {
             AudioUnitUninitialize(iu)
             AudioComponentInstanceDispose(iu)
@@ -906,11 +1005,8 @@ public final class CoreAudioEngine: ObservableObject {
             outputBufferList = nil
         }
 
-        // 🔧 FIX: Deallocate ring buffers to prevent memory leak (~64KB per restart)
-        rbLeft?.deallocate()
-        rbRight?.deallocate()
-        rbLeft = nil
-        rbRight = nil
+        // Deallocate ring buffer (safe to call multiple times)
+        ringBuffer.deallocate()
 
         dlog("✅ CoreAudioEngine: Cleanup complete (including ring buffers)", category: .engine)
     }
@@ -1104,57 +1200,28 @@ private func renderCallbackFunction(
     let outputBuffers = UnsafeMutableAudioBufferListPointer(ioData)
     let outBufferCount = outputBuffers.count
     let framesRequested = Int(inNumberFrames)
-    let available = engine.rbWriteIndex - engine.rbReadIndex
-    let toRead = min(framesRequested, max(0, available))
-    let under = framesRequested - toRead
+    let rb = engine.ringBuffer
 
     if outBufferCount == 1, outputBuffers[0].mNumberChannels >= 2 {
         guard let outPtr = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        let readIdx = engine.rbReadIndex & engine.rbMask
-        if toRead > 0, let l = engine.rbLeft, let r = engine.rbRight {
-            let first = min(toRead, engine.rbCapacity - readIdx)
-            // ⚡ OPTIMIZED: Use vectorized interleaving for better performance and accuracy
-            for i in 0..<first {
-                outPtr[i * 2] = l[readIdx + i]
-                outPtr[i * 2 + 1] = r[readIdx + i]
-            }
-            if toRead > first {
-                let rem = toRead - first
-                for i in 0..<rem {
-                    outPtr[(first + i) * 2] = l[i]
-                    outPtr[(first + i) * 2 + 1] = r[i]
-                }
-            }
-            engine.rbReadIndex &+= toRead
-        }
-        if under > 0 {
-            let off = toRead * 2
-            vDSP_vclr(outPtr.advanced(by: off), 1, vDSP_Length(under * 2))
-        }
+        rb.readInterleaved(outPtr: outPtr, framesRequested: framesRequested)
         outputBuffers[0].mDataByteSize = UInt32(framesRequested * 2 * MemoryLayout<Float>.size)
     } else if outBufferCount >= 2 {
         guard let outL = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self),
               let outR = outputBuffers[1].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        let readIdx = engine.rbReadIndex & engine.rbMask
-        if toRead > 0, let l = engine.rbLeft, let r = engine.rbRight {
-            let first = min(toRead, engine.rbCapacity - readIdx)
-            memcpy(outL, l.advanced(by: readIdx), first * MemoryLayout<Float>.size)
-            memcpy(outR, r.advanced(by: readIdx), first * MemoryLayout<Float>.size)
-            if toRead > first {
-                let rem = toRead - first
-                memcpy(outL.advanced(by: first), l, rem * MemoryLayout<Float>.size)
-                memcpy(outR.advanced(by: first), r, rem * MemoryLayout<Float>.size)
-            }
-            engine.rbReadIndex &+= toRead
-        }
-        if under > 0 {
-            vDSP_vclr(outL.advanced(by: toRead), 1, vDSP_Length(under))
-            vDSP_vclr(outR.advanced(by: toRead), 1, vDSP_Length(under))
-        }
+        rb.readNonInterleaved(outL: outL, outR: outR, framesRequested: framesRequested)
         outputBuffers[0].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
         outputBuffers[1].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
     }
     return noErr
+}
+
+// 🔬 DIAG helper: elapsed nanoseconds since mach_absolute_time sample
+@inline(__always)
+private func machNanosSince(_ start: UInt64) -> UInt64 {
+    let end = mach_absolute_time()
+    let tb = CoreAudioEngine.machTimebase
+    return (end &- start) &* UInt64(tb.numer) / UInt64(tb.denom)
 }
 
 private func inputCaptureCallbackFunction(
@@ -1165,8 +1232,12 @@ private func inputCaptureCallbackFunction(
     inNumberFrames: UInt32,
     ioData: UnsafeMutablePointer<AudioBufferList>?
 ) -> OSStatus {
+    // 🔬 DIAG (Phase 0): measure input-callback processing time
+    let diagStart = mach_absolute_time()
+
     let engine = Unmanaged<CoreAudioEngine>.fromOpaque(inRefCon).takeUnretainedValue()
     engine.inputCallbackCounter &+= 1
+    engine.lastInputBufferFrames = inNumberFrames
     // Track input sample times (if valid)
     let tsIn = inTimeStamp.pointee
     if tsIn.mFlags.contains(.sampleTimeValid) {
@@ -1208,70 +1279,33 @@ private func inputCaptureCallbackFunction(
             return status
         }
     }
-
-    // ⚡ OPTIMIZED: Apply EQ filter chain (vDSP optimized for 5-10x better performance)
-    // Only process if filters are configured (vdspFilter or filterChain exists)
+    // ⚡ Lock-free filter read: single atomic pointer load, no retain/release.
     if engine.isEnabled, engine.channelCount >= 1, let lPtr = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-        // Try vDSP filter first (5-10x faster, ~5-10% CPU)
-        if let vdsp = engine.vdspFilter {
+        if let vdsp = engine.currentVDSPFilter() {
             if engine.channelCount > 1, let rPtr = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
                 vdsp.processStereo(lPtr, rPtr, frameCount: frames)
             } else {
-                // Mono: duplicate to temp buffer for stereo processing
                 vdsp.processStereo(lPtr, lPtr, frameCount: frames)
             }
         } else if let fc = engine.filterChain {
-            // Fallback to standard filter chain
             if engine.channelCount > 1, let rPtr = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
                 fc.processStereoBuffers(lPtr, rPtr, frameCount: frames)
             } else {
                 fc.processBuffer(lPtr, frameCount: frames)
             }
         }
-        // If both vdspFilter and filterChain are nil, audio passes through unchanged (bypass mode)
+        // Nil filter = bypass.
     }
 
-    // Write to ring buffer (deinterleaved)
-    let writeAvail = engine.rbCapacity - (engine.rbWriteIndex - engine.rbReadIndex)
-    let toWrite = min(frames, max(0, writeAvail))
-    if toWrite > 0, let l = engine.rbLeft, let r = engine.rbRight,
-       let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-        let wIdx = engine.rbWriteIndex & engine.rbMask
-        let first = min(toWrite, engine.rbCapacity - wIdx)
-        memcpy(l.advanced(by: wIdx), inL, first * MemoryLayout<Float>.size)
-        if engine.channelCount > 1, let inR = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
-            memcpy(r.advanced(by: wIdx), inR, first * MemoryLayout<Float>.size)
-        } else {
-            memcpy(r.advanced(by: wIdx), inL, first * MemoryLayout<Float>.size)
-        }
-        if toWrite > first {
-            let rem = toWrite - first
-            memcpy(l, inL.advanced(by: first), rem * MemoryLayout<Float>.size)
-            if engine.channelCount > 1, let inR = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
-                memcpy(r, inR.advanced(by: first), rem * MemoryLayout<Float>.size)
-            } else {
-                memcpy(r, inL.advanced(by: first), rem * MemoryLayout<Float>.size)
-            }
-        }
-        engine.rbWriteIndex &+= toWrite
+    // Write to ring buffer (deinterleaved) — delegated to SPSCRingBuffer
+    if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+        let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
+        engine.ringBuffer.write(inL: inL, inR: inR, frameCount: frames)
     }
-
-    // ⚡ OPTIMIZED: Update peak meters less frequently to reduce CPU overhead
-    engine.peakUpdateCounter += frames
-    if engine.peakUpdateCounter >= engine.peakUpdateInterval {
-        engine.peakUpdateCounter = 0
-
-        var maxL: Float = 0, maxR: Float = 0
-        if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-            vDSP_maxmgv(inL, 1, &maxL, vDSP_Length(frames))
-            if engine.channelCount > 1, let inR = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
-                vDSP_maxmgv(inR, 1, &maxR, vDSP_Length(frames))
-            }
-            let peak = max(maxL, maxR)
-            engine.rtInputPeak = peak
-            engine.rtOutputPeak = peak
-            engine.scheduleMeterUpdate()
-        }
+    // ⚡ OPTIMIZED: Update peak meters — delegated to PeakMeter
+    if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+        let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
+        engine.peakMeter.update(bufferL: inL, bufferR: inR, frameCount: frames, channelCount: engine.channelCount)
     }
 
     // ⚡ OPTIMIZED: Send audio data to visualizer less frequently to reduce CPU overhead
@@ -1279,16 +1313,20 @@ private func inputCaptureCallbackFunction(
     if engine.visualizerCounter >= engine.visualizerInterval {
         engine.visualizerCounter = 0
 
-        // Visualizer callback (if set)
-        if engine.visualizerCallback != nil {
-            if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-                let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : inL
-                if let rightPtr = inR {
-                    engine.visualizerCallback?(inL, rightPtr, frames)
-                }
+        // Visualizer callback — read once to avoid TOCTOU race (callback may be set/cleared from main thread)
+        if let callback = engine.visualizerCallback,
+           let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+            let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : inL
+            if let rightPtr = inR {
+                callback(inL, rightPtr, frames)
             }
         }
     }
+    // Audio-thread health: record total callback processing time.
+    let nanos = machNanosSince(diagStart)
+    if nanos > engine.maxInputCallbackNanos { engine.maxInputCallbackNanos = nanos }
+    engine.sumInputCallbackNanos &+= nanos
+    engine.countInputCallbacks &+= 1
 
     return noErr
 }
