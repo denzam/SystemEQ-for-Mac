@@ -98,8 +98,6 @@ final class BeatDetectionManager {
             }
 
         case .hardcut6:
-            // Bass reactive + flash - bass > 1.5, delay 0.2s
-            // TODO: Add white flash effect when bass > 4.9
             if bass > 1.5, timeSinceChange > 0.2 {
                 lastChangeTime = currentTime
                 return true

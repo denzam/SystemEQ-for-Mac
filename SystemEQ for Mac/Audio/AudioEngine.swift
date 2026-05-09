@@ -91,8 +91,10 @@ public final class AudioEngine: ObservableObject {
     @Published var bandMode: EQBandMode = .tenBand {
         didSet {
             if bandMode != oldValue {
-                setupEQBands()
-                syncToCoreAudioEngineImmediate()
+                DispatchQueue.main.async { [weak self] in
+                    self?.setupEQBands()
+                    self?.syncToCoreAudioEngineImmediate()
+                }
             }
         }
     }
@@ -128,26 +130,32 @@ public final class AudioEngine: ObservableObject {
         // Bind CoreAudioEngine states to this facade
         CoreAudioEngine.shared.$isRunning
             .receive(on: RunLoop.main)
-            .assign(to: \.isRunning, on: self)
+            .sink { [weak self] value in
+                DispatchQueue.main.async { self?.isRunning = value }
+            }
             .store(in: &cancellables)
 
         CoreAudioEngine.shared.$isEnabled
             .receive(on: RunLoop.main)
-            .assign(to: \.isEnabled, on: self)
+            .sink { [weak self] value in
+                DispatchQueue.main.async { self?.isEnabled = value }
+            }
             .store(in: &cancellables)
 
         // ⚡ CRITICAL OPTIMIZATION: Throttle peak meters to reduce Main Thread UI updates
         // From 23 updates/sec (~43ms) to 10 updates/sec (100ms) = 50-60% less UI overhead
         CoreAudioEngine.shared.peakMeter.$inputPeakLevel
             .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
-            .receive(on: RunLoop.main)
-            .assign(to: \.inputPeakLevel, on: self)
+            .sink { [weak self] value in
+                DispatchQueue.main.async { self?.inputPeakLevel = value }
+            }
             .store(in: &cancellables)
 
         CoreAudioEngine.shared.peakMeter.$outputPeakLevel
             .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
-            .receive(on: RunLoop.main)
-            .assign(to: \.outputPeakLevel, on: self)
+            .sink { [weak self] value in
+                DispatchQueue.main.async { self?.outputPeakLevel = value }
+            }
             .store(in: &cancellables)
     }
 
@@ -155,10 +163,32 @@ public final class AudioEngine: ObservableObject {
 
     private func setupEQBands() {
         let frequencies = bandMode.frequencies
-        // Preserve gains if switching modes where possible, otherwise reset
+        let previous = bands
         bands = frequencies.enumerated().map { index, freq in
-            EQBand(id: index, frequency: freq, gain: 0.0)
+            let gain = Self.interpolatedGain(at: freq, from: previous)
+            return EQBand(id: index, frequency: freq, gain: gain)
         }
+    }
+
+    private static func interpolatedGain(at freq: Float, from previous: [EQBand]) -> Float {
+        guard !previous.isEmpty else { return 0.0 }
+        if let exact = previous.first(where: { abs($0.frequency - freq) < 0.5 }) {
+            return exact.gain
+        }
+        let sorted = previous.sorted { $0.frequency < $1.frequency }
+        if freq <= sorted.first!.frequency { return sorted.first!.gain }
+        if freq >= sorted.last!.frequency { return sorted.last!.gain }
+        for i in 0..<(sorted.count - 1) {
+            let lo = sorted[i], hi = sorted[i + 1]
+            if freq >= lo.frequency && freq <= hi.frequency {
+                let logLo = log10(lo.frequency)
+                let logHi = log10(hi.frequency)
+                let logF = log10(freq)
+                let t = Float((logF - logLo) / (logHi - logLo))
+                return lo.gain + (hi.gain - lo.gain) * t
+            }
+        }
+        return 0.0
     }
 
     private func syncToCoreAudioEngine() {
@@ -219,10 +249,16 @@ public final class AudioEngine: ObservableObject {
     func updateBandGain(bandId: Int, gain: Float) {
         guard bandId < bands.count else { return }
         let clampedGain = max(-20.0, min(20.0, gain))
-        bands[bandId].gain = clampedGain
-
-        // Update CoreAudioEngine immediately
-        syncToCoreAudioEngine()
+        if Thread.isMainThread {
+            bands[bandId].gain = clampedGain
+            syncToCoreAudioEngine()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, bandId < self.bands.count else { return }
+                self.bands[bandId].gain = clampedGain
+                self.syncToCoreAudioEngine()
+            }
+        }
     }
 
     func resetAllBands() {

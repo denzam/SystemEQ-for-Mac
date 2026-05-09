@@ -32,3 +32,36 @@ swift generate_autoeq_index.swift
 ### Розмір:
 
 Поточний індекс: ~1.3 MB (8850+ моделей навушників)
+
+---
+
+## check_blackhole_updates.sh
+
+Перевіряє чи доступна нова версія BlackHole через Homebrew API і порівнює з
+`AppConstants.BlackHole.bundledVersion`.
+
+### Як запустити
+
+```bash
+# Лише перевірка
+./Scripts/check_blackhole_updates.sh
+
+# Автоматичне оновлення AppConstants.swift + показ diff
+./Scripts/check_blackhole_updates.sh --update
+```
+
+### Що оновлюється
+
+Один рядок у [SystemEQ for Mac/Config/AppConstants.swift](../SystemEQ%20for%20Mac/Config/AppConstants.swift):
+
+```swift
+public static let bundledVersion = "0.6.1"
+```
+
+Всі URL (прямий .pkg, Homebrew, UI-тексти) будуються з цієї однієї константи.
+
+### Коли запускати
+
+- Перед релізом нової версії SystemEQ
+- Якщо користувачі скаржаться на застарілу версію BlackHole
+- Рекомендовано — раз на квартал

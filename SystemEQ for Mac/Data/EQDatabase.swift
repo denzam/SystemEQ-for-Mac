@@ -8,6 +8,9 @@
 import Foundation
 import SQLite3
 
+// SQLITE_TRANSIENT tells SQLite to make its own copy of the string
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 // MARK: - Models
 
 struct DatabaseHeadphone: Identifiable, Hashable {
@@ -95,7 +98,7 @@ class EQDatabase {
 
     // MARK: - Search
 
-    /// Search headphones by query (full-text search)
+    /// Search headphones by query (full-text search with LIKE fallback)
     func searchHeadphones(_ query: String) -> [DatabaseHeadphone] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -104,7 +107,18 @@ class EQDatabase {
             return getAllHeadphones(limit: 100)
         }
 
-        // Full-text search
+        // Try FTS5 first
+        var results = searchWithFTS(normalizedQuery)
+
+        // Fallback to LIKE if FTS returns nothing
+        if results.isEmpty {
+            results = searchWithLike(normalizedQuery)
+        }
+
+        return results
+    }
+
+    private func searchWithFTS(_ query: String) -> [DatabaseHeadphone] {
         let sql = """
         SELECT DISTINCT h.id, h.brand, h.model, h.type, h.source
         FROM headphones h
@@ -123,22 +137,72 @@ class EQDatabase {
         defer { sqlite3_finalize(statement) }
 
         // FTS5 query syntax: "sennheiser* OR hd600*"
-        let ftsQuery = normalizedQuery.split(separator: " ").map { "\($0)*" }.joined(separator: " OR ")
-        sqlite3_bind_text(statement, 1, ftsQuery, -1, nil)
+        let ftsQuery = query.split(separator: " ").map { "\($0)*" }.joined(separator: " OR ")
+        sqlite3_bind_text(statement, 1, ftsQuery, -1, SQLITE_TRANSIENT)
 
         var results: [DatabaseHeadphone] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let headphone = DatabaseHeadphone(
-                id: Int(sqlite3_column_int(statement, 0)),
-                brand: String(cString: sqlite3_column_text(statement, 1)),
-                model: String(cString: sqlite3_column_text(statement, 2)),
-                type: String(cString: sqlite3_column_text(statement, 3)),
-                source: String(cString: sqlite3_column_text(statement, 4))
-            )
-            results.append(headphone)
+            if let headphone = parseHeadphoneRow(statement) {
+                results.append(headphone)
+            }
         }
 
         return results
+    }
+
+    private func searchWithLike(_ query: String) -> [DatabaseHeadphone] {
+        // LIKE search as fallback - more flexible matching
+        let sql = """
+        SELECT DISTINCT id, brand, model, type, source
+        FROM headphones
+        WHERE brand || ' ' || model LIKE ?
+           OR model LIKE ?
+           OR brand LIKE ?
+        ORDER BY 
+            CASE WHEN source = 'oratory1990' THEN 0 ELSE 1 END,
+            brand, model
+        LIMIT 100
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let likePattern = "%\(query)%"
+        likePattern.withCString { cString in
+            sqlite3_bind_text(statement, 1, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(statement, 2, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(statement, 3, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        }
+
+        var results: [DatabaseHeadphone] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let headphone = parseHeadphoneRow(statement) {
+                results.append(headphone)
+            }
+        }
+
+        return results
+    }
+
+    private func parseHeadphoneRow(_ statement: OpaquePointer?) -> DatabaseHeadphone? {
+        guard let statement,
+              let brandPtr = sqlite3_column_text(statement, 1),
+              let modelPtr = sqlite3_column_text(statement, 2),
+              let typePtr = sqlite3_column_text(statement, 3),
+              let sourcePtr = sqlite3_column_text(statement, 4) else {
+            return nil
+        }
+
+        return DatabaseHeadphone(
+            id: Int(sqlite3_column_int(statement, 0)),
+            brand: String(cString: brandPtr),
+            model: String(cString: modelPtr),
+            type: String(cString: typePtr),
+            source: String(cString: sourcePtr)
+        )
     }
 
     /// Get all headphones (for browsing)
@@ -162,14 +226,9 @@ class EQDatabase {
 
         var results: [DatabaseHeadphone] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let headphone = DatabaseHeadphone(
-                id: Int(sqlite3_column_int(statement, 0)),
-                brand: String(cString: sqlite3_column_text(statement, 1)),
-                model: String(cString: sqlite3_column_text(statement, 2)),
-                type: String(cString: sqlite3_column_text(statement, 3)),
-                source: String(cString: sqlite3_column_text(statement, 4))
-            )
-            results.append(headphone)
+            if let headphone = parseHeadphoneRow(statement) {
+                results.append(headphone)
+            }
         }
 
         return results
@@ -207,18 +266,13 @@ class EQDatabase {
         }
         defer { sqlite3_finalize(statement) }
 
-        sqlite3_bind_text(statement, 1, brand, -1, nil)
+        sqlite3_bind_text(statement, 1, brand, -1, SQLITE_TRANSIENT)
 
         var results: [DatabaseHeadphone] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let headphone = DatabaseHeadphone(
-                id: Int(sqlite3_column_int(statement, 0)),
-                brand: String(cString: sqlite3_column_text(statement, 1)),
-                model: String(cString: sqlite3_column_text(statement, 2)),
-                type: String(cString: sqlite3_column_text(statement, 3)),
-                source: String(cString: sqlite3_column_text(statement, 4))
-            )
-            results.append(headphone)
+            if let headphone = parseHeadphoneRow(statement) {
+                results.append(headphone)
+            }
         }
 
         return results
@@ -430,13 +484,14 @@ class EQDatabase {
         case checkFailed(String)
 
         var message: String {
+            let l = LocalizationManager.shared
             switch self {
             case let .upToDate(version):
-                "✅ База даних актуальна (версія \(version))"
+                return String(format: l.localized(.dbUpToDate), version)
             case let .updateAvailable(current, latest):
-                "🔄 Доступне оновлення: \(current) → \(latest)"
+                return String(format: l.localized(.dbUpdateAvailable), current, latest)
             case let .checkFailed(error):
-                "⚠️ Не вдалося перевірити: \(error)"
+                return String(format: l.localized(.dbCheckFailed), error)
             }
         }
 

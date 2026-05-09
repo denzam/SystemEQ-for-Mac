@@ -62,8 +62,8 @@ struct SystemEQ_for_MacApp: App {
                         // Show alert about enabling EQ
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             NSAlert.show(
-                                title: "🔊 Калібровку активовано!",
-                                message: "Тепер увімкніть EQ в головному вікні:\n\n1. Закрийте вікно калібровки\n2. Увімкніть 'Enable EQ'\n\nТільки тоді калібровка почне діяти на системний звук.",
+                                title: LocalizationManager.shared.localized(.calibrationActivatedTitle),
+                                message: LocalizationManager.shared.localized(.calibrationActivatedMessage),
                                 style: .informational
                             )
                         }
@@ -159,7 +159,7 @@ struct SystemEQ_for_MacApp: App {
                 .environmentObject(localizationManager)
                 .environmentObject(audioEngine)
                 .background(WindowAccessor(id: FeatureID.equalizer.rawValue, localizationKey: .equalizerTitle))
-                .frame(width: 900, height: 600)
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.equalizer.rawValue, key: .equalizerTitle)
         }
         .windowStyle(.titleBar)
@@ -182,7 +182,7 @@ struct SystemEQ_for_MacApp: App {
                     id: FeatureID.subjectiveRoomTuning.rawValue,
                     localizationKey: .subjectiveRoomTuning
                 ))
-                .frame(width: 900, height: 700)
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.subjectiveRoomTuning.rawValue, key: .subjectiveRoomTuning)
         }
         .windowStyle(.titleBar)
@@ -192,7 +192,7 @@ struct SystemEQ_for_MacApp: App {
             ResonanceFinderView()
                 .environmentObject(localizationManager)
                 .background(WindowAccessor(id: FeatureID.resonanceFinder.rawValue, localizationKey: .resonanceFinder))
-                .frame(width: 900, height: 700)
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.resonanceFinder.rawValue, key: .resonanceFinder)
         }
         .windowStyle(.titleBar)
@@ -203,6 +203,7 @@ struct SystemEQ_for_MacApp: App {
                 .environmentObject(localizationManager)
                 .environmentObject(audioEngine)
                 .background(WindowAccessor(id: FeatureID.autoeq.rawValue, localizationKey: .autoEQTitle))
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.autoeq.rawValue, key: .autoEQTitle)
         }
         .windowStyle(.titleBar)
@@ -212,6 +213,7 @@ struct SystemEQ_for_MacApp: App {
             PersonalizedCalibrationView()
                 .environmentObject(localizationManager)
                 .background(WindowAccessor(id: FeatureID.personalized.rawValue, localizationKey: .personalized))
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.personalized.rawValue, key: .personalized)
         }
         .windowStyle(.titleBar)
@@ -223,7 +225,7 @@ struct SystemEQ_for_MacApp: App {
                 .environmentObject(audioRouter)
                 .environmentObject(CoreAudioEngine.shared)
                 .background(WindowAccessor(id: FeatureID.routing.rawValue, localizationKey: .routing))
-                .frame(width: 800, height: 600)
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.routing.rawValue, key: .routing)
         }
         .windowStyle(.titleBar)
@@ -233,7 +235,7 @@ struct SystemEQ_for_MacApp: App {
             SettingsView()
                 .environmentObject(localizationManager)
                 .background(WindowAccessor(id: FeatureID.settings.rawValue, localizationKey: .settingsTitle))
-                .frame(width: 700, height: 500)
+                .frame(width: 900, height: 650)
                 .dynamicWindowTitle(id: FeatureID.settings.rawValue, key: .settingsTitle)
         }
         .windowStyle(.titleBar)
@@ -243,12 +245,12 @@ struct SystemEQ_for_MacApp: App {
             VisualizerView()
                 .environmentObject(localizationManager)
                 .background(WindowAccessor(id: FeatureID.visualizer.rawValue, localizationKey: .visualizer))
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 900, minHeight: 650)
                 .dynamicWindowTitle(id: FeatureID.visualizer.rawValue, key: .visualizer)
         }
         .windowStyle(.titleBar)
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 900, height: 600)
+        .defaultSize(width: 900, height: 650)
         MenuBarExtra("SystemEQ", systemImage: "slider.horizontal.3") {
             MenuBarExtraView()
                 .environmentObject(localizationManager)

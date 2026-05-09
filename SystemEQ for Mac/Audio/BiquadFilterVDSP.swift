@@ -49,7 +49,7 @@ public final class BiquadFilterVDSP {
         self.sampleRate = sampleRate
         self.preampLinear = pow(10.0, preamp / 20.0)
 
-        let activeBands = bands.filter { abs($0.gain) >= 0.5 }
+        let activeBands = bands.filter { abs($0.gain) >= 0.01 }
         let newCount = activeBands.count
 
         // Destroy previous setup before rebuilding.
@@ -107,10 +107,12 @@ public final class BiquadFilterVDSP {
         guard filterCount > 0, let sL = setupL, let sR = setupR else { return }
 
         delaysL.withUnsafeMutableBufferPointer { dL in
-            vDSP_biquad(sL, dL.baseAddress!, bufferL, 1, bufferL, 1, vDSP_Length(frameCount))
+            guard let addressL = dL.baseAddress else { return }
+            vDSP_biquad(sL, addressL, bufferL, 1, bufferL, 1, vDSP_Length(frameCount))
         }
         delaysR.withUnsafeMutableBufferPointer { dR in
-            vDSP_biquad(sR, dR.baseAddress!, bufferR, 1, bufferR, 1, vDSP_Length(frameCount))
+            guard let addressR = dR.baseAddress else { return }
+            vDSP_biquad(sR, addressR, bufferR, 1, bufferR, 1, vDSP_Length(frameCount))
         }
     }
 
@@ -141,22 +143,24 @@ public final class BiquadFilterVDSP {
             a2 = 1.0 - alpha / A
 
         case .lowShelf:
-            let beta = sqrt(A) / q
-            b0 = A * ((A + 1) - (A - 1) * cosW + beta * sinW)
+            let alpha = sinW / (2.0 * q)
+            let twoSqrtA_alpha = 2.0 * sqrt(A) * alpha
+            b0 = A * ((A + 1) - (A - 1) * cosW + twoSqrtA_alpha)
             b1 = 2.0 * A * ((A - 1) - (A + 1) * cosW)
-            b2 = A * ((A + 1) - (A - 1) * cosW - beta * sinW)
-            a0 = (A + 1) + (A - 1) * cosW + beta * sinW
+            b2 = A * ((A + 1) - (A - 1) * cosW - twoSqrtA_alpha)
+            a0 = (A + 1) + (A - 1) * cosW + twoSqrtA_alpha
             a1 = -2.0 * ((A - 1) + (A + 1) * cosW)
-            a2 = (A + 1) + (A - 1) * cosW - beta * sinW
+            a2 = (A + 1) + (A - 1) * cosW - twoSqrtA_alpha
 
         case .highShelf:
-            let beta = sqrt(A) / q
-            b0 = A * ((A + 1) + (A - 1) * cosW + beta * sinW)
+            let alpha = sinW / (2.0 * q)
+            let twoSqrtA_alpha = 2.0 * sqrt(A) * alpha
+            b0 = A * ((A + 1) + (A - 1) * cosW + twoSqrtA_alpha)
             b1 = -2.0 * A * ((A - 1) + (A + 1) * cosW)
-            b2 = A * ((A + 1) + (A - 1) * cosW - beta * sinW)
-            a0 = (A + 1) - (A - 1) * cosW + beta * sinW
+            b2 = A * ((A + 1) + (A - 1) * cosW - twoSqrtA_alpha)
+            a0 = (A + 1) - (A - 1) * cosW + twoSqrtA_alpha
             a1 = 2.0 * ((A - 1) - (A + 1) * cosW)
-            a2 = (A + 1) - (A - 1) * cosW - beta * sinW
+            a2 = (A + 1) - (A - 1) * cosW - twoSqrtA_alpha
 
         default:
             let alpha = sinW / (2.0 * q)

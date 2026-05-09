@@ -6,23 +6,101 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C012D7D12F410D2F00DB5B39 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D02F410D2F00DB5B39 /* AppKit.framework */; };
+		C012D7D32F410D3A00DB5B39 /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D22F410D3A00DB5B39 /* OpenGL.framework */; };
+		C012D7D52F410D4300DB5B39 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D42F410D4300DB5B39 /* CoreVideo.framework */; };
+		C012D7D72F410DB100DB5B39 /* ProjectMHelper.app in CopyFiles */ = {isa = PBXBuildFile; fileRef = C012D7BA2F410A9300DB5B39 /* ProjectMHelper.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C0TEST00D2F4120000000000D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C064571D2E959CD100CF1B0E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C06457242E959CD100CF1B0E;
+			remoteInfo = "SystemEQ for Mac";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C012D7D62F410D6D00DB5B39 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				C012D7D72F410DB100DB5B39 /* ProjectMHelper.app in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		C012D7BA2F410A9300DB5B39 /* ProjectMHelper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProjectMHelper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C012D7D02F410D2F00DB5B39 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		C012D7D22F410D3A00DB5B39 /* OpenGL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGL.framework; path = System/Library/Frameworks/OpenGL.framework; sourceTree = SDKROOT; };
+		C012D7D42F410D4300DB5B39 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 		C06457252E959CD100CF1B0E /* SystemEQ for Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SystemEQ for Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0TEST0012F41200000000001 /* SystemEQ for MacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SystemEQ for MacTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		C012D7BB2F410A9300DB5B39 /* ProjectMHelper */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ProjectMHelper;
+			sourceTree = "<group>";
+		};
 		C06457272E959CD100CF1B0E /* SystemEQ for Mac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "SystemEQ for Mac";
 			sourceTree = "<group>";
 		};
+		C0TEST0022F41200000000002 /* SystemEQ for MacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SystemEQ for MacTests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		C012D7B72F410A9300DB5B39 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C012D7D52F410D4300DB5B39 /* CoreVideo.framework in Frameworks */,
+				C012D7D32F410D3A00DB5B39 /* OpenGL.framework in Frameworks */,
+				C012D7D12F410D2F00DB5B39 /* AppKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0TEST0052F41200000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
+		C012D7CF2F410D2F00DB5B39 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C012D7D42F410D4300DB5B39 /* CoreVideo.framework */,
+				C012D7D22F410D3A00DB5B39 /* OpenGL.framework */,
+				C012D7D02F410D2F00DB5B39 /* AppKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		C064571C2E959CD100CF1B0E = {
 			isa = PBXGroup;
 			children = (
 				C06457272E959CD100CF1B0E /* SystemEQ for Mac */,
+				C0TEST0022F41200000000002 /* SystemEQ for MacTests */,
+				C012D7BB2F410A9300DB5B39 /* ProjectMHelper */,
+				C012D7CF2F410D2F00DB5B39 /* Frameworks */,
 				C06457262E959CD100CF1B0E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -31,6 +109,8 @@
 			isa = PBXGroup;
 			children = (
 				C06457252E959CD100CF1B0E /* SystemEQ for Mac.app */,
+				C012D7BA2F410A9300DB5B39 /* ProjectMHelper.app */,
+				C0TEST0012F41200000000001 /* SystemEQ for MacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -38,12 +118,37 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C012D7B92F410A9300DB5B39 /* ProjectMHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C012D7C52F410A9500DB5B39 /* Build configuration list for PBXNativeTarget "ProjectMHelper" */;
+			buildPhases = (
+				C012D7B62F410A9300DB5B39 /* Sources */,
+				C012D7B72F410A9300DB5B39 /* Frameworks */,
+				C012D7B82F410A9300DB5B39 /* Resources */,
+				C0PROJECTM002 /* Copy projectM Libraries */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C012D7BB2F410A9300DB5B39 /* ProjectMHelper */,
+			);
+			name = ProjectMHelper;
+			packageProductDependencies = (
+			);
+			productName = ProjectMHelper;
+			productReference = C012D7BA2F410A9300DB5B39 /* ProjectMHelper.app */;
+			productType = "com.apple.product-type.application";
+		};
 		C06457242E959CD100CF1B0E /* SystemEQ for Mac */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C06457302E959CD300CF1B0E /* Build configuration list for PBXNativeTarget "SystemEQ for Mac" */;
 			buildPhases = (
 				C06457212E959CD100CF1B0E /* Sources */,
 				C06457232E959CD100CF1B0E /* Resources */,
+				C0PROJECTM001 /* Copy projectM Libraries */,
+				C012D7D62F410D6D00DB5B39 /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -59,6 +164,29 @@
 			productReference = C06457252E959CD100CF1B0E /* SystemEQ for Mac.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C0TEST0032F41200000000003 /* SystemEQ for MacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0TEST0092F41200000000009 /* Build configuration list for PBXNativeTarget "SystemEQ for MacTests" */;
+			buildPhases = (
+				C0TEST0042F41200000000004 /* Sources */,
+				C0TEST0052F41200000000005 /* Frameworks */,
+				C0TEST0062F41200000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0TEST00C2F4120000000000C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C0TEST0022F41200000000002 /* SystemEQ for MacTests */,
+			);
+			name = "SystemEQ for MacTests";
+			packageProductDependencies = (
+			);
+			productName = "SystemEQ for MacTests";
+			productReference = C0TEST0012F41200000000001 /* SystemEQ for MacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -66,11 +194,18 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2620;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					C012D7B92F410A9300DB5B39 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					C06457242E959CD100CF1B0E = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					C0TEST0032F41200000000003 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = C06457242E959CD100CF1B0E;
 					};
 				};
 			};
@@ -91,12 +226,28 @@
 			projectRoot = "";
 			targets = (
 				C06457242E959CD100CF1B0E /* SystemEQ for Mac */,
+				C012D7B92F410A9300DB5B39 /* ProjectMHelper */,
+				C0TEST0032F41200000000003 /* SystemEQ for MacTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C012D7B82F410A9300DB5B39 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C06457232E959CD100CF1B0E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0TEST0062F41200000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -105,8 +256,69 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		C0PROJECTM001 /* Copy projectM Libraries */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"/usr/local/lib/libprojectM-4.4.1.6.dylib",
+				"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib",
+			);
+			name = "Copy projectM Libraries";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks/libprojectM-4.4.dylib",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks/libprojectM-4-playlist.4.dylib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"/usr/local/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+		};
+		C0PROJECTM002 /* Copy projectM Libraries */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"/usr/local/lib/libprojectM-4.4.1.6.dylib",
+				"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib",
+			);
+			name = "Copy projectM Libraries";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks/libprojectM-4.4.dylib",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks/libprojectM-4-playlist.4.dylib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"/usr/local/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
+		C012D7B62F410A9300DB5B39 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C06457212E959CD100CF1B0E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0TEST0042F41200000000004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -115,7 +327,120 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		C0TEST00C2F4120000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C06457242E959CD100CF1B0E /* SystemEQ for Mac */;
+			targetProxy = C0TEST00D2F4120000000000D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		C012D7C32F410A9500DB5B39 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"GL_SILENCE_DEPRECATION=1",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = "$(SRCROOT)/Config/ProjectMHelper/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = (
+					"-lprojectM-4-playlist",
+					"-lprojectM-4",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ.ProjectMHelper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/ProjectMHelper/ProjectMHelper-Bridging-Header.h";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C012D7C42F410A9500DB5B39 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = "GL_SILENCE_DEPRECATION=1";
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = "$(SRCROOT)/Config/ProjectMHelper/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lprojectM-4-playlist",
+					"-lprojectM-4",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ.ProjectMHelper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/ProjectMHelper/ProjectMHelper-Bridging-Header.h";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		C064572E2E959CD300CF1B0E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -155,7 +480,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -206,8 +531,31 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"GL_SILENCE_DEPRECATION=1",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
 				INFOPLIST_FILE = Config/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				MARKETING_VERSION = 1.0;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = (
+					"-lprojectM-4",
+					"-lprojectM-4-playlist",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -215,6 +563,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/SystemEQ for Mac/SystemEQ_for_Mac-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -231,14 +580,22 @@
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = "GL_SILENCE_DEPRECATION=1";
 				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = /usr/local/lib;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lprojectM-4",
+					"-lprojectM-4-playlist",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -246,14 +603,59 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/SystemEQ for Mac/SystemEQ_for_Mac-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C0TEST0072F41200000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ.Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SystemEQ for Mac.app/Contents/MacOS/SystemEQ for Mac";
+			};
+			name = Debug;
+		};
+		C0TEST0082F41200000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ.Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SystemEQ for Mac.app/Contents/MacOS/SystemEQ for Mac";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C012D7C52F410A9500DB5B39 /* Build configuration list for PBXNativeTarget "ProjectMHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C012D7C32F410A9500DB5B39 /* Debug */,
+				C012D7C42F410A9500DB5B39 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C06457202E959CD100CF1B0E /* Build configuration list for PBXProject "SystemEQ for Mac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -268,6 +670,15 @@
 			buildConfigurations = (
 				C06457312E959CD300CF1B0E /* Debug */,
 				C06457322E959CD300CF1B0E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C0TEST0092F41200000000009 /* Build configuration list for PBXNativeTarget "SystemEQ for MacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0TEST0072F41200000000007 /* Debug */,
+				C0TEST0082F41200000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

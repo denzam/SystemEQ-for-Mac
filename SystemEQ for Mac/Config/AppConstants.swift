@@ -18,18 +18,42 @@ public enum AppConstants {
         public static let autoEQWebApp = "https://autoeq.app/equalize"
 
         // BlackHole
+        // ⚠️ Єдине джерело істини: оновлюй тільки BlackHole.bundledVersion нижче.
         public static let blackHoleRepo = "https://github.com/ExistentialAudio/BlackHole"
         public static let blackHoleReleases = "https://github.com/ExistentialAudio/BlackHole/releases"
         public static let blackHoleLatest = "https://github.com/ExistentialAudio/BlackHole/releases/latest"
-        public static let blackHole2chPkg = "https://github.com/ExistentialAudio/BlackHole/releases/download/v0.5.0/BlackHole2ch.v0.5.0.pkg"
         public static let blackHoleWebsite = "https://existential.audio/blackhole/"
+        public static let blackHoleHomebrewInfo = "https://formulae.brew.sh/cask/blackhole-2ch"
+
+        /// Прямий URL до .pkg для закріпленої версії BlackHole (official CDN).
+        public static var blackHole2chPkg: String {
+            "https://existential.audio/downloads/BlackHole2ch-\(BlackHole.bundledVersion).pkg"
+        }
 
         /// Project
         public static let projectRepo = "https://github.com/denyszamorniak/SystemEQ-for-Mac"
+        public static let buyMeACoffee = "https://buymeacoffee.com/denzam"
 
         // Local Server
         public static let localAutoEQServer = "http://127.0.0.1:5555"
         public static let localAutoEQServerAlt = "http://127.0.0.1:8000/equalize"
+    }
+
+    // MARK: - BlackHole
+
+    public enum BlackHole {
+        /// Закріплена версія BlackHole, з якою протестовано застосунок.
+        /// Оновлення: запусти `Scripts/check_blackhole_updates.sh` і зміни цей рядок.
+        public static let bundledVersion = "0.6.1"
+
+        /// Мінімальна версія, яка точно працює з CoreAudioEngine.
+        public static let minimumSupportedVersion = "0.5.0"
+
+        /// Команда Homebrew для установки.
+        public static let homebrewCommand = "brew install blackhole-2ch"
+
+        /// Homebrew cask ідентифікатор.
+        public static let homebrewCask = "blackhole-2ch"
     }
 
     // MARK: - Audio Configuration

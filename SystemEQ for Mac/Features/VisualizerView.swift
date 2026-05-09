@@ -1,16 +1,11 @@
 import SwiftUI
-import Metal
-import MetalKit
 
 struct VisualizerView: View {
     @ObservedObject private var localization = LocalizationManager.shared
-    @State private var currentShader: ComputeShaderType = .plasma
-    @State private var intensity: Double = 0.7
+    @StateObject private var helperClient = ProjectMHelperClient.shared
     @State private var isFullscreen: Bool = false
-    @State private var metalViewID = UUID()
-    @State private var showFPS: Bool = false
-    @State private var currentFPS: Double = 0
-    @State private var averageFrameTime: Double = 0
+    @State private var helperWindowFrame: NSRect = .zero
+    @State private var isTransitioningFullscreen: Bool = false
 
     var body: some View {
         Group {
@@ -18,15 +13,8 @@ struct VisualizerView: View {
                 // Fullscreen: no container chrome, just the visualization
                 ZStack {
                     Color.black.ignoresSafeArea()
-
-                    MetalVisualizerView(
-                        currentShader: $currentShader,
-                        intensity: .constant(Float(intensity)),
-                        currentFPS: $currentFPS,
-                        averageFrameTime: $averageFrameTime
-                    )
-                    .id(metalViewID)
-                    .ignoresSafeArea()
+                    visualizationCanvas
+                        .ignoresSafeArea()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
@@ -47,17 +35,11 @@ struct VisualizerView: View {
 
                         // MARK: - Visualization Canvas
 
-                        MetalVisualizerView(
-                            currentShader: $currentShader,
-                            intensity: .constant(Float(intensity)),
-                            currentFPS: $currentFPS,
-                            averageFrameTime: $averageFrameTime
-                        )
-                        .id(metalViewID)
-                        .cornerRadius(AppRadius.md)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.horizontal, AppSpacing.lg)
-                        .padding(.bottom, AppSpacing.md)
+                        visualizationCanvas
+                            .cornerRadius(AppRadius.md)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.bottom, AppSpacing.md)
 
                         // MARK: - Status Bar
 
@@ -67,9 +49,6 @@ struct VisualizerView: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            metalViewID = UUID()
         }
         .onReceive(NotificationCenter.default.publisher(for: .languageChanged)) { _ in
             // Force view refresh when language changes
@@ -93,6 +72,7 @@ struct VisualizerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { notification in
             if let window = notification.object as? NSWindow,
                window.identifier?.rawValue == FeatureID.visualizer.rawValue {
+                isTransitioningFullscreen = true
                 withAnimation(.easeInOut(duration: 0.1)) {
                     isFullscreen = true
                 }
@@ -101,106 +81,205 @@ struct VisualizerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { notification in
             if let window = notification.object as? NSWindow,
                window.identifier?.rawValue == FeatureID.visualizer.rawValue {
+                isTransitioningFullscreen = true
                 withAnimation(.easeInOut(duration: 0.1)) {
                     isFullscreen = false
                 }
                 NSCursor.unhide()
             }
         }
+        .onAppear {
+            isTransitioningFullscreen = false
+            startVisualizerIfNeeded()
+        }
+        .onDisappear {
+            // Guard against SwiftUI destroying the outgoing branch when toggling
+            // fullscreen — that fires onDisappear but the helper must keep running.
+            if isTransitioningFullscreen {
+                isTransitioningFullscreen = false
+                return
+            }
+            stopVisualizerIfNeeded()
+        }
+    }
+
+    // MARK: - Visualization Canvas
+
+    @ViewBuilder private var visualizationCanvas: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black
+
+                if helperClient.isRunning {
+                    // Helper is running - show info overlay
+                    VStack(spacing: AppSpacing.md) {
+                        Image(systemName: "waveform.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.purple.opacity(0.5))
+
+                        Text(localization.localized(.visualizerInSeparateWindow))
+                            .font(AppTypography.body)
+                            .foregroundColor(.secondary)
+
+                        Text(localization.localized(.dragProjectMWindowHint))
+                            .font(AppTypography.labelSmall)
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                } else {
+                    // Helper not running - show start button
+                    VStack(spacing: AppSpacing.md) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.purple)
+
+                        Button(localization.localized(.launchMilkDrop)) {
+                            startHelperWithFrame(geometry.frame(in: .global))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                    }
+                }
+            }
+            .onChange(of: geometry.frame(in: .global)) { newFrame in
+                // Defer to avoid triggering layout during an active layout pass
+                DispatchQueue.main.async {
+                    helperWindowFrame = newFrame
+                }
+            }
+        }
+    }
+
+    // MARK: - Lifecycle
+
+    private func startVisualizerIfNeeded() {
+        // Will start when user clicks button
+    }
+
+    private func stopVisualizerIfNeeded() {
+        helperClient.stop()
+    }
+
+    private func startHelperWithFrame(_ frame: NSRect) {
+        // Position helper window next to main window
+        let helperFrame = NSRect(
+            x: frame.origin.x + frame.width + 20,
+            y: frame.origin.y,
+            width: 800,
+            height: 600
+        )
+        helperClient.start(frame: helperFrame)
     }
 
     // MARK: - Fullscreen
 
     private func toggleFullscreen() {
-        if FullscreenOverlayManager.shared.isShowingOverlay {
-            FullscreenOverlayManager.shared.hideFullscreen()
-        } else {
-            FullscreenOverlayManager.shared.showFullscreen(shader: currentShader, intensity: Float(intensity))
-        }
-    }
-
-    private func nextShader() {
-        let allShaders = ComputeShaderType.allCases
-        guard let idx = allShaders.firstIndex(of: currentShader) else { return }
-        let nextIdx = allShaders.index(after: idx)
-        currentShader = nextIdx < allShaders.endIndex ? allShaders[nextIdx] : allShaders[allShaders.startIndex]
-    }
-
-    private func prevShader() {
-        let allShaders = ComputeShaderType.allCases
-        guard let idx = allShaders.firstIndex(of: currentShader) else { return }
-        if idx == allShaders.startIndex {
-            currentShader = allShaders[allShaders.index(before: allShaders.endIndex)]
-        } else {
-            currentShader = allShaders[allShaders.index(before: idx)]
-        }
+        // Use native macOS fullscreen via window toggle
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { 
+            $0.identifier?.rawValue == FeatureID.visualizer.rawValue 
+        }) else { return }
+        
+        window.toggleFullScreen(nil)
     }
 
     // MARK: - Controls Bar
 
     private var controlsBar: some View {
         HStack(spacing: AppSpacing.md) {
-            // Previous
-            Button(action: prevShader) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-            }
-            .buttonStyle(.borderless)
-            .help("Previous shader")
-
-            // Shader picker
-            Menu {
-                ForEach(ComputeShaderType.allCases, id: \.self) { shader in
-                    Button(action: { currentShader = shader }) {
-                        Text(shader.rawValue)
-                    }
+            // Category picker
+            Picker("", selection: $helperClient.selectedCategory) {
+                ForEach(helperClient.availableCategories, id: \.self) { category in
+                    Text(category).tag(category)
                 }
-            } label: {
-                HStack(spacing: AppSpacing.xs) {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 12))
-                    Text(currentShader.rawValue)
-                        .font(AppTypography.labelSmall)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xxs)
-                .background(Color.green.opacity(0.2))
-                .cornerRadius(AppRadius.xs)
             }
-            .menuStyle(.borderlessButton)
+            .pickerStyle(.menu)
+            .frame(width: 120)
+            .help(localization.localized(.presetCategoryHelp))
 
-            // Next
-            Button(action: nextShader) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+            // Weight picker
+            Picker("", selection: $helperClient.selectedWeight) {
+                Text("All").tag("All")
+                Text("Light").tag("Light")
+                Text("Medium").tag("Medium")
+                Text("Heavy").tag("Heavy")
             }
-            .buttonStyle(.borderless)
-            .help("Next shader")
+            .pickerStyle(.menu)
+            .frame(width: 90)
+            .help(localization.localized(.presetWeightHelp))
+
+            Divider()
+                .frame(height: 20)
+
+            // projectM controls
+            projectMControls
 
             Spacer()
+        }
+    }
 
-            // Fullscreen button
-            Button(action: toggleFullscreen) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 12, weight: .semibold))
+    // MARK: - projectM Controls
+
+    private var projectMControls: some View {
+        HStack(spacing: AppSpacing.md) {
+            Button(action: {
+                helperClient.previousPreset()
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
             }
             .buttonStyle(.borderless)
-            .help("Fullscreen (double-click visualization)")
+            .help(localization.localized(.previousPresetHelp))
 
-            // Intensity slider
-            HStack(spacing: AppSpacing.sm) {
-                Image(systemName: "sun.min")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Slider(value: $intensity, in: 0.1...1.5)
-                    .frame(width: 120)
-                Image(systemName: "sun.max.fill")
-                    .font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(helperClient.currentPresetName)
+                    .font(AppTypography.labelSmall)
+                    .lineLimit(1)
+                    .frame(maxWidth: 200)
+                Text("\(helperClient.presetCount) presets")
+                    .font(.system(size: 9))
                     .foregroundColor(.secondary)
             }
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.vertical, AppSpacing.xxs)
+            .background(Color.purple.opacity(0.2))
+            .cornerRadius(AppRadius.xs)
+
+            Button(action: {
+                helperClient.nextPreset()
+            }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help(localization.localized(.nextPresetHelp))
+
+            Button(action: {
+                helperClient.randomPreset()
+            }) {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help(localization.localized(.randomPresetHelp))
+
+            HStack(spacing: 4) {
+                Text(localization.localized(.autoLabel))
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+                Toggle("", isOn: $helperClient.isShuffleEnabled)
+                    .toggleStyle(.switch)
+                    .scaleEffect(0.7)
+            }
+            .help(localization.localized(.autoPresetsHelp))
+
+            HStack(spacing: 4) {
+                Text(localization.localized(.lockLabel))
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+                Toggle("", isOn: $helperClient.isPresetLocked)
+                    .toggleStyle(.switch)
+                    .scaleEffect(0.7)
+            }
+            .help(localization.localized(.lockPresetHelp))
         }
     }
 
@@ -211,64 +290,28 @@ struct VisualizerView: View {
             // Status indicator
             HStack(spacing: AppSpacing.xs) {
                 Circle()
-                    .fill(Color.green)
+                    .fill(helperClient.isRunning ? Color.green : Color.gray)
                     .frame(width: 8, height: 8)
 
-                Text("Compute Shaders Active")
+                Text(helperClient.isRunning ? "projectM Active" : "projectM Inactive")
                     .font(AppTypography.labelSmall)
                     .foregroundColor(.secondary)
             }
 
-            // FPS counter (toggle with click)
-            Button(action: { showFPS.toggle() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "speedometer")
-                        .font(.system(size: 10))
-                    if showFPS {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(String(format: "%.1f FPS", currentFPS))
-                                .font(AppTypography.monoSmall)
-                            Text(String(format: "%.1f ms", averageFrameTime))
-                                .font(.system(size: 8, design: .monospaced))
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        Text("FPS")
-                            .font(AppTypography.labelSmall)
-                    }
-                }
-                .foregroundColor(fpsColor)
-            }
-            .buttonStyle(.plain)
-            .help("Click to toggle FPS display")
-
-
             Spacer()
 
-            // Shader indicator
+            // Stable mode indicator
             HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 10))
-                Text(currentShader.rawValue)
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 15))
+                Text("Stable Mode")
                     .font(AppTypography.labelSmall)
             }
-            .foregroundColor(.secondary)
+            .foregroundColor(.green)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xxs)
             .background(Color.green.opacity(0.15))
             .cornerRadius(AppRadius.xs)
-        }
-    }
-
-    private var fpsColor: Color {
-        if currentFPS < 25 {
-            return .red
-        } else if currentFPS < 45 {
-            return .orange
-        } else if currentFPS >= 60 {
-            return .green
-        } else {
-            return .secondary
         }
     }
 }

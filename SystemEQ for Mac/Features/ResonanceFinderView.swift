@@ -59,40 +59,42 @@ struct ResonanceFinderView: View {
     // MARK: - Info Card
 
     private var infoCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "waveform.path.ecg")
-                    .font(AppTypography.heading1)
-                    .foregroundColor(.blue)
+        HStack(spacing: 10) {
+            Image(systemName: "waveform.path.ecg")
+                .font(AppTypography.heading1)
+                .foregroundColor(.blue)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(localization.localized(.resonanceFinder))
                     .font(AppTypography.heading2)
-            }
-
-            Text(localization.localized(.resonanceFinderSubtitle))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Label(localization.localized(.resonanceStep1), systemImage: "speaker.wave.2")
-                    .font(.subheadline)
-                Label(localization.localized(.resonanceStep2), systemImage: "ear")
-                    .font(.subheadline)
-                Label(localization.localized(.resonanceStep3), systemImage: "flag")
-                    .font(.subheadline)
-            }
-            .foregroundColor(.secondary)
-
-            // Important note
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "info.circle.fill")
-                    .foregroundColor(.orange)
-                Text(localization.localized(.resonanceNote))
-                    .font(.caption)
+                Text(localization.localized(.resonanceFinderSubtitle))
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
             }
-            .padding(.top, 8)
+            .fixedSize()
+            InfoPopoverButton {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Image(systemName: "waveform.path.ecg").foregroundColor(.blue)
+                        Text(localization.localized(.resonanceFinder)).font(.headline)
+                    }
+                    Text(localization.localized(.resonanceFinderSubtitle))
+                        .font(.body).foregroundColor(.secondary)
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(localization.localized(.resonanceStep1), systemImage: "speaker.wave.2").font(.body)
+                        Label(localization.localized(.resonanceStep2), systemImage: "ear").font(.body)
+                        Label(localization.localized(.resonanceStep3), systemImage: "flag").font(.body)
+                    }
+                    .foregroundColor(.primary)
+                    Divider()
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle.fill").foregroundColor(.orange)
+                        Text(localization.localized(.resonanceNote))
+                            .font(.body).foregroundColor(.secondary)
+                    }
+                }
+            }
+            .frame(width: 28, height: 28)
         }
         .padding(16)
         .background(Color.blue.opacity(0.05))
@@ -104,7 +106,7 @@ struct ResonanceFinderView: View {
     private var frequencyDisplay: some View {
         VStack(spacing: 10) {
             Text(localization.localized(.currentFrequency))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .foregroundColor(.secondary)
 
             Text(String(format: "%.1f Hz", sineSweep.currentFrequency))
@@ -113,7 +115,7 @@ struct ResonanceFinderView: View {
 
             if sineSweep.isPlaying {
                 Text(localization.localized(.sweepInProgress))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.orange)
                     .fontWeight(.semibold)
             }
@@ -132,19 +134,19 @@ struct ResonanceFinderView: View {
             HStack {
                 Image(systemName: "waveform.path")
                     .foregroundColor(.orange)
-                Text("Автоматичний sweep")
-                    .font(.subheadline)
+                Text(localization.localized(.automaticSweep))
+                    .font(AppTypography.body)
                     .fontWeight(.semibold)
             }
 
-            Text("Sweep автоматично проходить через всі частоти. Коли почуєте резонанс — натисніть 'Позначити'.")
-                .font(.caption)
+            Text(localization.localized(.sweepInstructions))
+                .font(AppTypography.label)
                 .foregroundColor(.secondary)
 
             // Speed selector
             VStack(alignment: .leading, spacing: 8) {
                 Text(localization.localized(.sweepSpeed))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
 
                 Picker("", selection: $sineSweep.sweepSpeed) {
@@ -216,17 +218,17 @@ struct ResonanceFinderView: View {
     private var quickTestSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(localization.localized(.quickTestCommon))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .fontWeight(.semibold)
 
             Text(localization.localized(.commonProblemFrequencies))
-                .font(.caption)
+                .font(AppTypography.label)
                 .foregroundColor(.secondary)
 
             // Quick frequency buttons - switch frequency, don't auto-stop
             VStack(spacing: 10) {
-                Text("Швидкий вибір частоти")
-                    .font(.caption)
+                Text(localization.localized(.quickFrequencySelect))
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
@@ -238,7 +240,7 @@ struct ResonanceFinderView: View {
                             }
                         }) {
                             Text("\(freq)")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 15, weight: .medium))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 6)
                         }
@@ -255,7 +257,7 @@ struct ResonanceFinderView: View {
             VStack(spacing: 12) {
                 HStack {
                     Text(localization.localized(.frequency))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.0f Hz", currentFrequency))
@@ -281,23 +283,23 @@ struct ResonanceFinderView: View {
 
                 HStack {
                     Text("20 Hz")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("50")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("100")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("200")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("500 Hz")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
             }
@@ -316,7 +318,7 @@ struct ResonanceFinderView: View {
                 }) {
                     HStack {
                         Image(systemName: sineSweep.isPlaying ? "stop.fill" : "play.fill")
-                        Text(sineSweep.isPlaying ? "Зупинити" : "Відтворити")
+                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization.localized(.playTone))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -342,8 +344,8 @@ struct ResonanceFinderView: View {
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
-                    Text("Рухайте повзунок або натискайте кнопки частот — звук оновиться автоматично")
-                        .font(.caption)
+                    Text(localization.localized(.sliderFrequencyHint))
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
                 .padding(10)
@@ -378,10 +380,10 @@ struct ResonanceFinderView: View {
                         .font(.largeTitle)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.noResonancesDetected))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.playSweepHint))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -394,10 +396,10 @@ struct ResonanceFinderView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(Int(resonance.frequency)) Hz")
-                                .font(.subheadline)
+                                .font(AppTypography.body)
                                 .fontWeight(.semibold)
                             Text(resonance.description)
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
 
@@ -407,7 +409,7 @@ struct ResonanceFinderView: View {
                         HStack(spacing: 4) {
                             ForEach(0..<resonance.severity.rating, id: \.self) { _ in
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                                     .foregroundColor(colorForSeverity(resonance.severity))
                             }
                         }
@@ -424,7 +426,7 @@ struct ResonanceFinderView: View {
                             detectedResonances.removeAll { $0.id == resonance.id }
                         }) {
                             Image(systemName: "trash")
-                                .font(.caption)
+                                .font(AppTypography.label)
                         }
                         .buttonStyle(BorderedButtonStyle())
                     }
@@ -449,7 +451,7 @@ struct ResonanceFinderView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(localization.localized(.frequency))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                 Text(String(format: "%.0f Hz", newResonanceFrequency))
                     .font(.title3)
@@ -458,7 +460,7 @@ struct ResonanceFinderView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(localization.localized(.severity))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
 
                 Picker("", selection: $newResonanceSeverity) {

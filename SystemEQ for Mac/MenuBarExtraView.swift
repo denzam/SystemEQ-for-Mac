@@ -70,7 +70,7 @@ struct MenuBarExtraView: View {
                 .frame(width: 8, height: 8)
 
             Text(statusText)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.primary)
 
             Spacer()
@@ -78,7 +78,7 @@ struct MenuBarExtraView: View {
             if !audioRouter.blackHoleDetected {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
-                    .font(.system(size: 11))
+                    .font(.system(size: 15))
                     .help("BlackHole not detected")
             }
         }
@@ -122,9 +122,9 @@ struct MenuBarExtraView: View {
             )) {
                 HStack(spacing: 6) {
                     Image(systemName: "waveform")
-                        .font(.system(size: 12))
+                        .font(.system(size: 15))
                     Text("EQ")
-                        .font(.system(size: 13))
+                        .font(.system(size: 15))
                 }
             }
             .toggleStyle(SwitchToggleStyle(tint: .blue))
@@ -134,7 +134,7 @@ struct MenuBarExtraView: View {
             // Mute button
             Button(action: { coreEngine.setMuted(!coreEngine.muted) }) {
                 Image(systemName: coreEngine.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 16))
                     .foregroundColor(coreEngine.muted ? .orange : .primary)
                     .frame(width: 28, height: 28)
                     .background(hoveredButton == "mute" ? Color.primary.opacity(0.1) : Color.clear)
@@ -153,10 +153,10 @@ struct MenuBarExtraView: View {
     private var activePresetRow: some View {
         HStack(spacing: 6) {
             Image(systemName: "waveform.badge.checkmark")
-                .font(.system(size: 10))
+                .font(.system(size: 15))
                 .foregroundColor(.secondary)
             Text(activePresetName)
-                .font(.system(size: 11))
+                .font(.system(size: 15))
                 .foregroundColor(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -169,11 +169,11 @@ struct MenuBarExtraView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(localization.localized(.menuMainGain))
-                    .font(.system(size: 12))
+                    .font(.system(size: 15))
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(String(format: "%+.1f dB", sliderGain))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 16, design: .monospaced))
                     .foregroundColor(.secondary)
             }
 
@@ -226,10 +226,10 @@ struct MenuBarExtraView: View {
                 Text(title)
                 Spacer()
                 Text(shortcut)
-                    .font(.system(size: 10))
+                    .font(.system(size: 15))
                     .foregroundColor(.secondary)
             }
-            .font(.system(size: 13))
+            .font(.system(size: 15))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)

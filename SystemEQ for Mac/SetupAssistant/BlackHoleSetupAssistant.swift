@@ -314,7 +314,7 @@ struct InstallBlackHoleStepView: View {
                         Text(localization.localized(.freeOpenSource))
                             .fontWeight(.medium)
                         Text(localization.localized(.mitLicense))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -326,7 +326,7 @@ struct InstallBlackHoleStepView: View {
                         Text(localization.localized(.safeTrusted))
                             .fontWeight(.medium)
                         Text(localization.localized(.usedByThousands))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -338,7 +338,7 @@ struct InstallBlackHoleStepView: View {
                         Text(localization.localized(.easyToUninstall))
                             .fontWeight(.medium)
                         Text(localization.localized(.canBeRemovedAnytime))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -359,25 +359,52 @@ struct InstallBlackHoleStepView: View {
 
             Spacer()
 
-            HStack(spacing: 12) {
-                Button(action: downloadBlackHole) {
-                    Label(localization.localized(.download) + " BlackHole", systemImage: "arrow.down.circle.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+            if BlackHoleInstaller.isHomebrewAvailable() {
+                VStack(spacing: 10) {
+                    Text("Homebrew detected — recommended install method")
+                        .font(AppTypography.label)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 12) {
+                        Button(action: installViaHomebrew) {
+                            Label("Install via Homebrew", systemImage: "terminal.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
 
-                Button("View on GitHub") {
-                    openBlackHoleGitHub()
+                        Button(action: downloadBlackHole) {
+                            Label("Download .pkg instead", systemImage: "arrow.down.circle")
+                        }
+                        .controlSize(.large)
+                    }
                 }
-                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack(spacing: 12) {
+                    Button(action: downloadBlackHole) {
+                        Label(
+                            localization.localized(.download) + " BlackHole v" + AppConstants.BlackHole.bundledVersion,
+                            systemImage: "arrow.down.circle.fill"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    Button("View on GitHub") {
+                        openBlackHoleGitHub()
+                    }
+                    .controlSize(.large)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
     }
 
     private func downloadBlackHole() {
-        guard let url = URL(string: AppConstants.URLs.blackHoleLatest) else { return }
-        NSWorkspace.shared.open(url)
+        BlackHoleInstaller.openDirectDownload()
+    }
+
+    private func installViaHomebrew() {
+        BlackHoleInstaller.openHomebrewInTerminal()
     }
 
     private func openBlackHoleGitHub() {
@@ -672,7 +699,7 @@ struct FeatureRow: View {
                 Text(title)
                     .fontWeight(.medium)
                 Text(description)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
         }
@@ -714,7 +741,7 @@ struct CheckRow: View {
                 Text(title)
                     .fontWeight(.medium)
                 Text(description)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
             Spacer()
@@ -729,7 +756,7 @@ struct StepRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
-                .font(.caption)
+                .font(AppTypography.label)
                 .fontWeight(.bold)
                 .foregroundColor(.white)
                 .frame(width: 24, height: 24)
@@ -756,7 +783,7 @@ struct TroubleshootRow: View {
                 Text(text)
                     .fontWeight(.medium)
                 Text(solution)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
         }
@@ -779,7 +806,7 @@ struct NextStepRow: View {
                 Text(title)
                     .fontWeight(.medium)
                 Text(description)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
         }

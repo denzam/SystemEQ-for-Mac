@@ -185,190 +185,116 @@ struct CalibrationView: View {
     }
 
     private var infoCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "headphones")
-                    .font(.title2)
-                    .foregroundColor(.blue)
+        HStack(spacing: 10) {
+            Image(systemName: "headphones")
+                .font(.title2)
+                .foregroundColor(.blue)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(localization.localized(.equalLoudnessCalibration))
                     .font(.headline)
+                Text(localization.localized(.calibrationCompensateHeadphones))
+                    .font(AppTypography.body)
+                    .foregroundColor(.secondary)
             }
+            .fixedSize()
+            InfoPopoverButton {
+                calibrationInfoPopoverContent
+            }
+            .frame(width: 28, height: 28)
+            Spacer()
+        }
+        .padding(14)
+        .background(Color.blue.opacity(0.05))
+        .cornerRadius(8)
+    }
 
-            Text(localization.localized(.calibrationCompensateHeadphones))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-
-            // Important notice about limitations
+    private var calibrationInfoPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                        .font(.subheadline)
                     Text(localization.localized(.calibrationImportantLimitations))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                        .font(.headline)
                         .foregroundColor(.orange)
                 }
-
                 VStack(alignment: .leading, spacing: 4) {
                     Text(localization.localized(.calibrationWhatWillImprove))
-                        .font(.caption)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                         .foregroundColor(.green)
-                    Text(localization.localized(.calibrationMidHighBalance))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(localization.localized(.calibrationHearingCompensation))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(localization.localized(.calibrationHeadphoneCorrection))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(localization.localized(.calibrationLessFatigue))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
+                    ForEach([
+                        localization.localized(.calibrationMidHighBalance),
+                        localization.localized(.calibrationHearingCompensation),
+                        localization.localized(.calibrationHeadphoneCorrection),
+                        localization.localized(.calibrationLessFatigue)
+                    ], id: \.self) { item in
+                        Text("• \(item)").font(AppTypography.body).foregroundColor(.secondary)
+                    }
                     Text(localization.localized(.calibrationWhatWontFix))
-                        .font(.caption)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                         .foregroundColor(.orange)
-                    Text(localization.localized(.calibrationDriverLimitations))
-                        .font(.caption)
+                        .padding(.top, 4)
+                    Text("• \(localization.localized(.calibrationDriverLimitations))")
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(10)
-            .background(Color.orange.opacity(0.05))
-            .cornerRadius(6)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-            )
+            .padding(12)
+            .background(Color.orange.opacity(0.07))
+            .cornerRadius(8)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("🎯")
-                        .font(.title3)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.localized(.calibrationMethodPrincipleTitle))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text(localization.localized(.calibrationMethodPrincipleDesc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    Text(localization.localized(.calibrationMethodPrincipleTitle))
+                        .font(AppTypography.body).fontWeight(.semibold)
                 }
+                Text(localization.localized(.calibrationMethodPrincipleDesc))
+                    .font(AppTypography.body).foregroundColor(.secondary)
+            }
 
-                Divider()
-                    .padding(.vertical, 2)
+            Divider()
 
-                HStack {
-                    Text("1️⃣")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.localized(.calibrationPreparation))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text(localization.localized(.calibrationPreparationDesc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                HStack {
-                    Text("2️⃣")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.localized(.calibrationReference1000))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text(localization.localized(.calibrationReference1000Desc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                HStack {
-                    Text("3️⃣")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.localized(.calibrationAdjustFrequencies))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text(localization.localized(.calibrationAdjustFrequenciesDesc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                HStack {
-                    Text("4️⃣")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.localized(.calibrationVerification))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text(localization.localized(.calibrationVerificationDesc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach([
+                    ("1️⃣", localization.localized(.calibrationPreparation), localization.localized(.calibrationPreparationDesc)),
+                    ("2️⃣", localization.localized(.calibrationReference1000), localization.localized(.calibrationReference1000Desc)),
+                    ("3️⃣", localization.localized(.calibrationAdjustFrequencies), localization.localized(.calibrationAdjustFrequenciesDesc)),
+                    ("4️⃣", localization.localized(.calibrationVerification), localization.localized(.calibrationVerificationDesc))
+                ], id: \.1) { emoji, title, desc in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(emoji)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(title).font(AppTypography.body).fontWeight(.semibold)
+                            Text(desc).font(AppTypography.body).foregroundColor(.secondary)
+                        }
                     }
                 }
             }
-            .foregroundColor(.secondary)
 
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Image(systemName: "lightbulb.fill")
-                        .foregroundColor(.yellow)
-                        .font(.caption)
+                    Image(systemName: "lightbulb.fill").foregroundColor(.yellow)
                     Text(localization.localized(.calibrationProTips))
-                        .font(.caption)
-                        .fontWeight(.semibold)
+                        .font(AppTypography.body).fontWeight(.semibold)
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("•")
-                            .font(.caption)
-                        Text(localization.localized(.calibrationProTip1))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("•")
-                            .font(.caption)
-                        Text(localization.localized(.calibrationProTip2))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("•")
-                            .font(.caption)
-                        Text(localization.localized(.calibrationProTip3))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("•")
-                            .font(.caption)
-                        Text(localization.localized(.calibrationProTip4))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("•")
-                            .font(.caption)
-                        Text(localization.localized(.calibrationProTip5))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                ForEach([
+                    localization.localized(.calibrationProTip1),
+                    localization.localized(.calibrationProTip2),
+                    localization.localized(.calibrationProTip3),
+                    localization.localized(.calibrationProTip4),
+                    localization.localized(.calibrationProTip5)
+                ], id: \.self) { tip in
+                    Text("• \(tip)").font(AppTypography.body).foregroundColor(.secondary)
                 }
             }
-            .foregroundColor(.secondary)
         }
-        .padding(14)
-        .background(Color.blue.opacity(0.05))
-        .cornerRadius(8)
     }
 
     private var calibrationModeSelector: some View {
@@ -385,23 +311,23 @@ struct CalibrationView: View {
                             HStack {
                                 Image(systemName: mode.icon)
                                     .font(.title2)
-                                Text(mode.rawValue)
+                                Text(localization.localized(mode == .clean ? .calibrationModeClean : .calibrationModeCombined))
                                     .font(.headline)
                             }
 
-                            Text(mode.description)
-                                .font(.caption)
+                            Text(localization.localized(mode == .clean ? .calibrationModeCleanDesc : .calibrationModeCombinedDesc))
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
 
                             if mode == .clean {
                                 Text(localization.localized(.recommended))
-                                    .font(.caption2)
+                                    .font(AppTypography.labelSmall)
                                     .foregroundColor(.green)
                             } else {
                                 Text(localization.localized(.advanced))
-                                    .font(.caption2)
+                                    .font(AppTypography.labelSmall)
                                     .foregroundColor(.orange)
                             }
                         }
@@ -446,14 +372,14 @@ struct CalibrationView: View {
                                 .font(.title)
                                 .fontWeight(.bold)
                             Text(count.displayName(localization))
-                                .font(.caption)
+                                .font(AppTypography.label)
                             if count == .bands10 {
                                 Text(localization.localized(.recommended))
-                                    .font(.caption2)
+                                    .font(AppTypography.labelSmall)
                                     .foregroundColor(.green)
                             } else {
                                 Text(localization.localized(.forPerfectionists))
-                                    .font(.caption2)
+                                    .font(AppTypography.labelSmall)
                                     .foregroundColor(.orange)
                             }
                         }
@@ -487,12 +413,12 @@ struct CalibrationView: View {
                     .fontWeight(.semibold)
 
                 Text(localization.localized(.step1SetReferenceDesc))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
 
                 Text(localization.localized(.step1SetReferenceNote))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -504,7 +430,7 @@ struct CalibrationView: View {
                     .foregroundColor(.blue)
 
                 Text(localization.localized(.referenceFrequency))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
             .padding(.vertical, 12)
@@ -516,11 +442,11 @@ struct CalibrationView: View {
             VStack(spacing: 12) {
                 HStack {
                     Text(localization.localized(.volumeLevel))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.1f \(localization.localized(.dB))", calibration.referenceLevel))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                 }
 
@@ -541,17 +467,17 @@ struct CalibrationView: View {
 
                 HStack {
                     Text("-40 \(localization.localized(.dB))")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.quiet))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("0 \(localization.localized(.dB))")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.loud))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
             }
@@ -579,7 +505,7 @@ struct CalibrationView: View {
 
                 if calibration.isPlayingReference {
                     Text(localization.localized(.listenCarefully))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.blue)
                         .fontWeight(.semibold)
                 }
@@ -592,39 +518,39 @@ struct CalibrationView: View {
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
-                        .font(.caption)
+                        .font(AppTypography.label)
                     Text(localization.localized(.howToSetupCorrectly))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .fontWeight(.semibold)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("•")
-                            .font(.caption)
+                            .font(AppTypography.label)
                         Text(localization.localized(.sitInUsualPlace))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                     HStack {
                         Text("•")
-                            .font(.caption)
+                            .font(AppTypography.label)
                         Text(localization.localized(.closeEyesForFocus))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                     HStack {
                         Text("•")
-                            .font(.caption)
+                            .font(AppTypography.label)
                         Text(localization.localized(.volumeShouldBeComfortable))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                     HStack {
                         Text("•")
-                            .font(.caption)
+                            .font(AppTypography.label)
                         Text(localization.localized(.rememberThisVolume))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -666,11 +592,11 @@ struct CalibrationView: View {
             VStack(spacing: 8) {
                 HStack {
                     Text(localization.localized(.progress))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("\(currentTestBandIndex + 1) / \(frequencies.count)")
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                 }
 
@@ -680,13 +606,13 @@ struct CalibrationView: View {
                         .fontWeight(.semibold)
 
                     Text(localization.localized(.step2AdjustFrequenciesDesc))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
 
                     VStack(spacing: 10) {
                         Text(localization.localized(.currentFrequencyLabel))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .foregroundColor(.secondary)
 
                         Text(calibration.frequencyLabel(currentFrequency) + " \(localization.localized(.frequencyHz))")
@@ -694,12 +620,12 @@ struct CalibrationView: View {
                             .foregroundColor(.blue)
 
                         Text(localization.localized(.adjustToReferenceVolume))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
 
                         Text(localization.localized(.tipCloseEyes))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.blue)
                             .fontWeight(.semibold)
                     }
@@ -714,14 +640,14 @@ struct CalibrationView: View {
                 VStack(spacing: 12) {
                     HStack {
                         Text(localization.localized(.levelCorrection))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(String(
                             format: "%+.1f \(localization.localized(.dB))",
                             testBands[getGlobalBandIndex(currentTestBandIndex)]
                         ))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                         .foregroundColor(testBands[getGlobalBandIndex(currentTestBandIndex)] > 0 ? .green : .red)
                     }
@@ -755,11 +681,11 @@ struct CalibrationView: View {
 
                     HStack {
                         Text(localization.localized(.quieter2))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(localization.localized(.louder2))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -770,14 +696,14 @@ struct CalibrationView: View {
                 // Test controls
                 VStack(spacing: 12) {
                     Text(localization.localized(.testingFrequency))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
 
                     // Signal type selector
                     VStack(spacing: 8) {
                         HStack {
                             Text(localization.localized(.testSignalType))
-                                .font(.subheadline)
+                                .font(AppTypography.body)
                                 .foregroundColor(.secondary)
                             Spacer()
                         }
@@ -788,9 +714,9 @@ struct CalibrationView: View {
                             }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "waveform.path")
-                                        .font(.system(size: 14))
+                                        .font(.system(size: 16))
                                     Text(localization.localized(.pinkNoise))
-                                        .font(.system(size: 13))
+                                        .font(.system(size: 15))
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
@@ -810,9 +736,9 @@ struct CalibrationView: View {
                             }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "sinewave")
-                                        .font(.system(size: 14))
+                                        .font(.system(size: 16))
                                     Text(localization.localized(.pureTone))
-                                        .font(.system(size: 13))
+                                        .font(.system(size: 15))
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
@@ -876,7 +802,7 @@ struct CalibrationView: View {
 
                     if calibration.comparisonMode {
                         Text(localization.localized(.alternatingPattern))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.blue)
                             .fontWeight(.semibold)
                     }
@@ -887,43 +813,43 @@ struct CalibrationView: View {
                     HStack {
                         Image(systemName: "lightbulb.fill")
                             .foregroundColor(.yellow)
-                            .font(.caption)
+                            .font(AppTypography.label)
                         Text(localization.localized(.howToAdjustCorrectly))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .fontWeight(.semibold)
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("1.")
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .fontWeight(.semibold)
                             Text(localization.localized(.pressTestFrequency))
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
                         HStack {
                             Text("2.")
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .fontWeight(.semibold)
                             Text(localization.localized(.moveSliderRealtime))
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
                         HStack {
                             Text("3.")
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .fontWeight(.semibold)
                             Text(localization.localized(.pressStopWhenDone))
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
                         HStack {
                             Text("4.")
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .fontWeight(.semibold)
                             Text(localization.localized(.useCompareForAB))
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -936,13 +862,13 @@ struct CalibrationView: View {
                 VStack(spacing: 8) {
                     HStack {
                         Text(localization.localized(.progress))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(
                             "\(currentTestBandIndex + 1) \(localization.localized(.progressOf)) \(selectedBandCount == .bands10 ? 10 : 31)"
                         )
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                     }
 
@@ -1039,42 +965,42 @@ struct CalibrationView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     Text("1️⃣")
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.bold)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(localization.localized(.saveCalibrationProfileStep))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .fontWeight(.medium)
                         Text(localization.localized(.saveCalibrationProfileStepDesc))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
 
                 HStack(alignment: .top, spacing: 8) {
                     Text("2️⃣")
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.bold)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(localization.localized(.activateProfileHere))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .fontWeight(.medium)
                         Text(localization.localized(.activateProfileHereDesc))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
 
                 HStack(alignment: .top, spacing: 8) {
                     Text("3️⃣")
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.bold)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(localization.localized(.enableEQInMainWindow))
-                            .font(.subheadline)
+                            .font(AppTypography.body)
                             .fontWeight(.medium)
                         Text(localization.localized(.enableEQInMainWindowDesc))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -1085,9 +1011,9 @@ struct CalibrationView: View {
                 HStack {
                     Image(systemName: "lightbulb.fill")
                         .foregroundColor(.yellow)
-                        .font(.caption)
+                        .font(AppTypography.label)
                     Text(localization.localized(.tipCalibrationWorksOnlyWithEQ))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
             }
@@ -1110,7 +1036,7 @@ struct CalibrationView: View {
                 .font(.title3)
                 .fontWeight(.semibold)
             Text(localization.localized(.noCalibrationProfilesDesc))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -1144,10 +1070,10 @@ struct CalibrationView: View {
                 Text(profile.name)
                     .font(.headline)
                 Text(profile.type.rawValue)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
                 Text(profile.createdAt, style: .date)
-                    .font(.caption2)
+                    .font(AppTypography.labelSmall)
                     .foregroundColor(.secondary)
             }
 
@@ -1156,7 +1082,7 @@ struct CalibrationView: View {
             HStack(spacing: 8) {
                 if calibration.activeProfile?.id == profile.id {
                     Text(localization.localized(.active2))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .fontWeight(.semibold)
                         .foregroundColor(.green)
                         .padding(.horizontal, 8)
@@ -1223,7 +1149,7 @@ struct CalibrationView: View {
                 .foregroundColor(.secondary)
 
             Text(localization.localized(.compareWithCleanSoundDesc))
-                .font(.caption)
+                .font(AppTypography.label)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
@@ -1284,7 +1210,7 @@ struct CalibrationView: View {
     private func profileSelector(label: String, binding: Binding<CalibrationProfile?>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label)
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .foregroundColor(.secondary)
 
             Picker("", selection: binding) {
@@ -1365,7 +1291,7 @@ struct CalibrationView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Profile Name")
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                 TextField("e.g., My Headphones", text: $profileName)
                     .textFieldStyle(.roundedBorder)
@@ -1373,7 +1299,7 @@ struct CalibrationView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Notes (Optional)")
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                 TextField("e.g., Calibrated for evening listening", text: $profileNotes)
                     .textFieldStyle(.roundedBorder)

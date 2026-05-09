@@ -21,7 +21,7 @@ struct WindowSize {
     static let large = WindowSize(minWidth: 900, minHeight: 700, maxWidth: 1400, maxHeight: 1000)
     static let compact = WindowSize(minWidth: 700, minHeight: 600, maxWidth: 900, maxHeight: 900)
     static let wide = WindowSize(minWidth: 900, minHeight: 600, maxWidth: 1600, maxHeight: 1200)
-    static let equalizer = WindowSize(minWidth: 600, minHeight: 450, maxWidth: 1200, maxHeight: 800)
+    static let equalizer = WindowSize(minWidth: 900, minHeight: 450, maxWidth: 1400, maxHeight: 800)
 }
 
 // MARK: - Tab Item Protocol
@@ -49,6 +49,8 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
 
     /// Localization
     @ObservedObject private var localization = LocalizationManager.shared
+
+    @AppStorage("useGlassEffect") private var useGlassEffect = true
 
     /// State for forcing initial layout
     @State private var isReady = false
@@ -104,53 +106,44 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
     }
 
     var body: some View {
-        ZStack {
-            // Background layer - always visible immediately (no opacity animation)
-            ZStack {
-                // Main glass background (original style with transparency)
-                GlassCard(padding: 0, topCornersOnly: true) {
-                    Color.clear
-                }
+        VStack(spacing: 0) {
+            // MARK: - Header Section
 
-                // Dark title bar area only (top ~28px where traffic lights are)
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.9))
-                        .frame(height: 28)
-                    Spacer()
+            headerSection
+
+            if showDividerAfterHeader {
+                Divider()
+            }
+
+            // MARK: - Tab Selector (якщо є)
+
+            if showTabSelector, let tab = selectedTab {
+                tabSelectorSection(currentTab: tab)
+                Divider()
+            }
+
+            // MARK: - Content Section
+
+            if hasScrollView {
+                ScrollView {
+                    contentSection
+                }
+            } else {
+                contentSection
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            Group {
+                if useGlassEffect {
+                    VisualEffectBackground()
+                } else {
+                    Color(NSColor.windowBackgroundColor)
                 }
             }
             .ignoresSafeArea(.all)
-
-            // Content layer - fades in after layout is ready
-            VStack(spacing: 0) {
-                // MARK: - Header Section
-
-                headerSection
-
-                if showDividerAfterHeader {
-                    Divider()
-                }
-
-                // MARK: - Tab Selector (якщо є)
-
-                if showTabSelector, let tab = selectedTab {
-                    tabSelectorSection(currentTab: tab)
-                    Divider()
-                }
-
-                // MARK: - Content Section
-
-                if hasScrollView {
-                    ScrollView {
-                        contentSection
-                    }
-                } else {
-                    contentSection
-                }
-            }
-            .opacity(isReady ? 1 : 0)
         }
+        .opacity(isReady ? 1 : 0)
         .frame(
             minWidth: windowSize.minWidth,
             minHeight: windowSize.minHeight
@@ -160,15 +153,12 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
             maxHeight: windowSize.maxHeight
         )
         .onAppear {
-            // Force layout calculation before showing content to prevent visual glitch
-            // Small delay allows window to fully initialize its geometry
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 withAnimation(.easeIn(duration: 0.1)) {
                     isReady = true
                 }
             }
         }
-        .blurOnLanguageChange()
     }
 
     // MARK: - Header Section
@@ -188,7 +178,7 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
 
             Spacer()
         }
-        .padding(.top, showTabSelector ? 28 : 52)
+        .padding(.top, 52)
         .padding(.horizontal, AppSpacing.lg)
         .padding(.bottom, AppSpacing.md)
     }
@@ -202,7 +192,7 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
                     selectedTab = tab
                 }) {
                     Text(tab.localizedTitle(localization))
-                        .font(.system(size: 13, weight: currentTab == tab ? .semibold : .regular))
+                        .font(.system(size: 15, weight: currentTab == tab ? .semibold : .regular))
                         .foregroundColor(currentTab == tab ? .primary : .secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -218,7 +208,6 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(NSColor.controlBackgroundColor))
     }
 
     // MARK: - Content Section
@@ -228,7 +217,7 @@ struct FeatureWindowContainer<Content: View, Tab: FeatureTab>: View {
             content(selectedTab)
         }
         .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, showTabSelector ? AppSpacing.lg : AppSpacing.xxl)
+        .padding(.top, AppSpacing.lg)
         .padding(.bottom, AppSpacing.xxxl + AppSpacing.lg) // Extra padding for bottom content visibility
     }
 }

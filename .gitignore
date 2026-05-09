@@ -169,3 +169,17 @@ AutoEq/
 *.bak
 *.backup
 *~
+
+# Build artifacts
+build.log
+dist/
+*.dmg
+
+# IDE
+.sourcekit-lsp/
+.windsurf/
+.windsurf-modules.json
+.vscode/
+
+# Internal docs (not for public)
+Docs/internal/

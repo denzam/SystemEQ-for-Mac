@@ -80,6 +80,7 @@ public enum LocalizedString: String, CaseIterable {
     case linkGitHub
     case linkAutoEQ
     case linkBlackHole
+    case linkBuyMeACoffee
     case supportDevelopment
     case supportDesc
     case supportThankYou
@@ -646,6 +647,78 @@ public enum LocalizedString: String, CaseIterable {
     case setBlackHoleAsSystemOutputTitle
     case setBlackHoleAsSystemOutputInstructions
     case blackHoleRequiredForRouting
+
+    // Visualizer (ProjectM)
+    case visualizerInSeparateWindow
+    case dragProjectMWindowHint
+    case launchMilkDrop
+    case presetCategoryHelp
+    case presetWeightHelp
+    case previousPresetHelp
+    case nextPresetHelp
+    case randomPresetHelp
+    case autoLabel
+    case autoPresetsHelp
+    case lockLabel
+    case lockPresetHelp
+
+    // Resonance / Room Tuning
+    case automaticSweep
+    case sweepInstructions
+    case quickFrequencySelect
+    case playTone
+    case stopPlayback
+    case sliderFrequencyHint
+
+    // Add Resonance Sheet
+    case whatIsThis
+    case resonanceExplanation
+    case resonanceStrength
+    case resonanceStrengthDesc
+    case severityMild
+    case severityMildDesc
+    case severityModerate
+    case severityModerateDesc
+    case severitySevere
+    case severitySevereDesc
+    case severityExtreme
+    case severityExtremeDesc
+
+    // Setup Assistant
+    case runSetupAssistant
+    case launchAtLoginHelp
+
+    // SubjectiveRoomTuningView tabs
+    case tuningTab
+
+    // Calibration Activation Alert
+    case calibrationActivatedTitle
+    case calibrationActivatedMessage
+
+    // AutoEQ Setup Prompt
+    case neverAsk
+    case later
+    case installNow
+
+    // Glass Design Section (Settings)
+    case glassDesignTitle
+    case glassDesignDesc
+    case glassDesignStyle
+    case glassDesignCustomOpacity
+    case glassDesignOpacity
+    case glassDesignPreview
+    case glassDesignPreviewLabel
+
+    // Calibration Mode Selector
+    case calibrationModeClean
+    case calibrationModeCombined
+    case calibrationModeCleanDesc
+    case calibrationModeCombinedDesc
+
+    // Database Version Check
+    case dbUpToDate
+    case dbUpdateAvailable
+    case dbCheckFailed
 }
 
 // MARK: - Localization Data Structure
@@ -838,6 +911,11 @@ private enum LocalizationData {
                     .english: "BlackHole Download",
                     .italian: "Download BlackHole",
                     .ukrainian: "Завантажити BlackHole"
+                ],
+                .linkBuyMeACoffee: [
+                    .english: "Buy Me a Coffee",
+                    .italian: "Buy Me a Coffee",
+                    .ukrainian: "Buy Me a Coffee"
                 ],
                 .supportDevelopment: [
                     .english: "Support Development",
@@ -1039,9 +1117,9 @@ private enum LocalizationData {
                     .ukrainian: "Скинути"
                 ],
                 .autoPreamp: [
-                    .english: "Auto Preamp",
-                    .italian: "Preamp Automatico",
-                    .ukrainian: "Авто Підсилювач"
+                    .english: "Normalize",
+                    .italian: "Normalizza",
+                    .ukrainian: "Нормалізувати"
                 ],
                 .preamp: [
                     .english: "Preamp",
@@ -2326,6 +2404,11 @@ private enum LocalizationData {
                     .italian: "Manuale",
                     .ukrainian: "Вручну"
                 ],
+                .tuningTab: [
+                    .english: "Tuning",
+                    .italian: "Regolazione",
+                    .ukrainian: "Налаштування"
+                ],
                 .notchFilters: [
                     .english: "Notch Filters",
                     .italian: "Filtri Notch",
@@ -3452,6 +3535,279 @@ private enum LocalizationData {
                     .english: "BlackHole is required for system-wide audio routing. Download and install it, then restart this app.",
                     .italian: "BlackHole è richiesto per il routing audio di sistema. Scaricalo e installalo, quindi riavvia questa app.",
                     .ukrainian: "BlackHole потрібен для системної маршрутизації аудіо. Завантажте та встановіть його, потім перезапустіть програму."
+                ],
+
+                // Visualizer (ProjectM)
+                .visualizerInSeparateWindow: [
+                    .english: "Visualization in a separate window",
+                    .italian: "Visualizzazione in una finestra separata",
+                    .ukrainian: "Візуалізація в окремому вікні"
+                ],
+                .dragProjectMWindowHint: [
+                    .english: "Drag the projectM window next to it",
+                    .italian: "Trascina la finestra projectM accanto",
+                    .ukrainian: "Перетягніть вікно projectM поруч"
+                ],
+                .launchMilkDrop: [
+                    .english: "Launch MilkDrop",
+                    .italian: "Avvia MilkDrop",
+                    .ukrainian: "Запустити MilkDrop"
+                ],
+                .presetCategoryHelp: [
+                    .english: "Preset category",
+                    .italian: "Categoria preset",
+                    .ukrainian: "Категорія пресетів"
+                ],
+                .presetWeightHelp: [
+                    .english: "Preset weight (GPU load)",
+                    .italian: "Peso del preset (carico GPU)",
+                    .ukrainian: "Вага пресетів (GPU навантаження)"
+                ],
+                .previousPresetHelp: [
+                    .english: "Previous preset",
+                    .italian: "Preset precedente",
+                    .ukrainian: "Попередній пресет"
+                ],
+                .nextPresetHelp: [
+                    .english: "Next preset",
+                    .italian: "Preset successivo",
+                    .ukrainian: "Наступний пресет"
+                ],
+                .randomPresetHelp: [
+                    .english: "Random preset",
+                    .italian: "Preset casuale",
+                    .ukrainian: "Випадковий пресет"
+                ],
+                .autoLabel: [
+                    .english: "Auto",
+                    .italian: "Auto",
+                    .ukrainian: "Авто"
+                ],
+                .autoPresetsHelp: [
+                    .english: "Auto-change presets every 30 seconds",
+                    .italian: "Cambia preset automaticamente ogni 30 secondi",
+                    .ukrainian: "Автоматична зміна пресетів кожні 30 секунд"
+                ],
+                .lockLabel: [
+                    .english: "Lock",
+                    .italian: "Blocca",
+                    .ukrainian: "Блок"
+                ],
+                .lockPresetHelp: [
+                    .english: "Lock current preset",
+                    .italian: "Blocca il preset corrente",
+                    .ukrainian: "Заблокувати поточний пресет"
+                ],
+
+                // Resonance / Room Tuning
+                .automaticSweep: [
+                    .english: "Automatic sweep",
+                    .italian: "Sweep automatico",
+                    .ukrainian: "Автоматичний sweep"
+                ],
+                .sweepInstructions: [
+                    .english: "Sweep automatically runs through all frequencies. When you hear a resonance — click 'Mark'.",
+                    .italian: "Lo sweep passa automaticamente per tutte le frequenze. Quando senti una risonanza — clicca 'Segna'.",
+                    .ukrainian: "Sweep автоматично проходить через всі частоти. Коли почуєте резонанс — натисніть 'Позначити'."
+                ],
+                .quickFrequencySelect: [
+                    .english: "Quick frequency selection",
+                    .italian: "Selezione rapida della frequenza",
+                    .ukrainian: "Швидкий вибір частоти"
+                ],
+                .playTone: [
+                    .english: "Play",
+                    .italian: "Riproduci",
+                    .ukrainian: "Відтворити"
+                ],
+                .stopPlayback: [
+                    .english: "Stop",
+                    .italian: "Stop",
+                    .ukrainian: "Зупинити"
+                ],
+                .sliderFrequencyHint: [
+                    .english: "Move the slider or press frequency buttons — sound will update automatically",
+                    .italian: "Muovi il cursore o premi i pulsanti delle frequenze — il suono si aggiorna automaticamente",
+                    .ukrainian: "Рухайте повзунок або натискайте кнопки частот — звук оновиться автоматично"
+                ],
+
+                // Add Resonance Sheet
+                .whatIsThis: [
+                    .english: "What is this?",
+                    .italian: "Cos'è questo?",
+                    .ukrainian: "Що це?"
+                ],
+                .resonanceExplanation: [
+                    .english: "A resonance is a frequency at which your room amplifies sound. Add a resonance to create a notch filter to suppress it.",
+                    .italian: "Una risonanza è una frequenza alla quale la tua stanza amplifica il suono. Aggiungi una risonanza per creare un filtro notch che la sopprima.",
+                    .ukrainian: "Резонанс — це частота, на якій ваша кімната підсилює звук. Додайте резонанс, щоб потім створити notch-фільтр для його придушення."
+                ],
+                .resonanceStrength: [
+                    .english: "Resonance strength",
+                    .italian: "Intensità della risonanza",
+                    .ukrainian: "Сила резонансу"
+                ],
+                .resonanceStrengthDesc: [
+                    .english: "Select how strongly this frequency stands out:",
+                    .italian: "Seleziona quanto questa frequenza si distingue:",
+                    .ukrainian: "Оберіть наскільки сильно ця частота виділяється:"
+                ],
+                .severityMild: [
+                    .english: "Mild",
+                    .italian: "Lieve",
+                    .ukrainian: "Легкий"
+                ],
+                .severityMildDesc: [
+                    .english: "Barely noticeable resonance",
+                    .italian: "Risonanza appena percettibile",
+                    .ukrainian: "Ледь помітний резонанс"
+                ],
+                .severityModerate: [
+                    .english: "Moderate",
+                    .italian: "Moderato",
+                    .ukrainian: "Помірний"
+                ],
+                .severityModerateDesc: [
+                    .english: "Noticeable but not critical",
+                    .italian: "Percettibile ma non critico",
+                    .ukrainian: "Помітний, але не критичний"
+                ],
+                .severitySevere: [
+                    .english: "Severe",
+                    .italian: "Grave",
+                    .ukrainian: "Сильний"
+                ],
+                .severitySevereDesc: [
+                    .english: "Clearly interferes with sound",
+                    .italian: "Interferisce chiaramente con il suono",
+                    .ukrainian: "Явно заважає звучанню"
+                ],
+                .severityExtreme: [
+                    .english: "Very severe",
+                    .italian: "Molto grave",
+                    .ukrainian: "Дуже сильний"
+                ],
+                .severityExtremeDesc: [
+                    .english: "Critical resonance",
+                    .italian: "Risonanza critica",
+                    .ukrainian: "Критичний резонанс"
+                ],
+
+                // Setup Assistant
+                .runSetupAssistant: [
+                    .english: "Run Setup Assistant",
+                    .italian: "Avvia Assistente di Configurazione",
+                    .ukrainian: "Запустити помічника налаштування"
+                ],
+                .launchAtLoginHelp: [
+                    .english: "Automatically start SystemEQ when you log in",
+                    .italian: "Avvia automaticamente SystemEQ all'accesso",
+                    .ukrainian: "Автоматично запускати SystemEQ при вході"
+                ],
+
+                // Calibration Activation Alert
+                .calibrationActivatedTitle: [
+                    .english: "Calibration activated!",
+                    .italian: "Calibrazione attivata!",
+                    .ukrainian: "Калібровку активовано!"
+                ],
+                .calibrationActivatedMessage: [
+                    .english: "Now enable EQ in the main window:\n\n1. Close the calibration window\n2. Enable 'Enable EQ'\n\nOnly then will calibration apply to system audio.",
+                    .italian: "Ora abilita l'EQ nella finestra principale:\n\n1. Chiudi la finestra di calibrazione\n2. Abilita 'Abilita EQ'\n\nSolo allora la calibrazione verrà applicata all'audio di sistema.",
+                    .ukrainian: "Тепер увімкніть EQ в головному вікні:\n\n1. Закрийте вікно калібровки\n2. Увімкніть 'Enable EQ'\n\nТільки тоді калібровка почне діяти на системний звук."
+                ],
+
+                // AutoEQ Setup Prompt
+                .neverAsk: [
+                    .english: "Never ask again",
+                    .italian: "Non chiedere più",
+                    .ukrainian: "Ніколи не питати"
+                ],
+                .later: [
+                    .english: "Later",
+                    .italian: "Più tardi",
+                    .ukrainian: "Пізніше"
+                ],
+                .installNow: [
+                    .english: "Install now",
+                    .italian: "Installa ora",
+                    .ukrainian: "Встановити зараз"
+                ],
+
+                // Glass Design Section (Settings)
+                .glassDesignTitle: [
+                    .english: "Glass Design",
+                    .italian: "Design in Vetro",
+                    .ukrainian: "Скляний дизайн"
+                ],
+                .glassDesignDesc: [
+                    .english: "Customize the appearance of glass UI elements",
+                    .italian: "Personalizza l'aspetto degli elementi dell'interfaccia in vetro",
+                    .ukrainian: "Налаштуйте вигляд скляних елементів інтерфейсу"
+                ],
+                .glassDesignStyle: [
+                    .english: "Style",
+                    .italian: "Stile",
+                    .ukrainian: "Стиль"
+                ],
+                .glassDesignCustomOpacity: [
+                    .english: "Custom Opacity",
+                    .italian: "Opacità Personalizzata",
+                    .ukrainian: "Власна прозорість"
+                ],
+                .glassDesignOpacity: [
+                    .english: "Opacity",
+                    .italian: "Opacità",
+                    .ukrainian: "Прозорість"
+                ],
+                .glassDesignPreview: [
+                    .english: "Preview",
+                    .italian: "Anteprima",
+                    .ukrainian: "Попередній перегляд"
+                ],
+                .glassDesignPreviewLabel: [
+                    .english: "Glass Effect Preview",
+                    .italian: "Anteprima Effetto Vetro",
+                    .ukrainian: "Попередній перегляд ефекту скла"
+                ],
+
+                // Calibration Mode Selector
+                .calibrationModeClean: [
+                    .english: "Clean Calibration",
+                    .italian: "Calibrazione Pulita",
+                    .ukrainian: "Чиста Калібровка"
+                ],
+                .calibrationModeCombined: [
+                    .english: "Combined Calibration",
+                    .italian: "Calibrazione Combinata",
+                    .ukrainian: "Комбінована Калібровка"
+                ],
+                .calibrationModeCleanDesc: [
+                    .english: "Calibrate pure speakers/headphones (EQ will be disabled)",
+                    .italian: "Calibra altoparlanti/cuffie puri (l'EQ verrà disabilitato)",
+                    .ukrainian: "Калібрувати чисті динаміки/навушники (EQ буде вимкнено)"
+                ],
+                .calibrationModeCombinedDesc: [
+                    .english: "Calibrate with current EQ preset active",
+                    .italian: "Calibra con il preset EQ attuale attivo",
+                    .ukrainian: "Калібрувати з активним поточним пресетом EQ"
+                ],
+
+                // Database Version Check (use String(format:) for %@ substitutions)
+                .dbUpToDate: [
+                    .english: "✅ Database is up to date (version %@)",
+                    .italian: "✅ Database aggiornato (versione %@)",
+                    .ukrainian: "✅ База даних актуальна (версія %@)"
+                ],
+                .dbUpdateAvailable: [
+                    .english: "🔄 Update available: %@ → %@",
+                    .italian: "🔄 Aggiornamento disponibile: %@ → %@",
+                    .ukrainian: "🔄 Доступне оновлення: %@ → %@"
+                ],
+                .dbCheckFailed: [
+                    .english: "⚠️ Could not check: %@",
+                    .italian: "⚠️ Impossibile verificare: %@",
+                    .ukrainian: "⚠️ Не вдалося перевірити: %@"
                 ]
             ]
 
@@ -3628,4 +3984,6 @@ extension LocalizedString {
 extension Notification.Name {
     static let languageChanged = Notification.Name("languageChanged")
     static let visualizerToggleFullscreen = Notification.Name("visualizerToggleFullscreen")
+    static let visualizerNextPreset = Notification.Name("visualizerNextPreset")
+    static let visualizerPrevPreset = Notification.Name("visualizerPrevPreset")
 }

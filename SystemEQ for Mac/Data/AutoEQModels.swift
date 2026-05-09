@@ -63,9 +63,9 @@ public struct ParametricBand: Codable, Identifiable {
     public let filterType: FilterType
 
     public init(frequency: Float, gain: Float, q: Float, filterType: FilterType = .peak) {
-        self.frequency = frequency
-        self.gain = gain
-        self.q = q
+        self.frequency = max(20.0, min(frequency, 20000.0))
+        self.gain = max(-30.0, min(gain, 30.0))
+        self.q = max(0.1, min(q, 20.0))
         self.filterType = filterType
     }
 
@@ -168,7 +168,7 @@ public struct ParsedBand: Identifiable, Equatable {
 public struct MappedBand: Identifiable {
     public let id = UUID()
     public let center: Double
-    public let gain: Double
+    public var gain: Double
 
     public init(center: Double, gain: Double) {
         self.center = center

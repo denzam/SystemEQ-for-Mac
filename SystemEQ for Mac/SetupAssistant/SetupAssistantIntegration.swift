@@ -96,7 +96,7 @@ struct SetupAssistantButton: View {
     @EnvironmentObject var localization: LocalizationManager
 
     var body: some View {
-        Button("Run Setup Assistant") {
+        Button(localization.localized(.runSetupAssistant)) {
             showSetup = true
         }
         .sheet(isPresented: $showSetup) {
@@ -125,7 +125,7 @@ struct QuickSetupBanner: View {
                         Text(localization.localized(.setupRequired))
                             .font(.headline)
                         Text(localization.localized(.blackHoleNotInstalledShort))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
 
@@ -190,259 +190,14 @@ class LaunchAtLoginManager: ObservableObject {
     }
 }
 
-// MARK: - Quit Prevention Manager
-
-class QuitPreventionManager: NSObject, NSApplicationDelegate {
-    static let shared = QuitPreventionManager()
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Check if EQ is active
-        if CoreAudioEngine.shared.isRunning {
-            DispatchQueue.main.async {
-                self.showQuitWarning()
-            }
-            return .terminateCancel
-        }
-
-        return .terminateNow
-    }
-
-    private func showQuitWarning() {
-        let alert = NSAlert()
-        alert.messageText = "EQ is Currently Active"
-        alert.informativeText = """
-        Closing SystemEQ will stop audio processing.
-
-        If System Output is still set to BlackHole, you won't hear any audio.
-
-        What would you like to do?
-        """
-        alert.alertStyle = .warning
-
-        alert.addButton(withTitle: "Disable EQ & Quit")
-        alert.addButton(withTitle: "Minimize to Menu Bar")
-        alert.addButton(withTitle: "Cancel")
-
-        let response = alert.runModal()
-
-        switch response {
-        case .alertFirstButtonReturn:
-            // Disable EQ and restore output
-            AudioRouter.shared.disableEQRouting()
-            NSApplication.shared.terminate(nil)
-
-        case .alertSecondButtonReturn:
-            // Hide window but keep running
-            NSApplication.shared.hide(nil)
-
-        default:
-            // Cancel - do nothing
-            break
-        }
-    }
-}
-
-// MARK: - System Health Monitor
-
-class SystemHealthMonitor: ObservableObject {
-    @Published var blackHoleStatus: HealthStatus = .unknown
-    @Published var systemOutputStatus: HealthStatus = .unknown
-    @Published var audioEngineStatus: HealthStatus = .unknown
-    @Published var lastCheckTime: Date?
-
-    enum HealthStatus: Equatable {
-        case unknown
-        case healthy
-        case warning(String)
-        case error(String)
-
-        var icon: String {
-            switch self {
-            case .unknown: "questionmark.circle"
-            case .healthy: "checkmark.circle.fill"
-            case .warning: "exclamationmark.triangle.fill"
-            case .error: "xmark.circle.fill"
-            }
-        }
-
-        var color: Color {
-            switch self {
-            case .unknown: .gray
-            case .healthy: .green
-            case .warning: .orange
-            case .error: .red
-            }
-        }
-
-        var message: String {
-            switch self {
-            case .unknown: "Unknown"
-            case .healthy: "OK"
-            case let .warning(msg): msg
-            case let .error(msg): msg
-            }
-        }
-    }
-
-    static let shared = SystemHealthMonitor()
-
-    private init() {
-        // Start periodic health checks
-        startPeriodicChecks()
-    }
-
-    func performHealthCheck() {
-        Task {
-            // Check BlackHole
-            if !AudioRouter.shared.blackHoleDetected {
-                blackHoleStatus = .error("BlackHole not installed")
-            } else {
-                blackHoleStatus = .healthy
-            }
-
-            // Check System Output
-            if CoreAudioEngine.shared.isRunning {
-                if let currentOutput = await AudioRouter.shared.getCurrentSystemOutput() {
-                    if currentOutput.name.lowercased().contains("blackhole") {
-                        systemOutputStatus = .healthy
-                    } else {
-                        systemOutputStatus = .warning("System Output is '\(currentOutput.name)'")
-                    }
-                } else {
-                    systemOutputStatus = .error("Cannot detect System Output")
-                }
-            } else {
-                systemOutputStatus = .unknown
-            }
-
-            if CoreAudioEngine.shared.isRunning {
-                if CoreAudioEngine.shared.inputPeakLevel > 0.001 {
-                    audioEngineStatus = .healthy
-                } else {
-                    audioEngineStatus = .warning("No audio detected (play something)")
-                }
-            } else {
-                audioEngineStatus = .unknown
-            }
-
-            lastCheckTime = Date()
-        }
-    }
-
-    private func startPeriodicChecks() {
-        // Check every 5 seconds
-        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.performHealthCheck()
-            }
-        }
-    }
-}
-
-// MARK: - Diagnostics View
-
-struct DiagnosticsView: View {
-    @StateObject private var healthMonitor = SystemHealthMonitor.shared
-    @ObservedObject private var localization = LocalizationManager.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(localization.localized(.systemDiagnostics))
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            if let lastCheck = healthMonitor.lastCheckTime {
-                Text(lastCheck, style: .relative) + Text(" ") + Text(localization.localized(.ago))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Divider()
-
-            VStack(spacing: 12) {
-                HealthStatusRow(
-                    title: localization.localized(.blackHoleInstallation),
-                    status: healthMonitor.blackHoleStatus
-                )
-
-                HealthStatusRow(
-                    title: "System Output",
-                    status: healthMonitor.systemOutputStatus
-                )
-
-                HealthStatusRow(
-                    title: "Audio Engine",
-                    status: healthMonitor.audioEngineStatus
-                )
-            }
-
-            Divider()
-
-            HStack {
-                Button("Refresh") {
-                    healthMonitor.performHealthCheck()
-                }
-
-                Button("Run Setup Assistant") {
-                    Task { @MainActor in
-                        SetupAssistantCoordinator.shared.startSetup()
-                    }
-                }
-
-                Spacer()
-
-                Button("View Logs") {
-                    openConsoleApp()
-                }
-            }
-        }
-        .padding()
-        .frame(width: 400)
-        .onAppear {
-            healthMonitor.performHealthCheck()
-        }
-    }
-
-    private func openConsoleApp() {
-        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")
-        NSWorkspace.shared.open(url)
-    }
-}
-
-struct HealthStatusRow: View {
-    let title: String
-    let status: SystemHealthMonitor.HealthStatus
-
-    var body: some View {
-        HStack {
-            Image(systemName: status.icon)
-                .foregroundColor(status.color)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .fontWeight(.medium)
-                Text(status.message)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
-    }
-}
-
 // MARK: - Enhanced Settings View Integration
 
 struct LaunchAtLoginToggle: View {
     @StateObject private var launchManager = LaunchAtLoginManager()
+    @ObservedObject private var localization = LocalizationManager.shared
 
     var body: some View {
-        Toggle("Launch at Login", isOn: $launchManager.isEnabled)
-            .help("Automatically start SystemEQ when you log in")
+        Toggle(localization.localized(.launchAtLogin), isOn: $launchManager.isEnabled)
+            .help(localization.localized(.launchAtLoginHelp))
     }
 }

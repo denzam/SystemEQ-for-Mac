@@ -80,25 +80,19 @@ class GlassDesignManager: ObservableObject {
 
     @Published var style: GlassStyle {
         didSet {
-            DispatchQueue.main.async {
-                UserDefaults.standard.set(self.style.rawValue, forKey: "glassStyle")
-            }
+            UserDefaults.standard.set(style.rawValue, forKey: "glassStyle")
         }
     }
 
     @Published var customOpacity: Double {
         didSet {
-            DispatchQueue.main.async {
-                UserDefaults.standard.set(self.customOpacity, forKey: "glassCustomOpacity")
-            }
+            UserDefaults.standard.set(customOpacity, forKey: "glassCustomOpacity")
         }
     }
 
     @Published var useCustomOpacity: Bool {
         didSet {
-            DispatchQueue.main.async {
-                UserDefaults.standard.set(self.useCustomOpacity, forKey: "glassUseCustomOpacity")
-            }
+            UserDefaults.standard.set(useCustomOpacity, forKey: "glassUseCustomOpacity")
         }
     }
 
@@ -171,16 +165,16 @@ enum AppTypography {
     // Body
     static let bodyLarge = Font.system(size: 15, weight: .regular)
     static let body = Font.system(size: 13, weight: .regular)
-    static let bodySmall = Font.system(size: 12, weight: .regular)
+    static let bodySmall = Font.system(size: 15, weight: .regular)
 
     // Labels
-    static let label = Font.system(size: 11, weight: .medium)
-    static let labelSmall = Font.system(size: 10, weight: .medium)
+    static let label = Font.system(size: 14, weight: .medium)
+    static let labelSmall = Font.system(size: 13, weight: .medium)
 
     // Monospace (для значень dB, Hz)
     static let monoLarge = Font.system(size: 15, weight: .regular, design: .monospaced)
     static let mono = Font.system(size: 13, weight: .regular, design: .monospaced)
-    static let monoSmall = Font.system(size: 11, weight: .regular, design: .monospaced)
+    static let monoSmall = Font.system(size: 14, weight: .regular, design: .monospaced)
 }
 
 // MARK: - Spacing
@@ -287,7 +281,7 @@ struct GlassCard<Content: View>: View {
     let content: Content
     let padding: CGFloat
     let topCornersOnly: Bool
-    @ObservedObject private var glassManager = GlassDesignManager.shared
+    private let radius: CGFloat = 12
 
     init(padding: CGFloat = AppSpacing.lg, topCornersOnly: Bool = false, @ViewBuilder content: () -> Content) {
         self.padding = padding
@@ -297,96 +291,44 @@ struct GlassCard<Content: View>: View {
 
     private var cornerShape: UnevenRoundedRectangle {
         if topCornersOnly {
-            // No top corners (for windows with title bar), rounded bottom
             UnevenRoundedRectangle(
                 topLeadingRadius: 0,
-                bottomLeadingRadius: glassManager.style.cornerRadius,
-                bottomTrailingRadius: glassManager.style.cornerRadius,
+                bottomLeadingRadius: radius,
+                bottomTrailingRadius: radius,
                 topTrailingRadius: 0
             )
         } else {
-            // All corners rounded equally
             UnevenRoundedRectangle(
-                topLeadingRadius: glassManager.style.cornerRadius,
-                bottomLeadingRadius: glassManager.style.cornerRadius,
-                bottomTrailingRadius: glassManager.style.cornerRadius,
-                topTrailingRadius: glassManager.style.cornerRadius
+                topLeadingRadius: radius,
+                bottomLeadingRadius: radius,
+                bottomTrailingRadius: radius,
+                topTrailingRadius: radius
             )
         }
     }
+
+    @AppStorage("useGlassEffect") private var useGlassEffect = true
 
     var body: some View {
         ZStack {
-            // Background material for the "frost" effect
-            cornerShape
-                .fill(.clear)
-                .background(glassManager.style.material, in: cornerShape)
-
-            // Custom color overlay with dynamic opacity
-            cornerShape
-                .fill(glassBackgroundColor)
-
-            // Optional gradient overlay for medium/strong styles
-            if glassManager.style.hasGradient {
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.15),
-                        Color.white.opacity(0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(cornerShape)
+            if useGlassEffect {
+                VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+                    .clipShape(cornerShape)
+                cornerShape
+                    .fill(Color.white.opacity(0.04))
+            } else {
+                cornerShape
+                    .fill(Color(nsColor: .windowBackgroundColor))
             }
 
-            // The actual content
             content
                 .padding(padding)
         }
-        .compositingGroup()
         .overlay(
             cornerShape
-                .strokeBorder(borderGradient, lineWidth: 1)
+                .strokeBorder(useGlassEffect ? Color.white.opacity(0.12) : Color.white.opacity(0.06), lineWidth: 1)
         )
-        .shadow(
-            color: .black.opacity(0.15),
-            radius: glassManager.style.shadowRadius,
-            x: 0,
-            y: glassManager.style.shadowRadius / 3
-        )
-    }
-
-    private var glassBackgroundColor: Color {
-        if glassManager.style == .defaultStyle {
-            return AppSpecialEffects.glassBackground
-        }
-
-        let baseColor = if #available(macOS 14.0, *) {
-            Color(nsColor: .controlBackgroundColor)
-        } else {
-            Color(nsColor: .windowBackgroundColor)
-        }
-
-        return baseColor.opacity(glassManager.effectiveOpacity)
-    }
-
-    private var borderGradient: LinearGradient {
-        if glassManager.style.hasGradient {
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.3),
-                    Color.white.opacity(0.1)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            LinearGradient(
-                colors: [AppColors.border.opacity(0.5)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
+        .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 6)
     }
 }
 
@@ -470,17 +412,39 @@ struct AppDivider: View {
     }
 }
 
+// MARK: - Visual Effect Background (real macOS frosted glass)
+
+struct VisualEffectBackground: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .sidebar
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        view.wantsLayer = true
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blendingMode
+    }
+}
+
 // MARK: - Window Container
 
 struct WindowContainer<Content: View>: View {
     @ViewBuilder let content: Content
+    @AppStorage("useGlassEffect") private var useGlassEffect = true
 
     var body: some View {
         VStack(spacing: 0) {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.background)
+        .background(useGlassEffect ? AnyView(VisualEffectBackground()) : AnyView(Color(nsColor: .windowBackgroundColor)))
     }
 }
 
@@ -681,7 +645,7 @@ struct FeatureButton: View {
 
                 // Arrow
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppColors.secondary)
             }
             .padding(AppSpacing.md)

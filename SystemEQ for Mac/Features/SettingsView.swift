@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
-    @ObservedObject private var glassManager = GlassDesignManager.shared
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
@@ -41,7 +40,6 @@ struct SettingsView: View {
                 linksSection
             }
         }
-        .id(localization.currentLanguage)
     }
 
     // MARK: - Language Section
@@ -65,16 +63,14 @@ struct SettingsView: View {
             }
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     private func languageCard(_ language: AppLanguage) -> some View {
         Button(action: {
-            withAnimation {
-                localization.currentLanguage = language
-            }
+            localization.setLanguage(language)
         }) {
             VStack(spacing: 12) {
                 Text(language.flag)
@@ -120,111 +116,30 @@ struct SettingsView: View {
 
     // MARK: - Glass Design Section
 
+    @AppStorage("useGlassEffect") private var useGlassEffect = true
+
     private var glassDesignSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Glass Design")
-                .font(AppTypography.heading2)
-                .padding(.horizontal, 4)
-
-            Text("Customize the appearance of glass UI elements")
-                .font(AppTypography.bodySmall)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 12) {
-                // Style Picker
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Style")
+        Toggle(isOn: $useGlassEffect) {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 20))
+                    .foregroundColor(.blue)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(localization.localized(.glassDesignTitle))
                         .font(AppTypography.body)
                         .foregroundColor(.primary)
-
-                    Picker("", selection: $glassManager.style) {
-                        ForEach(GlassStyle.allCases) { style in
-                            Text(style.displayName).tag(style)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                // Custom Opacity Toggle
-                Toggle(isOn: $glassManager.useCustomOpacity) {
-                    HStack {
-                        Image(systemName: "slider.horizontal.3")
-                            .foregroundColor(.purple)
-                            .frame(width: 24)
-                        Text("Custom Opacity")
-                    }
-                }
-                .toggleStyle(SwitchToggleStyle(tint: .blue))
-                .padding(.vertical, 8)
-
-                // Opacity Slider (shown only when custom opacity is enabled)
-                if glassManager.useCustomOpacity {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Opacity")
-                                .font(AppTypography.body)
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Text("\(Int(glassManager.customOpacity * 100))%")
-                                .font(AppTypography.mono)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Slider(value: $glassManager.customOpacity, in: 0.3...0.95, step: 0.05)
-                            .accentColor(.blue)
-                    }
-                    .padding(.vertical, 8)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                // Preview Card
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Preview")
+                    Text(localization.localized(.glassDesignDesc))
                         .font(AppTypography.bodySmall)
                         .foregroundColor(.secondary)
-
-                    ZStack {
-                        // Background pattern to show transparency
-                        HStack(spacing: 0) {
-                            ForEach(0..<4) { _ in
-                                VStack(spacing: 0) {
-                                    ForEach(0..<2) { _ in
-                                        Rectangle()
-                                            .fill(Color.gray.opacity(0.2))
-                                            .frame(width: 20, height: 20)
-                                        Rectangle()
-                                            .fill(Color.gray.opacity(0.1))
-                                            .frame(width: 20, height: 20)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(height: 80)
-                        .cornerRadius(8)
-
-                        // Glass preview
-                        GlassCard(padding: 12) {
-                            HStack {
-                                Image(systemName: "sparkles")
-                                    .foregroundColor(.blue)
-                                Text("Glass Effect Preview")
-                                    .font(AppTypography.body)
-                            }
-                        }
-                        .frame(height: 60)
-                    }
-                    .frame(height: 80)
                 }
             }
-            .padding(16)
-            .background(Color(NSColor.textBackgroundColor).opacity(0.05))
-            .cornerRadius(8)
         }
+        .toggleStyle(SwitchToggleStyle(tint: .blue))
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     // MARK: - EQ Startup Section
@@ -248,9 +163,9 @@ struct SettingsView: View {
             }
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     private func startupModeCard(_ mode: EQStartupMode) -> some View {
@@ -337,9 +252,9 @@ struct SettingsView: View {
             .cornerRadius(8)
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     // MARK: - Database Section
@@ -474,9 +389,9 @@ struct SettingsView: View {
             }
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     private func checkForDatabaseUpdates() {
@@ -542,9 +457,9 @@ struct SettingsView: View {
             }
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     // MARK: - Links Section
@@ -573,39 +488,48 @@ struct SettingsView: View {
                     icon: "chevron.right",
                     url: AppConstants.URLs.blackHoleReleases
                 )
+
+                linkButton(
+                    title: localization.localized(.linkBuyMeACoffee),
+                    icon: "cup.and.saucer.fill",
+                    url: AppConstants.URLs.buyMeACoffee
+                )
             }
         }
         .padding(AppSpacing.xl)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     private func linkButton(title: String, icon: String, url: String) -> some View {
-        Button(action: {
-            if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
+        HStack(spacing: 0) {
+            Button(action: {
+                if let url = URL(string: url) {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                HStack(alignment: .center, spacing: 6) {
+                    Text(title)
+                        .font(AppTypography.body)
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 16, height: 16)
+                }
+                .padding(AppSpacing.md)
+                .background(Color(NSColor.textBackgroundColor).opacity(0.05))
+                .cornerRadius(AppRadius.md)
             }
-        }) {
-            HStack {
-                Text(title)
-                    .font(AppTypography.body)
-                Spacer()
-                Image(systemName: icon)
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(.secondary)
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
             }
-            .padding(AppSpacing.md)
-            .background(Color(NSColor.textBackgroundColor).opacity(0.05))
-            .cornerRadius(AppRadius.md)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            if hovering {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
+            Spacer()
         }
     }
 

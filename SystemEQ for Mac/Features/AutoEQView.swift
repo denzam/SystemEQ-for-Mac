@@ -18,12 +18,7 @@ struct AutoEQView: View {
     enum BandMode: String, CaseIterable, Identifiable { case ten = "10", thirtyOne = "31"; var id: String {
         rawValue
     } }
-    enum DisplayMode: String, CaseIterable,
-        Identifiable { case bars = "Bars", curve = "Curve"; var id: String {
-        rawValue
-    } }
-
-    private static let indexVersion = 5 // Increment when path logic changes
+private static let indexVersion = 5 // Increment when path logic changes
     private static let indexUpdateInterval: TimeInterval = 30 * 24 * 3600 // 30 днів (1 місяць)
 
     // MARK: - Localization
@@ -65,7 +60,6 @@ struct AutoEQView: View {
     @State private var parsed10: [ParsedBand] = []
     @State private var parsed31: [ParsedBand] = []
     @State private var bandMode: BandMode = .ten
-    @State private var displayMode: DisplayMode = .curve
     @State private var mapped: [MappedBand] = []
     @State private var searchText: String = ""
     @State private var isSearching: Bool = false
@@ -100,6 +94,8 @@ struct AutoEQView: View {
     @State private var activeRequests: Set<String> = []
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var applyEQDebounceTask: Task<Void, Never>? // Debounce для applyToAudioEngine
+    @State private var draggingBandIndex: Int?
+    @State private var hoveredBandIndex: Int?
 
     /// ✅ Import cache: prevents re-importing same preset and getting different values
     struct ImportCacheEntry {
@@ -171,8 +167,7 @@ struct AutoEQView: View {
         FeatureWindowContainer(
             title: .autoEQTitle,
             subtitle: .featureAutoEQSubtitle,
-            windowSize: .large,
-            hasScrollView: false
+            windowSize: .large
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 // MARK: - Active Preset Info
@@ -271,16 +266,17 @@ struct AutoEQView: View {
 
                 if !favorites.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
+                        HStack(spacing: 8) {
                             Text(localization.localized(.autoEQFavoritesTitle))
                                 .font(AppTypography.heading2)
-                            Spacer()
                             Button(showFavorites ? localization.localized(.autoEQHide) : localization
                                 .localized(.autoEQShow)) {
                                     showFavorites.toggle()
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                                 .font(AppTypography.bodySmall)
+                            Spacer()
                         }
 
                         if showFavorites {
@@ -366,18 +362,11 @@ struct AutoEQView: View {
                     Text(showingBandLabel)
                         .foregroundStyle(.secondary)
 
-                    Picker(localization.localized(.autoEQView), selection: $displayMode) {
-                        Text(localization.localized(.autoEQBars)).tag(DisplayMode.bars)
-                        Text(localization.localized(.autoEQCurve)).tag(DisplayMode.curve)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 200)
-
-                    if displayMode == .bars {
-                        barsBody()
-                    } else {
-                        curveBody()
-                    }
+                    EQGraphView(
+                        bands: mappedAsEQBands,
+                        gainBinding: { id in mappedGainBinding(id: id) }
+                    )
+                    .frame(height: 300)
                     if let p = preampDB {
                         Text(String(format: "%@: %+.1f dB", localization.localized(.autoEQPreamp), p))
                             .font(AppTypography.mono)
@@ -757,85 +746,224 @@ struct AutoEQView: View {
         }
     }
 
+    private func formatFrequency(_ hz: Double) -> String {
+        if hz >= 1000 {
+            let k = hz / 1000.0
+            return k == k.rounded() ? String(format: "%.0fk", k) : String(format: "%.1fk", k)
+        }
+        return String(format: "%.0f", hz)
+    }
+
+    private var mappedAsEQBands: [EQBand] {
+        mapped.enumerated().map { index, mb in
+            let bassBoost = bassBoostForFrequency(mb.center)
+            let total = min(max(mb.gain + bassBoost, -20), 20)
+            return EQBand(id: index, frequency: Float(mb.center), gain: Float(total))
+        }
+    }
+
+    private func mappedGainBinding(id: Int) -> Binding<Float> {
+        Binding(
+            get: {
+                guard id < mapped.count else { return 0 }
+                let mb = mapped[id]
+                let total = mb.gain + bassBoostForFrequency(mb.center)
+                return Float(min(max(total, -20), 20))
+            },
+            set: { newValue in
+                guard id < mapped.count else { return }
+                let bassBoost = bassBoostForFrequency(mapped[id].center)
+                let rawGain = Double(newValue) - bassBoost
+                let clamped = min(max(rawGain, -12), 12)
+                let stepped = (clamped / 0.5).rounded() * 0.5
+                if mapped[id].gain != stepped {
+                    mapped[id].gain = stepped
+                    scheduleLiveApply()
+                }
+            }
+        )
+    }
+
     private func barsBody() -> some View {
         GeometryReader { geo in
-            let maxH = max(200.0, geo.size.height - 40)
-            // Тонші bars для 31 смуги - без горизонтального скролу
-            let barWidth: CGFloat = bandMode == .thirtyOne ? 6 : 12
-            let spacing: CGFloat = bandMode == .thirtyOne ? 4 : 8
+            let labelHeight: CGFloat = bandMode == .thirtyOne ? 28 : 18
+            let dbAxisWidth: CGFloat = 32
+            let topReserve: CGFloat = 18
+            let maxH = max(160.0, geo.size.height - labelHeight - topReserve - 8)
+            let bandCount = CGFloat(mapped.isEmpty ? (bandMode == .thirtyOne ? 31 : 10) : mapped.count)
+            let availableWidth = geo.size.width - dbAxisWidth - 6
+            let minSpacing: CGFloat = bandMode == .thirtyOne ? 3 : 5
+            let minBarWidth: CGFloat = bandMode == .thirtyOne ? 8 : 14
+            let spacing: CGFloat = max(minSpacing, min(10, (availableWidth - bandCount * minBarWidth) / max(1, bandCount - 1)))
+            let hitWidth: CGFloat = max(minBarWidth, (availableWidth - spacing * (bandCount - 1)) / bandCount)
+            let barWidth: CGFloat = bandMode == .thirtyOne ? max(hitWidth * 0.65, hitWidth - 4) : 14
+            let gridDbs: [Int] = [12, 6, 0, -6, -12]
 
-            HStack(alignment: .bottom, spacing: spacing) {
-                ForEach(mapped) { mb in
-                    let bassBoostValue = bassBoostForFrequency(mb.center)
-                    let totalGain = mb.gain + bassBoostValue
-
-                    VStack(spacing: 0) {
-                        // Spacer займає весь простір зверху, текст завжди внизу
-                        Spacer(minLength: 0)
-
-                        Rectangle()
-                            .fill(.tint)
-                            .frame(width: barWidth, height: CGFloat((min(max(totalGain, -12), 12) + 12) / 24) * maxH)
-                        // ⚡ REMOVED: Double animation was causing 62 simultaneous animations (31 bands * 2)
-
-                        Text(String(format: "%.0f", mb.center))
-                            .font(bandMode == .thirtyOne ? Font.system(size: 8) : AppTypography.labelSmall)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .rotationEffect(.degrees(bandMode == .thirtyOne ? -45 : 0))
+            HStack(alignment: .top, spacing: 6) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: topReserve)
+                    ZStack {
+                        ForEach(gridDbs, id: \.self) { db in
+                            let y = CGFloat(12 - db) / 24.0 * maxH
+                            Text(db > 0 ? "+\(db)" : "\(db)")
+                                .font(.system(size: 16, weight: db == 0 ? .semibold : .regular).monospacedDigit())
+                                .foregroundStyle(db == 0 ? Color.primary.opacity(0.85) : .secondary)
+                                .frame(width: dbAxisWidth - 4, alignment: .trailing)
+                                .position(x: (dbAxisWidth - 4) / 2, y: y)
+                        }
                     }
-                    .frame(height: maxH + 30) // Фіксована висота для кожного стовпчика
+                    .frame(width: dbAxisWidth - 4, height: maxH)
+                    Spacer().frame(height: labelHeight + 4)
+                }
+
+                ZStack(alignment: .top) {
+                    VStack(spacing: 0) {
+                        Spacer().frame(height: topReserve)
+                        ZStack(alignment: .top) {
+                            ForEach(gridDbs, id: \.self) { db in
+                                let y = CGFloat(12 - db) / 24.0 * maxH
+                                Rectangle()
+                                    .fill(db == 0 ? Color.secondary.opacity(0.55) : Color.secondary.opacity(0.12))
+                                    .frame(height: db == 0 ? 1 : 0.5)
+                                    .offset(y: y)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: maxH, alignment: .top)
+                        Spacer().frame(height: labelHeight + 4)
+                    }
+
+                    HStack(alignment: .top, spacing: spacing) {
+                        ForEach(Array(mapped.enumerated()), id: \.element.id) { index, mb in
+                            bandColumn(
+                                index: index,
+                                mb: mb,
+                                maxH: maxH,
+                                barWidth: barWidth,
+                                hitWidth: hitWidth,
+                                labelHeight: labelHeight,
+                                topReserve: topReserve
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
             .frame(maxWidth: .infinity)
         }
-        .frame(height: 200)
+        .frame(height: 300)
     }
 
-    private func curveBody() -> some View {
-        GeometryReader { _ in
-            Canvas { context, size in
-                let w = size.width
-                let h = size.height
-                let minDb: Double = -12
-                let maxDb: Double = 12
-                let minF = (bandMode == .ten) ? (tenCenters.first ?? 31.5) : (thirtyOneCenters.first ?? 20.0)
-                let maxF = (bandMode == .ten) ? (tenCenters.last ?? 16000.0) : (thirtyOneCenters.last ?? 20000.0)
-                let minL = log10(minF)
-                let maxL = log10(maxF)
+    @ViewBuilder
+    private func bandColumn(
+        index: Int,
+        mb: MappedBand,
+        maxH: CGFloat,
+        barWidth: CGFloat,
+        hitWidth: CGFloat,
+        labelHeight: CGFloat,
+        topReserve: CGFloat
+    ) -> some View {
+        let bassBoostValue = bassBoostForFrequency(mb.center)
+        let totalGain = mb.gain + bassBoostValue
+        let clampedTotal = min(max(totalGain, -12), 12)
+        let zeroY = maxH / 2
+        let barHeight = CGFloat(abs(clampedTotal) / 24) * maxH
+        let barTop = clampedTotal >= 0 ? zeroY - barHeight : zeroY
+        let thumbY = clampedTotal >= 0 ? zeroY - barHeight : zeroY + barHeight
+        let isActive = draggingBandIndex == index
+        let isHovered = hoveredBandIndex == index
+        let thumbSize: CGFloat = bandMode == .thirtyOne ? 12 : 14
+        let showReadout = isActive || isHovered
 
-                var gridPath = Path()
-                for db in stride(from: -12, through: 12, by: 3) {
-                    let y = h * CGFloat((maxDb - Double(db)) / (maxDb - minDb))
-                    gridPath.move(to: CGPoint(x: 0, y: y))
-                    gridPath.addLine(to: CGPoint(x: w, y: y))
-                }
-                context.stroke(gridPath, with: .color(.secondary.opacity(0.2)), lineWidth: 1)
+        VStack(spacing: 0) {
+            Text(String(format: "%+.1f dB", mb.gain))
+                .font(.system(size: 16, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white)
+                .fixedSize()
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.black.opacity(0.7))
+                )
+                .opacity(showReadout ? 1 : 0)
+                .frame(height: topReserve)
+                .zIndex(10)
 
-                var curve = Path()
-                var isFirst = true
-                for mb in mapped {
-                    let f = max(min(mb.center, maxF), minF)
-                    let l = log10(f)
-                    let x = w * CGFloat((l - minL) / (maxL - minL))
-                    let bassBoostValue = bassBoostForFrequency(mb.center)
-                    let g = min(max(mb.gain + bassBoostValue, -12), 12)
-                    let y = h * CGFloat((maxDb - g) / (maxDb - minDb))
-                    if isFirst {
-                        curve.move(to: CGPoint(x: x, y: y))
-                        isFirst = false
-                    } else {
-                        curve.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                context.stroke(curve, with: .color(.accentColor), lineWidth: 2)
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(Color.accentColor.opacity(isActive ? 1.0 : (isHovered ? 0.95 : 0.85)))
+                    .frame(width: barWidth, height: barHeight)
+                    .offset(y: barTop)
+
+                Circle()
+                    .fill(Color.white.opacity(isActive ? 0.45 : (isHovered ? 0.95 : 0.85)))
+                    .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .offset(y: thumbY - thumbSize / 2)
+                    .animation(.easeOut(duration: 0.1), value: isActive)
+                    .animation(.easeOut(duration: 0.1), value: isHovered)
+            }
+            .frame(width: hitWidth, height: maxH, alignment: .top)
+
+            Text(formatFrequency(mb.center))
+                .font(bandMode == .thirtyOne ? Font.system(size: 16) : AppTypography.labelSmall)
+                .foregroundStyle(isHovered || isActive ? .primary : .secondary)
+                .fontWeight(isHovered || isActive ? .semibold : .regular)
+                .fixedSize()
+                .padding(.top, 4)
+                .rotationEffect(.degrees(bandMode == .thirtyOne ? -45 : 0))
+                .frame(height: labelHeight)
+        }
+        .frame(width: hitWidth, height: topReserve + maxH + labelHeight + 4)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                hoveredBandIndex = index
+            } else if hoveredBandIndex == index {
+                hoveredBandIndex = nil
             }
         }
-        .frame(height: 200)
+        .gesture(bandDragGesture(index: index, maxH: maxH, topReserve: topReserve))
     }
 
-    // MARK: - Search helpers
+    private func bandDragGesture(index: Int, maxH: CGFloat, topReserve: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard index < mapped.count else { return }
+                if draggingBandIndex != index { draggingBandIndex = index }
+                let yInBar = value.location.y - topReserve
+                let zeroY = maxH / 2
+                let offsetFromZero = zeroY - yInBar
+                let bassBoostValue = bassBoostForFrequency(mapped[index].center)
+                let rawTotal = Double(offsetFromZero / maxH) * 24.0
+                let rawGain = rawTotal - bassBoostValue
+                let clamped = min(max(rawGain, -12), 12)
+                let stepped = (clamped / 0.5).rounded() * 0.5
+                if mapped[index].gain != stepped {
+                    mapped[index].gain = stepped
+                    scheduleLiveApply()
+                }
+            }
+            .onEnded { _ in
+                draggingBandIndex = nil
+            }
+    }
+
+    private func scheduleLiveApply() {
+        applyEQDebounceTask?.cancel()
+        applyEQDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                applyToAudioEngine()
+            }
+        }
+    }
+
+// MARK: - Search helpers
 
     private var normalizedQuery: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1254,17 +1382,69 @@ struct AutoEQView: View {
 
     private func mappedBands() -> [MappedBand] {
         let centers = (bandMode == .ten) ? tenCenters : thirtyOneCenters
-        var buckets: [[Double]] = Array(repeating: [], count: centers.count)
+        let sampleRate: Double = 48000
 
-        for b in parsed {
-            let idx = nearestCenterIndex(for: b.freq, centers: centers)
-            buckets[idx].append(b.gain)
+        return centers.map { c in
+            let total = parsed.reduce(0.0) { acc, b in
+                acc + Self.biquadGainDB(at: c, filter: b, sampleRate: sampleRate)
+            }
+            return MappedBand(center: c, gain: total)
+        }
+    }
+
+    private static func biquadGainDB(at freq: Double, filter b: ParsedBand, sampleRate: Double) -> Double {
+        let f0 = b.freq
+        let gain = b.gain
+        let q = max(b.q, 0.001)
+        let A = pow(10.0, gain / 40.0)
+        let w0 = 2.0 * .pi * f0 / sampleRate
+        let alpha = sin(w0) / (2.0 * q)
+        let cosW0 = cos(w0)
+
+        var b0 = 1.0, b1 = 0.0, b2 = 0.0
+        var a0 = 1.0, a1 = 0.0, a2 = 0.0
+
+        switch b.type {
+        case .peak, .allPassPEQ:
+            b0 = 1 + alpha * A
+            b1 = -2 * cosW0
+            b2 = 1 - alpha * A
+            a0 = 1 + alpha / A
+            a1 = -2 * cosW0
+            a2 = 1 - alpha / A
+        case .lowShelf:
+            let beta = sqrt(A) / q
+            b0 = A * ((A + 1) - (A - 1) * cosW0 + beta * sin(w0))
+            b1 = 2 * A * ((A - 1) - (A + 1) * cosW0)
+            b2 = A * ((A + 1) - (A - 1) * cosW0 - beta * sin(w0))
+            a0 = (A + 1) + (A - 1) * cosW0 + beta * sin(w0)
+            a1 = -2 * ((A - 1) + (A + 1) * cosW0)
+            a2 = (A + 1) + (A - 1) * cosW0 - beta * sin(w0)
+        case .highShelf:
+            let beta = sqrt(A) / q
+            b0 = A * ((A + 1) + (A - 1) * cosW0 + beta * sin(w0))
+            b1 = -2 * A * ((A - 1) + (A + 1) * cosW0)
+            b2 = A * ((A + 1) + (A - 1) * cosW0 - beta * sin(w0))
+            a0 = (A + 1) - (A - 1) * cosW0 + beta * sin(w0)
+            a1 = 2 * ((A - 1) - (A + 1) * cosW0)
+            a2 = (A + 1) - (A - 1) * cosW0 - beta * sin(w0)
+        default:
+            return 0
         }
 
-        return centers.enumerated().map { i, c in
-            let avg = buckets[i].isEmpty ? 0 : buckets[i].reduce(0, +) / Double(buckets[i].count)
-            return MappedBand(center: c, gain: avg)
-        }
+        let w = 2.0 * .pi * freq / sampleRate
+        let cosW = cos(w), cos2W = cos(2 * w)
+        let sinW = sin(w), sin2W = sin(2 * w)
+
+        let numRe = b0 + b1 * cosW + b2 * cos2W
+        let numIm = -(b1 * sinW + b2 * sin2W)
+        let denRe = a0 + a1 * cosW + a2 * cos2W
+        let denIm = -(a1 * sinW + a2 * sin2W)
+
+        let numMag = sqrt(numRe * numRe + numIm * numIm)
+        let denMag = sqrt(denRe * denRe + denIm * denIm)
+        guard denMag > 0 else { return 0 }
+        return 20.0 * log10(numMag / denMag)
     }
 
     private func nearestCenterIndex(for freq: Double, centers: [Double]) -> Int {
@@ -1310,15 +1490,14 @@ struct AutoEQView: View {
             eqValues.append(Float(totalGain))
         }
 
-        engine.applyEQValues(eqValues)
-
-        // Застосовуємо preamp якщо є
         if let preamp = preampDB {
-            engine.setPreampGain(Float(preamp))
+            engine.preampGain = Float(preamp)
         } else {
-            // Автоматичний preamp якщо не вказаний
-            engine.applyAutoPreamp()
+            let maxPositive = eqValues.max() ?? 0
+            engine.preampGain = maxPositive > 0 ? -maxPositive : 0
         }
+
+        engine.applyEQValues(eqValues)
 
         // ✅ CRITICAL: Save clean gains WITHOUT Bass Boost to avoid accumulation
         PresetPersistence.save(
@@ -1919,7 +2098,7 @@ extension AutoEQView {
                     .multilineTextAlignment(.center)
 
                 Text(localization.localized(.autoEQSetupDesc2))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -1932,7 +2111,7 @@ extension AutoEQView {
                         .progressViewStyle(.linear)
 
                     Text(autoEQInstallStatus)
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal)
@@ -1941,7 +2120,7 @@ extension AutoEQView {
             // Повідомлення про помилку
             if let error = autoEQInstallError {
                 Text(error)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.red)
                     .padding(.horizontal)
             }
@@ -1949,17 +2128,17 @@ extension AutoEQView {
             // Кнопки
             HStack(spacing: 12) {
                 if !isInstallingAutoEQ {
-                    Button("Ніколи не питати") {
+                    Button(localization.localized(.neverAsk)) {
                         UserDefaults.standard.set(true, forKey: "AutoEQSetupSkipped")
                         showAutoEQSetup = false
                     }
                     .keyboardShortcut(.cancelAction)
 
-                    Button("Пізніше") {
+                    Button(localization.localized(.later)) {
                         showAutoEQSetup = false
                     }
 
-                    Button("Встановити зараз") {
+                    Button(localization.localized(.installNow)) {
                         Task {
                             await startAutoEQInstallation()
                         }

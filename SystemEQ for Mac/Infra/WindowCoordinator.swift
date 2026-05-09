@@ -66,14 +66,14 @@ struct WindowAccessor: NSViewRepresentable {
 
         // Configure window for glass effect transparency
         window.isOpaque = false
-        window.backgroundColor = NSColor.windowBackgroundColor
+        window.backgroundColor = .clear
         window.hasShadow = true
 
         // Configure transparent title bar for all windows
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.styleMask.insert(.fullSizeContentView)
-        window.styleMask.insert(.resizable) // Required for fullscreen support
+        window.styleMask.insert(.resizable)
 
         // Enable fullscreen support - remove transient behavior
         window.collectionBehavior = [.fullScreenPrimary, .managed]

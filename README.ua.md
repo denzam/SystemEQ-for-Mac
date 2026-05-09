@@ -1,144 +1,231 @@
 # SystemEQ for Mac
 
-Системний еквалайзер для macOS з підтримкою пресетів AutoEQ та персоналізованої калібрації.
+Професійний системний еквалайзер для macOS 13+
 
-## Особливості
+[![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-- 🎛️ **10/31-смуговий еквалайзер** з реальним часом обробки
-- 🎧 **Інтеграція з AutoEQ** - 5000+ пресетів для навушників
-- 🔬 **Персоналізована калібрація** слуху
-- 🏠 **Калібрація кімнати** з аналізом резонансів
-- 📊 **Візуалізатор аудіо** з різними стилями
-- 🎛️ **Низька затримка** через Core Audio (5-10ms)
-- 💾 **SQLite база даних** для швидкого пошуку пресетів
+> 🇺🇦 Українська | 🇬🇧 [English](README.md) | 🇮🇹 [Italiano](README.it.md)
 
-## Системні вимоги
+## ✨ Можливості
+
+### Основні функції
+
+- **10/31-смуговий параметричний EQ** — Професійна обробка звуку з biquad-фільтрами
+- **База даних AutoEQ** — 8 665 моделей навушників, 8 850 пресетів (SQLite, 18 МБ)
+- **Візуалізація в реальному часі** — Спектр, Хвиля, Частинки, Психоделічний
+- **Модуль калібрації** — Тест слуху + власні профілі + порівняння A/B
+- **Інтеграція з BlackHole** — Системне маршрутизування аудіо з автоматичним Setup Assistant
+- **Управління пресетами** — Зберігай, завантажуй та організовуй налаштування EQ
+- **Багатомовність** — Англійська, Італійська, Українська
+
+### Аудіодвигун
+
+- **CoreAudioEngine** — Мала затримка (~5-10ms) через AudioUnit (AUHAL)
+- **vDSP Biquad-фільтри** — Фреймворк Accelerate, у 5-10× швидше за скалярний режим
+- **Пік-метри** — Моніторинг рівня звуку в реальному часі
+- **Захист від кліпінгу** — Автоматичне зменшення підсилення та контроль преампу
+- **Підтримка медіаклавіш** — Керування гучністю з клавіатури
+
+### Інтеграція з AutoEQ
+
+- **SQLite-база даних** — Миттєвий офлайн-пошук (<10ms)
+- **4-рівневий fallback** — Python-сервер → База → Локальні файли → GitHub
+- **ParametricEQ та GraphicEQ** — Повна підтримка форматів
+
+## 🚀 Швидкий старт
+
+### Вимоги
 
 - macOS 13.0 (Ventura) або новіша
 - Apple Silicon (M1/M2/M3) або Intel Mac
-- 4GB RAM (рекомендовано 8GB)
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (безкоштовний віртуальний аудіодрайвер)
+- 4 ГБ RAM (рекомендовано 8 ГБ)
 
-## Встановлення
+### Встановлення
 
-### Автоматичне (рекомендовано)
+#### Варіант 1: Завантажити DMG (рекомендовано)
 
-1. Завантажте останній реліз з [Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
-2. Відкрийте `.dmg` файл
-3. Перетягніть SystemEQ в Applications
-4. Запустіть додаток
+1. Завантаж останній реліз з [Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
+2. Відкрий `.dmg` файл
+3. Перетягни `SystemEQ for Mac.app` до Applications
+4. Перший запуск — права кнопка → Відкрити (попередження Gatekeeper — застосунок підписаний ad-hoc, не нотаризований)
+5. Слідуй **Setup Assistant** для встановлення BlackHole
 
-### Ручне збирання
+#### Варіант 2: Зібрати з вихідного коду
 
 ```bash
 git clone https://github.com/denyszamorniak/SystemEQ-for-Mac.git
 cd "SystemEQ for Mac"
 open "SystemEQ for Mac.xcodeproj"
-# Натисніть Cmd+R для збірки та запуску
+# Натисни Cmd+R для збірки та запуску
 ```
 
-## Швидкий старт
+### Налаштування
 
-1. **Встановіть BlackHole** (віртуальне аудіо пристрій):
-   - Завантажте з [BlackHole website](https://existential.audio/blackhole/)
-   - Встановіть 16-канальну версію
+1. **Встанови BlackHole** (автоматично через Setup Assistant):
+   - Завантаж з [сайту BlackHole](https://existential.audio/blackhole/)
+   - Встанови 2-канальну версію
+   - Перезапусти SystemEQ після встановлення
 
-2. **Налаштуйте аудіо маршрут**:
-   - Відкрийте SystemEQ
-   - Перейдіть в Routing → Configure Audio Devices
-   - Виберіть BlackHole як вхід, ваш DAC як вихід
-   - Увімкніть Multi-Output в системних налаштуваннях
+2. **Налаштуй маршрутизацію аудіо**:
+   - Відкрий SystemEQ → вкладка Routing
+   - Обери BlackHole як вхід, твої навушники/колонки як вихід
+   - Встанови системний вихід на BlackHole в macOS Sound Settings
 
-3. **Застосуйте пресет**:
-   - AutoEQ → Search headphones
-   - Введіть модель ваших навушників
-   - Натисніть "⚡ Quick Import"
+3. **Застосуй пресет EQ**:
+   - Вкладка AutoEQ → Пошук моделі навушників
+   - Натисни "⚡ Quick Import"
+   - Або вручну налаштуй смуги у вкладці Equalizer
 
-## Структура проекту
+## 🛠️ Архітектура
 
+```text
+Системний вихід → BlackHole 2ch
+                       ↓
+               CoreAudioEngine (вхід)
+                       ↓
+            vDSP Biquad EQ обробка
+                       ↓
+               CoreAudioEngine (вихід)
+                       ↓
+           Фізичні навушники/колонки
 ```
+
+**Multi-Output Device не потрібен.** CoreAudioEngine виступає мостом між BlackHole і фізичним виходом.
+
+### Технічні деталі
+
+- **CoreAudioEngine**: Низькорівневий AUHAL dual I/O, lock-free ring buffer
+- **BiquadFilterVDSP**: vDSP batch processing, у 5-10× швидше за скалярний
+- **SPSCRingBuffer**: Lock-free SPSC буфер з C11 атомарними операціями
+- **EQDatabase**: SQLite, 18 МБ, 8 665 моделей навушників
+
+## 📁 Структура проєкту
+
+```text
 SystemEQ for Mac/
-├── Audio/              # Core Audio обробка
+├── Audio/              # Обробка Core Audio
 │   ├── CoreAudioEngine.swift
-│   ├── BiquadFilter.swift
-│   └── CalibrationEngine.swift
-├── Data/               # Моделі даних та база даних
+│   ├── AudioRouter.swift
+│   ├── BiquadFilterVDSP.swift
+│   ├── CalibrationEngine.swift
+│   └── SPSCRingBuffer.swift
+├── Data/               # Моделі даних та база
 │   ├── EQDatabase.swift
-│   └── AutoEQModels.swift
-├── Features/           # UI компоненти
+│   ├── AutoEQModels.swift
+│   └── PresetPersistence.swift
+├── Features/           # UI-вікна
 │   ├── EqualizerView.swift
 │   ├── AutoEQView.swift
-│   └── CalibrationView.swift
-├── DesignSystem/       # Дизайн система
-└── Extensions/         # Розширення Swift
+│   ├── CalibrationView.swift
+│   ├── VisualizerView.swift
+│   └── RoutingView.swift
+├── DesignSystem/       # Дизайн-токени та компоненти
+├── Resources/          # Ресурси та база даних
+│   └── EQDatabase.db
+└── Docs/               # Документація
 ```
 
-## Використання
+## 🎯 Використання
 
 ### Еквалайзер
 
-- Використовуйте слайдери для налаштування частот
-- Перемикайтеся між 10 та 31 смугами
-- Зберігайте власні пресети
+- Регулюй частотні смуги слайдерами
+- Перемикайся між 10-смуговим і 31-смуговим режимом
+- Зберігай власні пресети для швидкого виклику
+- Застосовуй авто-преамп для захисту від кліпінгу
 
-### AutoEQ пресети
+### Пресети AutoEQ
 
-1. Пошукайте модель навушників
-2. Виберіть бажаний пресет (оригінальний або Harman)
-3. Імпортуйте налаштування
+1. Знайди модель своїх навушників (доступно 8 665)
+2. Обери пресет (oratory1990, Crinacle тощо)
+3. Натисни "⚡ Quick Import"
+4. За потреби скорегуй підсилення басів
 
-### Персоналізована калібрація
+### Калібрація
 
-1. Запустіть тест слуху
-2. Регулюйте гучність для кожної частоти
-3. Збережіть профіль для автоматичного застосування
+1. Запусти тест слуху (31 частота)
+2. Відрегулюй гучність для кожної частоти відносно еталону
+3. Збережи профіль для автоматичного застосування
+4. Використовуй порівняння A/B для оцінки профілів
 
-### Калібрація кімнати
+### Візуалізатор
 
-1. Розмістіть мікрофон у точці прослуховування
-2. Запустіть аналіз кімнати
-3. Застосуйте notch фільтри для резонансів
+- Обери один з 4 стилів: Spectrum, Waveform, Particles, Psychedelic
+- Налаштуй інтенсивність (0–100%)
+- FFT в реальному часі при 60 FPS
 
-## Технічні деталі
+## 🎚️ Сумісність з DAW (Reaper, Logic, Ableton та інші)
 
-### Архітектура
+SystemEQ обробляє **системний аудіовихід**. DAW зазвичай обходять системний вихід і звертаються напряму до аудіоінтерфейсу — тому EQ **не застосовується** за замовчуванням.
 
-- **CoreAudioEngine**: Низькорівнева обробка через AudioUnit
-- **BiquadFilterChain**: DSP ланцюг фільтрів з оптимізацією
-- **AudioEngine**: Facade для SwiftUI інтеграції
-- **EQDatabase**: SQLite для зберігання пресетів
+| Сценарій | EQ застосовується? |
+| --- | --- |
+| Spotify, YouTube, Apple Music | ✅ Так |
+| DAW → Системний вихід (ручне налаштування) | ✅ Так |
+| DAW → Аудіоінтерфейс напряму (типово) | ❌ Ні |
+| Моніторинг через Scarlett/Focusrite | ❌ Ні |
 
-### Оптимізація
+### Як використовувати SystemEQ разом з DAW
 
-- Використання vDSP для Apple Silicon
-- Direct Form II Transposed bіquad фільтри
-- Мінімальна затримка (~5-10ms)
-- Ефективне використання пам'яті
+1. У DAW встанови **вихідний пристрій на BlackHole 2ch**
+2. SystemEQ застосує EQ і передасть аудіо на фізичний вихід
+3. Щоб повернутися до прямого моніторингу — встанови вихід DAW назад на інтерфейс
 
-## Внесок
+**Reaper:** Options → Preferences → Audio → Device → BlackHole 2ch
 
-Запрошуємо до внеску! Будь ласка:
+**Logic:** Preferences → Audio → Output Device → BlackHole 2ch
 
-1. Fork проект
-2. Створіть feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit зміни (`git commit -m 'Add some AmazingFeature'`)
-4. Push до branch (`git push origin feature/AmazingFeature`)
-5. Відкрийте Pull Request
+**Ableton:** Preferences → Audio → Output Device → BlackHole 2ch
 
-## Ліцензія
+> Це додає ~10-20ms затримки порівняно з прямим моніторингом. Архітектурне обмеження BlackHole (системний драйвер). Майбутня версія як HAL Audio Plugin вирішила б цю проблему, але потребує платного Apple Developer акаунту.
 
-Цей проект ліцензовано під MIT License - дивіться [LICENSE](LICENSE) файл для деталей.
+## 📊 Статус проєкту
 
-## Подяка
+- ✅ Фаза 1: Core EQ + маршрутизація BlackHole
+- ✅ Фаза 2: Калібрація + Візуалізатор
+- ✅ Фаза 3: Інтеграція бази AutoEQ (8 665 моделей)
+- ⏭️ Фаза 4: HAL плагін (потребує платного Apple Developer акаунту)
+- ⏭️ Фаза 5: Liquid Glass візуальне оформлення
 
-- [AutoEQ](https://github.com/jaakkopasanen/AutoEq) за базу даних пресетів
-- [BlackHole](https://existential.audio/blackhole/) за віртуальний аудіо драйвер
-- [oratory1990](https://oratory1990.org/) за вимірювання навушників
+## ⚠️ Безпека
 
-## Зв'язок
+- Застосунок **не sandboxed** (несумісно з CoreAudio/AUHAL віртуальними пристроями)
+- **Без телеметрії, аналітики та збору даних** — всі дані залишаються на твоєму Mac
+- Встановлюй лише з офіційних [GitHub Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
+- Ad-hoc підпис — права кнопка → Відкрити при першому запуску для обходу Gatekeeper
 
-- GitHub: [@denyszamorniak](https://github.com/denyszamorniak)
-- Email: denys.zamorniak@gmail.com
+## 🤝 Внесок у проєкт
+
+1. Зроби fork проєкту
+2. Створи гілку для функції (`git checkout -b feature/AmazingFeature`)
+3. Збережи зміни (`git commit -m 'Add AmazingFeature'`)
+4. Надішли гілку (`git push origin feature/AmazingFeature`)
+5. Відкрий Pull Request
+
+## 📄 Ліцензія
+
+MIT License — Дивись [LICENSE](LICENSE) для деталей.
+
+## 🙏 Подяки
+
+- [AutoEQ](https://github.com/jaakkopasanen/AutoEq) від Jaakko Pasanen — база даних пресетів EQ
+- [BlackHole](https://github.com/ExistentialAudio/BlackHole) від Existential Audio — віртуальний аудіодрайвер
+- [oratory1990](https://www.reddit.com/r/oratory1990/) — вимірювання навушників та дослідження
+
+## 💖 Підтримати розробку
+
+- ☕ [Ko-fi](https://ko-fi.com/denyszamorniak)
+- 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denyszamorniak)
+- 💝 [GitHub Sponsors](https://github.com/sponsors/denyszamorniak)
+
+## 📧 Контакти
+
+- **GitHub**: [@denyszamorniak](https://github.com/denyszamorniak)
+- **Issues / Питання**: [GitHub Issues](https://github.com/denyszamorniak/SystemEQ-for-Mac/issues)
 
 ---
 
-**SystemEQ for Mac** - зроблено з ❤️ для аудіофілів
+Зроблено з ❤️ для аудіоспільноти

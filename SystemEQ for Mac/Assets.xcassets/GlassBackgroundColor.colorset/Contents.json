@@ -8,7 +8,7 @@
           "red" : "0xF2",
           "green" : "0xF2",
           "blue" : "0xF7",
-          "alpha" : "0.80"
+          "alpha" : "0.20"
         }
       }
     },
@@ -23,10 +23,10 @@
       "color" : {
         "color-space" : "srgb",
         "components" : {
-          "red" : "0x3C",
-          "green" : "0x3C",
-          "blue" : "0x3C",
-          "alpha" : "0.75"
+          "red" : "0xFF",
+          "green" : "0xFF",
+          "blue" : "0xFF",
+          "alpha" : "0.08"
         }
       }
     }

@@ -39,40 +39,21 @@ xcodebuild archive \
     -scheme "$SCHEME" \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
-    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=YES \
     -quiet
 
 echo "   ✅ Archive complete"
 
-# Step 2: Export .app
-echo "📤 [2/4] Exporting .app..."
+# Step 2: Export .app + ad-hoc sign
+echo "📤 [2/4] Exporting and signing .app..."
+mkdir -p "$EXPORT_PATH"
+cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_PATH/"
 
-# Create export options plist
-cat > "$BUILD_DIR/ExportOptions.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>method</key>
-    <string>developer-id</string>
-    <key>destination</key>
-    <string>export</string>
-</dict>
-</plist>
-PLIST
-
-# Try export, fallback to manual copy if signing not available
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
-    -exportPath "$EXPORT_PATH" \
-    -quiet 2>/dev/null || {
-    echo "   ⚠️  Code signing not available, copying .app directly..."
-    mkdir -p "$EXPORT_PATH"
-    cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_PATH/"
-}
-
-echo "   ✅ Export complete"
+echo "   🔏 Ad-hoc signing (no Apple Developer account required)..."
+codesign --deep --force --sign - "$EXPORT_PATH/$APP_NAME.app"
+echo "   ✅ Export + sign complete"
 
 # Step 3: Create DMG
 echo "💿 [3/4] Creating DMG..."
@@ -149,4 +130,8 @@ echo "  Next steps:"
 echo "  1. Test the DMG by opening it"
 echo "  2. Upload to GitHub Releases"
 echo "  3. Tag: git tag v${VERSION} && git push --tags"
+echo ""
+echo "  ⚠️  Gatekeeper note (ad-hoc signed, no Developer ID):"
+echo "  Users must right-click → Open on first launch, or run:"
+echo "  xattr -rd com.apple.quarantine \"$APP_NAME.app\""
 echo "═══════════════════════════════════════════════════════════════"

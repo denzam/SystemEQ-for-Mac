@@ -43,29 +43,27 @@ struct MainWindowView: View {
                 // AppDivider() // Not needed on glass
 
                 // Features List
-                ScrollView {
-                    VStack(spacing: AppSpacing.sm) {
-                        ForEach(featureRegistry.ordered()) { (feature: Feature) in
-                            FeatureButton(
-                                title: localizedTitle(for: feature.id),
-                                icon: iconForFeature(feature.id),
-                                subtitle: subtitleForFeature(feature.id)
-                            ) {
-                                if !WindowCoordinator.shared.focus(id: feature.id.rawValue) {
-                                    openWindow(id: feature.id.rawValue)
-                                }
+                VStack(spacing: AppSpacing.sm) {
+                    ForEach(featureRegistry.ordered()) { (feature: Feature) in
+                        FeatureButton(
+                            title: localizedTitle(for: feature.id),
+                            icon: iconForFeature(feature.id),
+                            subtitle: subtitleForFeature(feature.id)
+                        ) {
+                            if !WindowCoordinator.shared.focus(id: feature.id.rawValue) {
+                                openWindow(id: feature.id.rawValue)
                             }
                         }
                     }
-                    .padding(AppSpacing.lg)
                 }
+                .padding(AppSpacing.lg)
 
                 Spacer()
             }
             // Welcome Wizard is handled by sheet presentation now
         }
-        .frame(width: 360, height: 650)
-        .frame(maxWidth: 360, maxHeight: 650)
+        .frame(width: 380, height: 750)
+        .frame(maxWidth: 380, maxHeight: 750)
         .background(.clear)
         .shadow(color: .black.opacity(0.2), radius: 24, x: 0, y: 8)
         .sheet(isPresented: $showWelcome) {

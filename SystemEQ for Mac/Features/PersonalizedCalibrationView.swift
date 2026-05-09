@@ -250,7 +250,7 @@ struct PersonalizedCalibrationView: View {
             // Response Slider
             VStack(spacing: 12) {
                 Text(localization.localized(.adjustUntilEquallyLoud))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
 
                 Slider(value: $userResponse, in: -30...30, step: 0.5)
@@ -258,10 +258,10 @@ struct PersonalizedCalibrationView: View {
 
                 HStack {
                     Text(localization.localized(.quieter))
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                     Spacer()
                     Text(localization.localized(.louder))
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                 }
                 .foregroundColor(.secondary)
             }
@@ -312,7 +312,7 @@ struct PersonalizedCalibrationView: View {
                 .progressViewStyle(LinearProgressViewStyle(tint: .accentColor))
 
             Text("\(Int(testProgress * 100))% \(localization.localized(.complete).lowercased())")
-                .font(.caption)
+                .font(AppTypography.label)
                 .foregroundColor(.secondary)
         }
     }
@@ -387,11 +387,11 @@ struct TestTypeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(type.localizedName(localization))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .fontWeight(isSelected ? .semibold : .regular)
 
             Text(type.localizedDescription(localization))
-                .font(.caption2)
+                .font(AppTypography.labelSmall)
                 .foregroundColor(.secondary)
         }
         .padding()
@@ -413,12 +413,12 @@ struct ProfileCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(profile.name)
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .fontWeight(.medium)
 
             HStack {
                 Text(profile.qualityDescription)
-                    .font(.caption2)
+                    .font(AppTypography.labelSmall)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(qualityColor.opacity(0.2))
@@ -428,7 +428,7 @@ struct ProfileCard: View {
                 Spacer()
 
                 Text("\(profile.trainingSessions) \(localization.localized(.sessions).lowercased())")
-                    .font(.caption2)
+                    .font(AppTypography.labelSmall)
                     .foregroundColor(.secondary)
             }
         }
@@ -471,7 +471,7 @@ struct UnlockPromptView: View {
                     .font(.system(size: 48, weight: .bold, design: .rounded))
 
                 Text(localization.localized(.oneTimePurchase))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
 

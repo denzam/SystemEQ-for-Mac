@@ -23,7 +23,6 @@ import SwiftUI
 
 // Common issues:
 // - CalibrationEngine: Check Audio/CalibrationEngine.swift is in target
-// - VisualizerEngine: Check Audio/VisualizerEngine.swift is in target
 // - LocalizationManager: Should be in target (check LocalizationManager.swift)
 // - AutoEQ types: Check AutoEQ/AutoEQModels.swift is in target
 

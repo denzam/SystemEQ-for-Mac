@@ -195,14 +195,12 @@ public struct WelcomeScreen: View {
                         }
 
                         Button(localization.localized(.downloadDriver)) {
-                            if let url = URL(string: AppConstants.URLs.blackHole2chPkg) {
-                                NSWorkspace.shared.open(url)
-                            }
+                            BlackHoleInstaller.openDirectDownload()
                         }
                         .buttonStyle(.borderedProminent)
 
                         Text(localization.localized(.driverInstructions))
-                            .font(.caption)
+                            .font(AppTypography.label)
                             .foregroundColor(.secondary)
 
                         Button(localization.localized(.refresh)) {
@@ -289,7 +287,7 @@ public struct WelcomeScreen: View {
 
                 Text(localization.localized(.accessExplanation))
                     .multilineTextAlignment(.center)
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 40)
 
@@ -309,7 +307,7 @@ public struct WelcomeScreen: View {
                     .buttonStyle(.borderedProminent)
 
                     Text(localization.localized(.accessInstructions))
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary)
                 }
             }

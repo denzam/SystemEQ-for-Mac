@@ -218,13 +218,22 @@ import Foundation
 
     // MARK: - Release Build Stubs
 
-    // В Release ці функції компілюються в НІЧОГО (zero overhead)
+    // В Release stub'и приймають ті ж типи що й DEBUG — інакше Swift не резолвить `.audio` / `.error`
+    // на call-site (бо `Any?` не має member'ів enum). Тіло порожнє — optimizer видалить виклики.
+
+    enum LogCategory: String, Sendable {
+        case audio, engine, routing, eq, preset, ui, network, database, calibration, general
+    }
+
+    enum LogLevel: Int, Sendable {
+        case verbose, debug, info, warning, error
+    }
 
     @inline(__always)
     func dlog(
         _ message: @autoclosure () -> String,
-        level: Any? = nil,
-        category: Any? = nil,
+        level: LogLevel = .debug,
+        category: LogCategory = .general,
         file: String = #file,
         function: String = #function,
         line: Int = #line
@@ -232,7 +241,7 @@ import Foundation
     @inline(__always)
     func audioLog(
         _ message: @autoclosure () -> String,
-        level: Any? = nil,
+        level: LogLevel = .debug,
         file: String = #file,
         function: String = #function,
         line: Int = #line
@@ -240,7 +249,7 @@ import Foundation
     @inline(__always)
     func engineLog(
         _ message: @autoclosure () -> String,
-        level: Any? = nil,
+        level: LogLevel = .debug,
         file: String = #file,
         function: String = #function,
         line: Int = #line
@@ -248,7 +257,7 @@ import Foundation
     @inline(__always)
     func eqLog(
         _ message: @autoclosure () -> String,
-        level: Any? = nil,
+        level: LogLevel = .debug,
         file: String = #file,
         function: String = #function,
         line: Int = #line
@@ -256,7 +265,7 @@ import Foundation
     @inline(__always)
     nonisolated func errorLog(
         _ message: @autoclosure () -> String,
-        category: Any? = nil,
+        category: LogCategory = .general,
         file: String = #file,
         function: String = #function,
         line: Int = #line

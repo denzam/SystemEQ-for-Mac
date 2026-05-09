@@ -12,7 +12,7 @@ struct InfoButton: View {
         }) {
             Image(systemName: "info.circle")
                 .foregroundColor(.secondary)
-                .font(.caption)
+                .font(AppTypography.label)
         }
         .buttonStyle(.plain)
         .help("Learn more")
@@ -57,7 +57,7 @@ struct InfoButtonMarkdown: View {
         }) {
             Image(systemName: "info.circle")
                 .foregroundColor(.secondary)
-                .font(.caption)
+                .font(AppTypography.label)
         }
         .buttonStyle(.plain)
         .help("Learn more")

@@ -60,15 +60,15 @@ public class BiquadFilter {
         let omega = 2.0 * Float.pi * frequency / sampleRate
         let sinW = sin(omega)
         let cosW = cos(omega)
-        _ = sinW / (2.0 * q)
-        let beta = sqrt(A) / q
+        let alpha = sinW / (2.0 * q)
+        let twoSqrtA_alpha = 2.0 * sqrt(A) * alpha
 
-        b0 = A * ((A + 1) - (A - 1) * cosW + beta * sinW)
+        b0 = A * ((A + 1) - (A - 1) * cosW + twoSqrtA_alpha)
         b1 = 2.0 * A * ((A - 1) - (A + 1) * cosW)
-        b2 = A * ((A + 1) - (A - 1) * cosW - beta * sinW)
-        a0 = (A + 1) + (A - 1) * cosW + beta * sinW
+        b2 = A * ((A + 1) - (A - 1) * cosW - twoSqrtA_alpha)
+        a0 = (A + 1) + (A - 1) * cosW + twoSqrtA_alpha
         a1 = -2.0 * ((A - 1) + (A + 1) * cosW)
-        a2 = (A + 1) + (A - 1) * cosW - beta * sinW
+        a2 = (A + 1) + (A - 1) * cosW - twoSqrtA_alpha
 
         // Normalize
         b0 /= a0
@@ -83,15 +83,15 @@ public class BiquadFilter {
         let omega = 2.0 * Float.pi * frequency / sampleRate
         let sinW = sin(omega)
         let cosW = cos(omega)
-        _ = sinW / (2.0 * q)
-        let beta = sqrt(A) / q
+        let alpha = sinW / (2.0 * q)
+        let twoSqrtA_alpha = 2.0 * sqrt(A) * alpha
 
-        b0 = A * ((A + 1) + (A - 1) * cosW + beta * sinW)
+        b0 = A * ((A + 1) + (A - 1) * cosW + twoSqrtA_alpha)
         b1 = -2.0 * A * ((A - 1) + (A + 1) * cosW)
-        b2 = A * ((A + 1) + (A - 1) * cosW - beta * sinW)
-        a0 = (A + 1) - (A - 1) * cosW + beta * sinW
+        b2 = A * ((A + 1) + (A - 1) * cosW - twoSqrtA_alpha)
+        a0 = (A + 1) - (A - 1) * cosW + twoSqrtA_alpha
         a1 = 2.0 * ((A - 1) - (A + 1) * cosW)
-        a2 = (A + 1) - (A - 1) * cosW - beta * sinW
+        a2 = (A + 1) - (A - 1) * cosW - twoSqrtA_alpha
 
         // Normalize
         b0 /= a0
@@ -288,9 +288,8 @@ public class BiquadFilterChain {
         type: FilterType,
         sampleRate: Float
     ) {
-        // ⚡ OPTIMIZATION: Mark filter as bypass if gain is near zero (±0.5 dB)
         let filter = filters[index]
-        filter.isBypass = abs(gain) < 0.5
+        filter.isBypass = abs(gain) < 0.01
 
         switch type {
         case .peak:

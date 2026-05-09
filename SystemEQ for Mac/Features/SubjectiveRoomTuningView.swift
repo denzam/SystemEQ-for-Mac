@@ -27,6 +27,8 @@ struct SubjectiveRoomTuningView: View {
     @State private var profileName: String = ""
     @State private var isComparing: Bool = false
     @State private var gainMatchOffset: Float = 0.0
+    @State private var abIsFiltered: Bool = true
+    @State private var abTimer: Timer?
 
     enum TuningTab: String, CaseIterable, FeatureTab, Identifiable {
         case tuning = "Tuning"
@@ -40,7 +42,7 @@ struct SubjectiveRoomTuningView: View {
         func localizedTitle(_ localization: LocalizationManager) -> String {
             switch self {
             case .tuning:
-                "Tuning"
+                localization.localized(.tuningTab)
             case .filters:
                 localization.localized(.notchFilters)
             case .compare:
@@ -91,28 +93,37 @@ struct SubjectiveRoomTuningView: View {
     // MARK: - Disclaimer Banner
 
     private var disclaimerBanner: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .font(.title2)
-                Text(localization.localized(.subjectiveRoomTuningDisclaimerTitle))
-                    .font(.headline)
-                    .foregroundColor(.orange)
-                Spacer()
-                Button(action: { showDisclaimer = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .font(.title3)
+            Text(localization.localized(.subjectiveRoomTuningDisclaimerTitle))
+                .font(AppTypography.body)
+                .fontWeight(.semibold)
+                .foregroundColor(.orange)
+                .fixedSize()
+            InfoPopoverButton {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(localization.localized(.subjectiveRoomTuningDisclaimerTitle))
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                    }
+                    Text(localization.localized(.subjectiveRoomTuningDisclaimer))
+                        .font(.body)
+                        .foregroundColor(.primary)
                 }
-                .buttonStyle(.plain)
             }
-
-            Text(localization.localized(.subjectiveRoomTuningDisclaimer))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(width: 28, height: 28)
+            Button(action: { showDisclaimer = false }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
         }
-        .padding(16)
+        .padding(12)
         .background(Color.orange.opacity(0.1))
         .cornerRadius(10)
     }
@@ -135,28 +146,32 @@ struct SubjectiveRoomTuningView: View {
     // MARK: - Workflow Info Card
 
     private var workflowInfoCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "lightbulb.fill")
-                    .foregroundColor(.yellow)
-                    .font(.title2)
-                Text(localization.localized(.howToUse))
-                    .font(.headline)
+        HStack(spacing: 10) {
+            Image(systemName: "lightbulb.fill")
+                .foregroundColor(.yellow)
+                .font(.title3)
+            Text(localization.localized(.howToUse))
+                .font(AppTypography.body)
+                .fontWeight(.semibold)
+                .fixedSize()
+            InfoPopoverButton {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "lightbulb.fill").foregroundColor(.yellow)
+                        Text(localization.localized(.howToUse)).font(.headline)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(localization.localized(.howToUseStep1), systemImage: "1.circle.fill").font(.body)
+                        Label(localization.localized(.howToUseStep2), systemImage: "2.circle.fill").font(.body)
+                        Label(localization.localized(.howToUseStep3), systemImage: "3.circle.fill").font(.body)
+                        Label(localization.localized(.howToUseStep4), systemImage: "4.circle.fill").font(.body)
+                    }
+                    .foregroundColor(.primary)
+                }
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Label(localization.localized(.howToUseStep1), systemImage: "1.circle.fill")
-                    .font(.subheadline)
-                Label(localization.localized(.howToUseStep2), systemImage: "2.circle.fill")
-                    .font(.subheadline)
-                Label(localization.localized(.howToUseStep3), systemImage: "3.circle.fill")
-                    .font(.subheadline)
-                Label(localization.localized(.howToUseStep4), systemImage: "4.circle.fill")
-                    .font(.subheadline)
-            }
-            .foregroundColor(.secondary)
+            .frame(width: 28, height: 28)
         }
-        .padding(16)
+        .padding(12)
         .background(Color.blue.opacity(0.05))
         .cornerRadius(10)
     }
@@ -183,10 +198,10 @@ struct SubjectiveRoomTuningView: View {
                         .font(.largeTitle)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.noResonancesDetected))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Text(localization.localized(.useResonanceFinderHint))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -198,10 +213,10 @@ struct SubjectiveRoomTuningView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(Int(resonance.frequency)) Hz")
-                                .font(.subheadline)
+                                .font(AppTypography.body)
                                 .fontWeight(.semibold)
                             Text(resonance.description)
-                                .font(.caption)
+                                .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                         }
 
@@ -211,7 +226,7 @@ struct SubjectiveRoomTuningView: View {
                         HStack(spacing: 4) {
                             ForEach(0..<resonance.severity.rating, id: \.self) { _ in
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                                     .foregroundColor(colorForSeverity(resonance.severity))
                             }
                         }
@@ -227,7 +242,7 @@ struct SubjectiveRoomTuningView: View {
                             addNotchFilter(for: resonance)
                         }) {
                             Text(localization.localized(.addFilter))
-                                .font(.caption)
+                                .font(AppTypography.label)
                         }
                         .buttonStyle(.borderedProminent)
 
@@ -235,7 +250,7 @@ struct SubjectiveRoomTuningView: View {
                             detectedResonances.removeAll { $0.id == resonance.id }
                         }) {
                             Image(systemName: "trash")
-                                .font(.caption)
+                                .font(AppTypography.label)
                         }
                         .buttonStyle(BorderedButtonStyle())
                     }
@@ -284,13 +299,13 @@ struct SubjectiveRoomTuningView: View {
                 .font(.headline)
 
             Text(localization.localized(.testSpecificFrequencies))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .foregroundColor(.secondary)
 
             // Quick frequency buttons
             VStack(spacing: 10) {
-                Text("Швидкий вибір частоти")
-                    .font(.caption)
+                Text(localization.localized(.quickFrequencySelect))
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
@@ -302,7 +317,7 @@ struct SubjectiveRoomTuningView: View {
                             }
                         }) {
                             Text(formatFrequency(freq))
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 15, weight: .medium))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
                         }
@@ -319,7 +334,7 @@ struct SubjectiveRoomTuningView: View {
             VStack(spacing: 12) {
                 HStack {
                     Text(localization.localized(.frequency))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.0f Hz", currentFrequency))
@@ -345,23 +360,23 @@ struct SubjectiveRoomTuningView: View {
 
                 HStack {
                     Text("20 Hz")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("100")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("1k")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("10k")
-                        .font(.caption2)
+                        .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary.opacity(0.6))
                     Spacer()
                     Text("20k Hz")
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
             }
@@ -380,7 +395,7 @@ struct SubjectiveRoomTuningView: View {
                 }) {
                     HStack {
                         Image(systemName: sineSweep.isPlaying ? "stop.fill" : "play.fill")
-                        Text(sineSweep.isPlaying ? "Зупинити" : "Відтворити")
+                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization.localized(.playTone))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -406,8 +421,8 @@ struct SubjectiveRoomTuningView: View {
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
-                    Text("Рухайте повзунок або натискайте кнопки частот — звук оновиться автоматично")
-                        .font(.caption)
+                    Text(localization.localized(.sliderFrequencyHint))
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
                 .padding(10)
@@ -431,7 +446,7 @@ struct SubjectiveRoomTuningView: View {
 
                 if detectedResonances.isEmpty {
                     Text(localization.localized(.noResonancesDetected))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -442,10 +457,10 @@ struct SubjectiveRoomTuningView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(Int(resonance.frequency)) \(localization.localized(.frequencyHz))")
-                                    .font(.subheadline)
+                                    .font(AppTypography.body)
                                     .fontWeight(.semibold)
                                 Text(resonance.description)
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                                     .foregroundColor(.secondary)
                             }
 
@@ -455,7 +470,7 @@ struct SubjectiveRoomTuningView: View {
                             HStack(spacing: 4) {
                                 ForEach(0..<resonance.severity.rating, id: \.self) { _ in
                                     Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.caption)
+                                        .font(AppTypography.label)
                                         .foregroundColor(colorForSeverity(resonance.severity))
                                 }
                             }
@@ -464,7 +479,7 @@ struct SubjectiveRoomTuningView: View {
                                 addNotchFilter(for: resonance)
                             }) {
                                 Text(localization.localized(.addFilter))
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                             }
                             .buttonStyle(BorderedButtonStyle())
                         }
@@ -494,7 +509,7 @@ struct SubjectiveRoomTuningView: View {
 
                 if appliedNotchFilters.isEmpty {
                     Text(localization.localized(.noNotchFiltersApplied))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -505,10 +520,10 @@ struct SubjectiveRoomTuningView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(Int(filter.frequency)) \(localization.localized(.frequencyHz)) Notch")
-                                    .font(.subheadline)
+                                    .font(AppTypography.body)
                                     .fontWeight(.semibold)
                                 Text(String(format: "Gain: %.1f dB, Q: %.1f", filter.gain, filter.q))
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                                     .foregroundColor(.secondary)
                             }
 
@@ -521,7 +536,7 @@ struct SubjectiveRoomTuningView: View {
                                 }
                             }) {
                                 Image(systemName: "trash")
-                                    .font(.caption)
+                                    .font(AppTypography.label)
                             }
                             .buttonStyle(BorderedButtonStyle())
                         }
@@ -542,7 +557,7 @@ struct SubjectiveRoomTuningView: View {
                 .font(.headline)
 
             Text(localization.localized(.compareOriginalVsFiltered))
-                .font(.subheadline)
+                .font(AppTypography.body)
                 .foregroundColor(.secondary)
 
             // Gain matching info
@@ -551,11 +566,11 @@ struct SubjectiveRoomTuningView: View {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
                     Text(localization.localized(.gainMatching))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .fontWeight(.semibold)
                 }
                 Text(localization.localized(.gainMatchingDesc))
-                    .font(.caption)
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
             }
             .padding(12)
@@ -591,12 +606,12 @@ struct SubjectiveRoomTuningView: View {
             if isComparing {
                 VStack(spacing: 12) {
                     Text(localization.localized(.alternatingOriginalFiltered))
-                        .font(.subheadline)
+                        .font(AppTypography.body)
                         .foregroundColor(.blue)
                         .fontWeight(.semibold)
 
                     Text(String(format: "Gain Match: %.1f dB", gainMatchOffset))
-                        .font(.caption)
+                        .font(AppTypography.label)
                         .foregroundColor(.secondary)
                 }
                 .padding(12)
@@ -623,14 +638,12 @@ struct SubjectiveRoomTuningView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle.fill")
                         .foregroundColor(.blue)
-                    Text("Що це?")
-                        .font(.subheadline)
+                    Text(localization.localized(.whatIsThis))
+                        .font(AppTypography.body)
                         .fontWeight(.medium)
                 }
-                Text(
-                    "Резонанс — це частота, на якій ваша кімната підсилює звук. Додайте резонанс, щоб потім створити notch-фільтр для його придушення."
-                )
-                .font(.caption)
+                Text(localization.localized(.resonanceExplanation))
+                .font(AppTypography.label)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -641,7 +654,7 @@ struct SubjectiveRoomTuningView: View {
             // Frequency display
             VStack(alignment: .leading, spacing: 8) {
                 Text(localization.localized(.frequency))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                 Text(String(format: "%.0f Hz", newResonanceFrequency))
                     .font(.title)
@@ -652,21 +665,21 @@ struct SubjectiveRoomTuningView: View {
 
             // Severity picker
             VStack(alignment: .leading, spacing: 10) {
-                Text("Сила резонансу")
-                    .font(.subheadline)
+                Text(localization.localized(.resonanceStrength))
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
 
-                Text("Оберіть наскільки сильно ця частота виділяється:")
-                    .font(.caption)
+                Text(localization.localized(.resonanceStrengthDesc))
+                    .font(AppTypography.label)
                     .foregroundColor(.secondary)
 
                 // Vertical buttons instead of segmented picker
                 VStack(spacing: 8) {
                     ForEach([
-                        (ResonancePoint.Severity.mild, "Легкий", "-2 dB", "Ледь помітний резонанс"),
-                        (ResonancePoint.Severity.moderate, "Помірний", "-4 dB", "Помітний, але не критичний"),
-                        (ResonancePoint.Severity.severe, "Сильний", "-6 dB", "Явно заважає звучанню"),
-                        (ResonancePoint.Severity.extreme, "Дуже сильний", "-8 dB", "Критичний резонанс")
+                        (ResonancePoint.Severity.mild, localization.localized(.severityMild), "-2 dB", localization.localized(.severityMildDesc)),
+                        (ResonancePoint.Severity.moderate, localization.localized(.severityModerate), "-4 dB", localization.localized(.severityModerateDesc)),
+                        (ResonancePoint.Severity.severe, localization.localized(.severitySevere), "-6 dB", localization.localized(.severitySevereDesc)),
+                        (ResonancePoint.Severity.extreme, localization.localized(.severityExtreme), "-8 dB", localization.localized(.severityExtremeDesc))
                     ], id: \.0) { severity, name, db, desc in
                         Button(action: {
                             newResonanceSeverity = severity
@@ -675,14 +688,14 @@ struct SubjectiveRoomTuningView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack {
                                         Text(name)
-                                            .font(.subheadline)
+                                            .font(AppTypography.body)
                                             .fontWeight(.medium)
                                         Text(db)
-                                            .font(.caption)
+                                            .font(AppTypography.label)
                                             .foregroundColor(.secondary)
                                     }
                                     Text(desc)
-                                        .font(.caption2)
+                                        .font(AppTypography.labelSmall)
                                         .foregroundColor(.secondary)
                                 }
                                 Spacer()
@@ -726,7 +739,7 @@ struct SubjectiveRoomTuningView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(localization.localized(.profileName))
-                    .font(.subheadline)
+                    .font(AppTypography.body)
                     .foregroundColor(.secondary)
                 TextField("e.g., Living Room - Notch Filters", text: $profileName)
                     .textFieldStyle(.roundedBorder)
@@ -776,20 +789,15 @@ struct SubjectiveRoomTuningView: View {
     }
 
     private func applyNotchFilters() {
-        // Apply notch filters to the audio engine
-        // This would integrate with your CoreAudioEngine or BiquadFilterChain
-        dlog("Applying \(appliedNotchFilters.count) notch filters", category: .calibration)
-
-        // Room correction filters will be implemented in a future version
-        // Integration points:
-        // 1. Create notch biquad filters for each peak frequency
-        // 2. Add to CoreAudioEngine filter chain
-        // 3. Update audio processing pipeline
+        let tuples = appliedNotchFilters.map { f in
+            (frequency: Float(f.frequency), gain: f.gain, q: f.q)
+        }
+        CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
+        dlog("🏠 Applied \(tuples.count) room notch filter(s)", category: .calibration)
     }
 
     private func toggleComparison() {
         isComparing.toggle()
-
         if isComparing {
             startABComparison()
         } else {
@@ -798,25 +806,33 @@ struct SubjectiveRoomTuningView: View {
     }
 
     private func startABComparison() {
-        // Start alternating between original and filtered sound
-        // Calculate gain matching offset
-        gainMatchOffset = calculateGainMatchOffset()
+        guard !appliedNotchFilters.isEmpty else { return }
 
-        // A/B comparison will be implemented in a future version
-        // Would toggle filters on/off at regular intervals (e.g., every 2 seconds)
-        dlog("Starting A/B comparison with gain match: \(gainMatchOffset) dB", category: .calibration)
+        // Average notch gain across all filters to estimate loudness change
+        let avgGain = appliedNotchFilters.map(\.gain).reduce(0, +) / Float(appliedNotchFilters.count)
+        gainMatchOffset = -avgGain  // compensate: filters cut, so add back when bypassed
+
+        abIsFiltered = true
+        applyNotchFilters()
+
+        abTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            abIsFiltered.toggle()
+            if abIsFiltered {
+                let tuples = appliedNotchFilters.map { (frequency: Float($0.frequency), gain: $0.gain, q: $0.q) }
+                CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
+            } else {
+                CoreAudioEngine.shared.clearRoomNotchFilters()
+            }
+        }
+        dlog("▶️ A/B comparison started (2s interval, gain offset: \(gainMatchOffset) dB)", category: .calibration)
     }
 
     private func stopABComparison() {
-        // Stop A/B comparison and restore normal processing
-        dlog("Stopping A/B comparison", category: .calibration)
-    }
-
-    private func calculateGainMatchOffset() -> Float {
-        // Calculate the gain difference between original and filtered signal
-        // This ensures volume-matched comparison
-        // For now, return a placeholder value
-        -2.0 // Example: filtered signal is 2dB quieter
+        abTimer?.invalidate()
+        abTimer = nil
+        abIsFiltered = true
+        applyNotchFilters()
+        dlog("⏹ A/B comparison stopped", category: .calibration)
     }
 
     private func saveCalibrationProfile() {

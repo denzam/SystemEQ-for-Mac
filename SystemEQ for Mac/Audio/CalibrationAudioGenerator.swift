@@ -300,65 +300,55 @@ public final class CalibrationAudioGenerator {
 
     // MARK: - DSP Helpers
 
-    /// Apply band-pass filter to buffer
+    /// Apply band-pass filter to buffer using RBJ biquad (constant-skirt gain, peak at 0 dB)
     private func applyBandPassFilter(
         buffer: AVAudioPCMBuffer,
         lowFrequency: Double,
         highFrequency: Double
     ) -> AVAudioPCMBuffer? {
-        guard let leftChannel = buffer.floatChannelData?[0],
-              buffer.floatChannelData?[1] != nil else { return nil }
+        guard let leftChannel = buffer.floatChannelData?[0] else { return nil }
 
         let frameCount = Int(buffer.frameLength)
 
-        // Create output buffer
         guard let outputBuffer = AVAudioPCMBuffer(
             pcmFormat: buffer.format,
             frameCapacity: buffer.frameCapacity
         ) else { return nil }
-
         outputBuffer.frameLength = buffer.frameLength
 
-        guard let outLeft = outputBuffer.floatChannelData?[0],
-              outputBuffer.floatChannelData?[1] != nil else { return nil }
+        guard let outLeft = outputBuffer.floatChannelData?[0] else { return nil }
 
-        // Simple 2nd order Butterworth band-pass filter
-        // For production, use more sophisticated filtering
+        // RBJ band-pass (constant 0 dB peak): f0 = geometric mean, Q from bandwidth
+        let f0 = sqrt(lowFrequency * highFrequency)
+        let bw = log2(highFrequency / lowFrequency) // octave bandwidth
+        let omega = 2.0 * Double.pi * f0 / sampleRate
+        let sinOmega = sin(omega)
+        let cosOmega = cos(omega)
+        // alpha from bandwidth: alpha = sin(w0)*sinh(ln(2)/2 * bw * w0/sin(w0))
+        let alpha = sinOmega * sinh(log(2.0) / 2.0 * bw * omega / sinOmega)
 
-        // High-pass filter (remove frequencies below lowFrequency)
-        let hpAlpha = Float(1.0 / (1.0 + 2.0 * .pi * lowFrequency / sampleRate))
-        var hpPrevIn: Float = 0.0
-        var hpPrevOut: Float = 0.0
+        let b0 = Float(sinOmega / 2.0)
+        let b1: Float = 0.0
+        let b2 = Float(-sinOmega / 2.0)
+        let a0 = Float(1.0 + alpha)
+        let a1 = Float(-2.0 * cosOmega)
+        let a2 = Float(1.0 - alpha)
+
+        let nb0 = b0 / a0; let nb1 = b1 / a0; let nb2 = b2 / a0
+        let na1 = a1 / a0; let na2 = a2 / a0
+
+        var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
 
         for i in 0..<frameCount {
-            let input = leftChannel[i]
-            let output = hpAlpha * (hpPrevOut + input - hpPrevIn)
-            outLeft[i] = output
-            hpPrevIn = input
-            hpPrevOut = output
+            let x0 = leftChannel[i]
+            let y0 = nb0 * x0 + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2
+            outLeft[i] = y0
+            x2 = x1; x1 = x0; y2 = y1; y1 = y0
         }
 
-        // Low-pass filter (remove frequencies above highFrequency)
-        let lpAlpha = Float(2.0 * .pi * highFrequency / sampleRate / (1.0 + 2.0 * .pi * highFrequency / sampleRate))
-        var lpPrevOut: Float = 0.0
-
-        for i in 0..<frameCount {
-            let input = outLeft[i]
-            let output = lpAlpha * input + (1.0 - lpAlpha) * lpPrevOut
-            outLeft[i] = output
-            lpPrevOut = output
-        }
-
-        // Copy left to right (mono)
         if let outRight = outputBuffer.floatChannelData?[1] {
-            for i in 0..<frameCount {
-                outRight[i] = outLeft[i]
-            }
+            vDSP_mmov(outLeft, outRight, vDSP_Length(frameCount), 1, 1, 1)
         }
-
-        // Normalize to compensate for filter gain
-        let gain: Float = 3.0 // Approximate compensation
-        scaleBuffer(outputBuffer, amplitude: gain)
 
         return outputBuffer
     }
