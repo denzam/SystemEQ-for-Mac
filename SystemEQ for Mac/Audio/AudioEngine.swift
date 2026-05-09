@@ -91,10 +91,8 @@ public final class AudioEngine: ObservableObject {
     @Published var bandMode: EQBandMode = .tenBand {
         didSet {
             if bandMode != oldValue {
-                DispatchQueue.main.async { [weak self] in
-                    self?.setupEQBands()
-                    self?.syncToCoreAudioEngineImmediate()
-                }
+                setupEQBands()
+                syncToCoreAudioEngineImmediate()
             }
         }
     }

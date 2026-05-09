@@ -9,22 +9,29 @@ import AVFoundation
 import Foundation
 import SwiftUI
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        StatusItemController.shared.install()
+
+        guard !UserDefaults.standard.bool(forKey: "hasCompletedSetup") else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            WelcomeWindowController.shared.showWelcome()
+        }
+    }
+}
+
 @main
 struct SystemEQ_for_MacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var featureRegistry = FeatureRegistry()
     @StateObject private var audioRouter = AudioRouter.shared
     @StateObject private var audioEngine = AudioEngine.shared
     @StateObject private var localizationManager = LocalizationManager.shared
 
-    // Removed duplicated state management - now handled in MainWindowView
-
     init() {
-        // Test database in DEBUG mode
         #if DEBUG
             EQDatabaseTest.runTests()
         #endif
-
-        // Setup window title manager
         WindowTitleManager.shared.setupObserver()
     }
 
@@ -49,6 +56,7 @@ struct SystemEQ_for_MacApp: App {
                     } else {
                         dlog("Audio access authorized", category: .audio)
                     }
+
 
                     // NOTE: Python AutoEQ Server removed - using SQLite database instead
                     // To restore: see git history for AutoEQServer.swift
@@ -251,13 +259,5 @@ struct SystemEQ_for_MacApp: App {
         .windowStyle(.titleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 650)
-        MenuBarExtra("SystemEQ", systemImage: "slider.horizontal.3") {
-            MenuBarExtraView()
-                .environmentObject(localizationManager)
-                .environmentObject(audioRouter)
-                .environmentObject(audioEngine)
-                .environmentObject(CoreAudioEngine.shared)
-            // NOTE: AutoEQServer removed - using SQLite database
-        }
     }
 }

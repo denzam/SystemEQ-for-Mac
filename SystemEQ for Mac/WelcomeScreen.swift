@@ -86,7 +86,7 @@ public struct WelcomeScreen: View {
             .background(Color(NSColor.windowBackgroundColor))
             .overlay(Rectangle().frame(height: 1).foregroundColor(Color.gray.opacity(0.1)), alignment: .top)
         }
-        .frame(width: 600, height: 500)
+        .frame(width: 640, height: 720)
         .background(Color(NSColor.windowBackgroundColor))
     }
 

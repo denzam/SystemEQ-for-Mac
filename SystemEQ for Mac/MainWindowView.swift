@@ -14,14 +14,9 @@ import SwiftUI
 struct MainWindowView: View {
     @EnvironmentObject var featureRegistry: FeatureRegistry
     @EnvironmentObject var localizationManager: LocalizationManager
-    @EnvironmentObject var audioRouter: AudioRouter
-    @EnvironmentObject var audioEngine: AudioEngine
     @Environment(\.openWindow) private var openWindow
 
-    // Setup Logic
     @AppStorage("hasCompletedSetup") private var hasCompletedSetup: Bool = false
-    @AppStorage("hasShownWelcome") private var hasShownWelcome: Bool = false
-    @State private var showWelcome: Bool = false
 
     var body: some View {
         GlassCard(topCornersOnly: true) {
@@ -66,25 +61,14 @@ struct MainWindowView: View {
         .frame(maxWidth: 380, maxHeight: 750)
         .background(.clear)
         .shadow(color: .black.opacity(0.2), radius: 24, x: 0, y: 8)
-        .sheet(isPresented: $showWelcome) {
-            WelcomeScreen(isPresented: $showWelcome)
-                .environmentObject(localizationManager)
-                .padding(24)
-                .background(Color(NSColor.windowBackgroundColor))
-                .onAppear {
-                    if !hasShownWelcome {
-                        openWindow(id: "welcome")
-                        hasShownWelcome = true
-                    }
-                }
-        }
-        .task {
-            // Check setup on appear
+        .blurOnLanguageChange()
+        .onAppear {
             if !hasCompletedSetup {
-                showWelcome = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    WelcomeWindowController.shared.showWelcome()
+                }
             }
         }
-        .blurOnLanguageChange()
     }
 
     private func iconForFeature(_ featureId: FeatureID) -> String {
