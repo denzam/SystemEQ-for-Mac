@@ -4,6 +4,18 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-16
+
+Installer UX improvements. No application code changes.
+
+### Added
+- DMG ships with a custom background image showing the drag-to-Applications arrow and Gatekeeper bypass instructions
+- `README - HOW TO OPEN.txt` bundled inside the DMG window (English, Italian, Ukrainian) with first-launch steps and Privacy & Security guidance
+- `dmg-assets/generate-background.swift` generator script invoked from the release workflow
+
+### Changed
+- Release workflow (`.github/workflows/release.yml`) copies the README and renders the background before calling `create-dmg`
+
 ## [1.0.0] — 2026-05-10
 
 First public release.
@@ -33,4 +45,5 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.0.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.1
 [1.0.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.0
