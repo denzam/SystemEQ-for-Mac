@@ -146,7 +146,9 @@ struct EQCurveView: View {
                 let cp2 = CGPoint(x: (prev.x + curr.x) / 2, y: curr.y)
                 path.addCurve(to: curr, control1: cp1, control2: cp2)
             }
-            path.addLine(to: CGPoint(x: points.last!.x, y: mid))
+            if let last = points.last {
+                path.addLine(to: CGPoint(x: last.x, y: mid))
+            }
             path.closeSubpath()
         }
     }

@@ -31,7 +31,7 @@ public enum AppConstants {
         }
 
         /// Project
-        public static let projectRepo = "https://github.com/denyszamorniak/SystemEQ-for-Mac"
+        public static let projectRepo = "https://github.com/denzam/SystemEQ-for-Mac"
         public static let buyMeACoffee = "https://buymeacoffee.com/denzam"
 
         // Local Server

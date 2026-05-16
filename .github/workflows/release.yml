@@ -50,6 +50,11 @@ jobs:
           mkdir -p build/export
           cp -R "build/SystemEQ.xcarchive/Products/Applications/SystemEQ for Mac.app" build/export/
 
+      - name: Ad-hoc sign (no Apple Developer ID required)
+        run: |
+          codesign --force --deep --sign - "build/export/SystemEQ for Mac.app"
+          codesign --verify --verbose=2 "build/export/SystemEQ for Mac.app"
+
       - name: Create DMG
         run: |
           mkdir -p build/dmg_content
@@ -107,10 +112,12 @@ jobs:
 
             ### Installation
             1. Download `.dmg` file below
-            2. Open the DMG
-            3. Drag **SystemEQ for Mac** to **Applications**
-            4. Launch from Applications
-            5. If macOS blocks it: System Settings → Privacy & Security → Open Anyway
+            2. Open the DMG and drag **SystemEQ for Mac** to **Applications**
+            3. **First launch:** right-click the app → **Open** → confirm the Gatekeeper dialog
+               (the app is ad-hoc signed but not notarized — Apple Developer ID is not used by this project)
+            4. Alternative: open Terminal and run
+               `xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"`
+            5. Or via Homebrew: `brew install --cask denzam/systemeq/systemeq` (quarantine flag handled automatically)
 
             ### Requirements
             - macOS 13 (Ventura) or later

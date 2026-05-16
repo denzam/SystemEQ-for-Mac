@@ -292,7 +292,7 @@ public final class SPSCRingBuffer {
 @inline(__always)
 private func interleaveStereo(l: UnsafePointer<Float>, r: UnsafePointer<Float>, out: UnsafeMutablePointer<Float>, count: Int) {
     for i in 0 ..< count {
-        out[i &* 2]     = l[i]
+        out[i &* 2] = l[i]
         out[i &* 2 &+ 1] = r[i]
     }
 }

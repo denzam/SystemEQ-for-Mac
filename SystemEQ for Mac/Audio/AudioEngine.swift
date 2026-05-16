@@ -91,8 +91,10 @@ public final class AudioEngine: ObservableObject {
     @Published var bandMode: EQBandMode = .tenBand {
         didSet {
             if bandMode != oldValue {
-                setupEQBands()
-                syncToCoreAudioEngineImmediate()
+                DispatchQueue.main.async { [weak self] in
+                    self?.setupEQBands()
+                    self?.syncToCoreAudioEngineImmediate()
+                }
             }
         }
     }
@@ -174,8 +176,8 @@ public final class AudioEngine: ObservableObject {
             return exact.gain
         }
         let sorted = previous.sorted { $0.frequency < $1.frequency }
-        if freq <= sorted.first!.frequency { return sorted.first!.gain }
-        if freq >= sorted.last!.frequency { return sorted.last!.gain }
+        if let first = sorted.first, freq <= first.frequency { return first.gain }
+        if let last = sorted.last, freq >= last.frequency { return last.gain }
         for i in 0..<(sorted.count - 1) {
             let lo = sorted[i], hi = sorted[i + 1]
             if freq >= lo.frequency && freq <= hi.frequency {

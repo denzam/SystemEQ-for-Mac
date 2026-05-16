@@ -4,7 +4,7 @@ Equalizzatore professionale a livello di sistema per macOS 13+
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 > 🇮🇹 Italiano | 🇬🇧 [English](README.md) | 🇺🇦 [Українська](README.ua.md)
 
@@ -45,18 +45,38 @@ Equalizzatore professionale a livello di sistema per macOS 13+
 
 ### Installazione
 
-#### Opzione 1: Scarica il DMG (consigliato)
-
-1. Scarica l'ultima versione da [Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
-2. Apri il file `.dmg`
-3. Trascina `SystemEQ for Mac.app` nella cartella Applicazioni
-4. Al primo avvio: clic destro → Apri (avviso Gatekeeper — app firmata ad-hoc, non notarizzata)
-5. Segui il **Setup Assistant** per installare BlackHole
-
-#### Opzione 2: Compilare dal sorgente
+#### Opzione 1: Homebrew (più semplice — aggira Gatekeeper automaticamente)
 
 ```bash
-git clone https://github.com/denyszamorniak/SystemEQ-for-Mac.git
+brew install --cask denzam/systemeq/systemeq
+```
+
+Il Cask rimuove l'attributo di quarantena durante l'installazione, quindi
+l'app si avvia senza avvisi di Gatekeeper.
+
+#### Opzione 2: Scarica il DMG
+
+1. Scarica l'ultimo `.dmg` o `.zip` dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+2. Apri il DMG e trascina `SystemEQ for Mac.app` in `/Applicazioni`
+3. **Al primo avvio (una di queste opzioni):**
+   - **Clic destro sull'app → Apri → Apri** nella finestra di conferma, oppure
+   - Prova ad avviarla, poi apri **Impostazioni di Sistema → Privacy e Sicurezza → Apri comunque**, oppure
+   - Da Terminale:
+     ```bash
+     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
+     ```
+4. Segui il **Setup Assistant** per installare BlackHole
+
+> L'app è **firmata ad-hoc** (gratis, autofirmata) — non notarizzata con un
+> Apple Developer ID. Per questo Gatekeeper mostra un avviso al primo avvio.
+> È una scelta intenzionale: SystemEQ resta gratuito e non richiede il
+> programma Apple Developer a pagamento. I passaggi sopra vanno fatti una
+> sola volta.
+
+#### Opzione 3: Compilare dal sorgente
+
+```bash
+git clone https://github.com/denzam/SystemEQ-for-Mac.git
 cd "SystemEQ for Mac"
 open "SystemEQ for Mac.xcodeproj"
 # Premi Cmd+R per compilare ed eseguire
@@ -194,7 +214,7 @@ SystemEQ elabora **l'uscita audio di sistema**. I DAW di solito bypassano l'usci
 
 - L'app **non è in sandbox** (incompatibile con i dispositivi audio virtuali CoreAudio/AUHAL)
 - **Nessuna telemetria, analisi o raccolta dati** — tutti i dati rimangono sul tuo Mac
-- Installa solo dalle [GitHub Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases) ufficiali
+- Installa solo dalle [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases) ufficiali
 - Firmata ad-hoc — clic destro → Apri al primo avvio per bypassare il Gatekeeper
 
 ## 🤝 Contribuire
@@ -207,7 +227,15 @@ SystemEQ elabora **l'uscita audio di sistema**. I DAW di solito bypassano l'usci
 
 ## 📄 Licenza
 
-Licenza MIT — Vedi [LICENSE](LICENSE) per i dettagli.
+**GNU General Public License v3.0** — vedi [LICENSE](LICENSE).
+
+SystemEQ è software libero. Puoi usarlo, modificarlo e ridistribuirlo, ma
+**qualsiasi fork o opera derivata** deve essere rilasciato sotto GPLv3 con
+il codice sorgente completo. Fork chiusi o commerciali a pagamento non
+sono permessi.
+
+I componenti di terze parti e le rispettive licenze sono elencati in
+[THIRDPARTY.md](THIRDPARTY.md).
 
 ## 🙏 Ringraziamenti
 
@@ -217,14 +245,14 @@ Licenza MIT — Vedi [LICENSE](LICENSE) per i dettagli.
 
 ## 💖 Supporta lo sviluppo
 
-- ☕ [Ko-fi](https://ko-fi.com/denyszamorniak)
-- 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denyszamorniak)
-- 💝 [GitHub Sponsors](https://github.com/sponsors/denyszamorniak)
+- ☕ [Ko-fi](https://ko-fi.com/denzam)
+- 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denzam)
+- 💝 [GitHub Sponsors](https://github.com/sponsors/denzam)
 
 ## 📧 Contatti
 
-- **GitHub**: [@denyszamorniak](https://github.com/denyszamorniak)
-- **Issues / Domande**: [GitHub Issues](https://github.com/denyszamorniak/SystemEQ-for-Mac/issues)
+- **GitHub**: [@denzam](https://github.com/denzam)
+- **Issues / Domande**: [GitHub Issues](https://github.com/denzam/SystemEQ-for-Mac/issues)
 
 ---
 

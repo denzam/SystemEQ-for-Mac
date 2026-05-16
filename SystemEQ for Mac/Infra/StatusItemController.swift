@@ -7,6 +7,7 @@ final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private var menu: NSMenu?
 
+    // swiftlint:disable implicitly_unwrapped_optional
     private var statusLine: NSMenuItem!
     private var blackHoleLine: NSMenuItem!
     private var routingLine: NSMenuItem!
@@ -16,6 +17,7 @@ final class StatusItemController: NSObject {
     private var toggleEQItem: NSMenuItem!
     private var openMainItem: NSMenuItem!
     private var quitItem: NSMenuItem!
+    // swiftlint:enable implicitly_unwrapped_optional
 
     private var cancellables: Set<AnyCancellable> = []
     private var presetObserver: NSObjectProtocol?

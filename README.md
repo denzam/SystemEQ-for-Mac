@@ -4,7 +4,7 @@
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 > 🇬🇧 English | 🇺🇦 [Українська](README.ua.md) | 🇮🇹 [Italiano](README.it.md)
 
@@ -45,18 +45,37 @@
 
 ### Installation
 
-#### Option 1: Download DMG (Recommended)
-
-1. Download the latest release from [Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
-2. Open the `.dmg` file
-3. Drag `SystemEQ for Mac.app` to Applications
-4. Right-click → Open on first launch (Gatekeeper warning — app is ad-hoc signed, not notarized)
-5. Follow the **Setup Assistant** to install BlackHole
-
-#### Option 2: Build from Source
+#### Option 1: Homebrew (easiest — bypasses Gatekeeper automatically)
 
 ```bash
-git clone https://github.com/denyszamorniak/SystemEQ-for-Mac.git
+brew install --cask denzam/systemeq/systemeq
+```
+
+The Cask removes the quarantine attribute on install, so the app opens
+without a Gatekeeper prompt.
+
+#### Option 2: Download DMG
+
+1. Download the latest `.dmg` or `.zip` from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`
+3. **First launch (one of):**
+   - **Right-click the app → Open → Open** in the confirmation dialog, or
+   - Try to launch, then open **System Settings → Privacy & Security → Open Anyway**, or
+   - From Terminal:
+     ```bash
+     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
+     ```
+4. Follow the **Setup Assistant** to install BlackHole
+
+> The app is **ad-hoc signed** (free, self-signed) — not notarized with an
+> Apple Developer ID. Gatekeeper therefore shows a warning on first launch.
+> This is intentional: SystemEQ stays free and does not require the paid
+> Apple Developer Program. The Gatekeeper steps above are one-time only.
+
+#### Option 3: Build from Source
+
+```bash
+git clone https://github.com/denzam/SystemEQ-for-Mac.git
 cd "SystemEQ for Mac"
 open "SystemEQ for Mac.xcodeproj"
 # Press Cmd+R to build and run
@@ -194,7 +213,7 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 
 - This app is **not sandboxed** (incompatible with CoreAudio/AUHAL virtual audio devices)
 - **No telemetry, analytics, or data collection** — all data stays on your Mac
-- Only install from official [GitHub Releases](https://github.com/denyszamorniak/SystemEQ-for-Mac/releases)
+- Only install from official [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
 - Ad-hoc signed — right-click → Open on first launch to bypass Gatekeeper
 
 ## 🤝 Contributing
@@ -207,7 +226,15 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 
 ## 📄 License
 
-MIT License — See [LICENSE](LICENSE) for details.
+**GNU General Public License v3.0** — see [LICENSE](LICENSE).
+
+SystemEQ is free software. You may use, modify, and redistribute it, but
+any redistributed version (including forks and derivative works) must
+also be released under GPLv3 with full source code available. Closed-source
+or paid commercial forks are not permitted.
+
+Third-party components and their licenses are listed in
+[THIRDPARTY.md](THIRDPARTY.md).
 
 ## 🙏 Credits
 
@@ -217,14 +244,14 @@ MIT License — See [LICENSE](LICENSE) for details.
 
 ## 💖 Support Development
 
-- ☕ [Ko-fi](https://ko-fi.com/denyszamorniak)
-- 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denyszamorniak)
-- 💝 [GitHub Sponsors](https://github.com/sponsors/denyszamorniak)
+- ☕ [Ko-fi](https://ko-fi.com/denzam)
+- 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denzam)
+- 💝 [GitHub Sponsors](https://github.com/sponsors/denzam)
 
 ## 📧 Contact
 
-- **GitHub**: [@denyszamorniak](https://github.com/denyszamorniak)
-- **Issues / Questions**: [GitHub Issues](https://github.com/denyszamorniak/SystemEQ-for-Mac/issues)
+- **GitHub**: [@denzam](https://github.com/denzam)
+- **Issues / Questions**: [GitHub Issues](https://github.com/denzam/SystemEQ-for-Mac/issues)
 
 ---
 

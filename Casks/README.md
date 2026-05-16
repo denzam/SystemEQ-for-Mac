@@ -4,7 +4,7 @@
 
 ### Встановлення
 ```bash
-brew tap denyszamorniak/systemeq
+brew tap denzam/systemeq
 brew install --cask systemeq
 ```
 
@@ -27,7 +27,7 @@ brew uninstall --cask systemeq
 
 ### Крок 2: Додати формулу
 ```bash
-git clone https://github.com/denyszamorniak/homebrew-systemeq.git
+git clone https://github.com/denzam/homebrew-systemeq.git
 mkdir -p homebrew-systemeq/Casks
 cp Casks/systemeq.rb homebrew-systemeq/Casks/
 cd homebrew-systemeq
