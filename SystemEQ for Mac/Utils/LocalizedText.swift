@@ -214,24 +214,8 @@ struct CrossfadeText: View {
 // MARK: - View Blur Modifier (Blur entire view on language change)
 
 struct ViewBlurModifier: ViewModifier {
-    @State private var blurRadius: CGFloat = 0
-
     func body(content: Content) -> some View {
         content
-            .blur(radius: blurRadius)
-            .onReceive(NotificationCenter.default.publisher(for: .languageChanged)) { _ in
-                // Blur out
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    blurRadius = 6
-                }
-
-                // Blur in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        blurRadius = 0
-                    }
-                }
-            }
     }
 }
 

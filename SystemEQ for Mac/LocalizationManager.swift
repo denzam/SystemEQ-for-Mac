@@ -3833,22 +3833,20 @@ public final class LocalizationManager: ObservableObject {
     }
 
     public func setLanguage(_ language: AppLanguage) {
-        queue.async(flags: .barrier) { [weak self] in
+        let apply = { [weak self] in
             guard let self else { return }
-
-            // Save language on background queue
-            self.saveLanguage()
-
-            // Update @Published property on main thread
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.currentLanguage = language
-
-                // Post notification immediately for smooth UI transitions
-                dlog("📢 Posting languageChanged notification...", category: .general)
-                NotificationCenter.default.post(name: .languageChanged, object: nil)
-                dlog("✅ languageChanged notification posted", category: .general)
-            }
+            self.currentLanguage = language
+            dlog("📢 Posting languageChanged notification...", category: .general)
+            NotificationCenter.default.post(name: .languageChanged, object: nil)
+            dlog("✅ languageChanged notification posted", category: .general)
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+        queue.async { [weak self] in
+            self?.saveLanguage()
         }
     }
 
@@ -3872,15 +3870,13 @@ public final class LocalizationManager: ObservableObject {
 
     /// Get localized string for current language
     public func localizedString(for key: LocalizedString) -> String {
-        queue.sync {
-            let language = self.currentLanguage // Read currentLanguage inside the queue
-            guard let translations = LocalizationData.translations[key],
-                  let localizedString = translations[language] else {
-                dlog("⚠️ Missing translation for \(key) in \(language.rawValue)", category: .general)
-                return LocalizationData.translations[key]?[.english] ?? String(describing: key)
-            }
-            return localizedString
+        let language = currentLanguage
+        guard let translations = LocalizationData.translations[key],
+              let localizedString = translations[language] else {
+            dlog("⚠️ Missing translation for \(key) in \(language.rawValue)", category: .general)
+            return LocalizationData.translations[key]?[.english] ?? String(describing: key)
         }
+        return localizedString
     }
 
     /// Get localized string with arguments
