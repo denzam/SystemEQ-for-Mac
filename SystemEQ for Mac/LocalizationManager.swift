@@ -3823,8 +3823,6 @@ public final class LocalizationManager: ObservableObject {
     /// ... rest of the code remains the same ...
     public static let shared = LocalizationManager()
 
-    private let queue = DispatchQueue(label: "localization", qos: .userInitiated, attributes: .concurrent)
-
     @Published public var currentLanguage: AppLanguage {
         didSet {
             saveLanguage()
