@@ -563,11 +563,14 @@ class VisualizerController: NSObject {
         // Archive root is `presets-cream-of-the-crop-master/` — move its contents into basePath.
         // Skip macOS-generated metadata folders (`__MACOSX`) and dotfiles so we don't pick them as the root.
         let fm = FileManager.default
-        guard let roots = try? fm.contentsOfDirectory(at: stagingDir, includingPropertiesForKeys: nil),
-              let archiveRoot = roots.first(where: {
-                  let name = $0.lastPathComponent
-                  return !name.hasPrefix("__") && !name.hasPrefix(".")
-              }) else {
+        guard let roots = try? fm.contentsOfDirectory(
+            at: stagingDir, includingPropertiesForKeys: [.isDirectoryKey]
+        ),
+            let archiveRoot = roots.first(where: {
+                let name = $0.lastPathComponent
+                let isDir = (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                return isDir && !name.hasPrefix("__") && !name.hasPrefix(".")
+            }) else {
             print("[ProjectMHelper] Extracted archive is empty")
             return
         }
