@@ -4,6 +4,14 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] — 2026-05-16
+
+Follow-up to v1.0.5.
+
+### Fixed
+
+- `LocalizationManager.setLanguage(_:)` no longer issues a redundant `queue.async { saveLanguage() }`. The `@Published currentLanguage` already persists via its `didSet`; the extra write could race ahead of the main-thread update on background-thread callers and store a stale value to `UserDefaults` (#21)
+
 ## [1.0.5] — 2026-05-16
 
 Critical hang fix and a rendering regression in AutoEQ.
