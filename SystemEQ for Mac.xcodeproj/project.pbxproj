@@ -265,8 +265,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"/usr/local/lib/libprojectM-4.4.1.6.dylib",
-				"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib",
 			);
 			name = "Copy projectM Libraries";
 			outputFileListPaths = (
@@ -277,7 +277,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"/usr/local/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
 		};
 		C0PROJECTM002 /* Copy projectM Libraries */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -287,8 +287,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"/usr/local/lib/libprojectM-4.4.1.6.dylib",
-				"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib",
 			);
 			name = "Copy projectM Libraries";
 			outputFileListPaths = (
@@ -299,7 +299,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"/usr/local/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"/usr/local/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -348,13 +348,13 @@
 					"GL_SILENCE_DEPRECATION=1",
 				);
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = /usr/local/include;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/include";
 				INFOPLIST_FILE = "$(SRCROOT)/Config/ProjectMHelper/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/lib";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0.0;
 				ONLY_ACTIVE_ARCH = NO;
@@ -417,13 +417,13 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_PREPROCESSOR_DEFINITIONS = "GL_SILENCE_DEPRECATION=1";
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = /usr/local/include;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/include";
 				INFOPLIST_FILE = "$(SRCROOT)/Config/ProjectMHelper/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/lib";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0.0;
 				OTHER_LDFLAGS = (
@@ -542,14 +542,14 @@
 					"GL_SILENCE_DEPRECATION=1",
 				);
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = /usr/local/include;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/include";
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/lib";
 				MARKETING_VERSION = 1.0.0;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = (
@@ -583,14 +583,14 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = "GL_SILENCE_DEPRECATION=1";
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = /usr/local/include;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/include";
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = /usr/local/lib;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/projectM/lib";
 				MARKETING_VERSION = 1.0.0;
 				OTHER_LDFLAGS = (
 					"-lprojectM-4",
