@@ -563,7 +563,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM";
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=\"$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM/module.modulemap\"";
+				SWIFT_INCLUDE_PATHS = "\"$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM\"";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/SystemEQ for Mac/SystemEQ_for_Mac-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -604,7 +605,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM";
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=\"$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM/module.modulemap\"";
+				SWIFT_INCLUDE_PATHS = "\"$(SRCROOT)/SystemEQ for Mac/Audio/Visualizer/ProjectM\"";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/SystemEQ for Mac/SystemEQ_for_Mac-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
