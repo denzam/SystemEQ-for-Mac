@@ -471,19 +471,118 @@ class VisualizerController: NSObject {
             projectm_set_texture_search_paths(handle, &texturePaths, 1)
         }
 
-        // Scan and categorize presets
-        scanPresets(at: presetsPath)
-
-        // Create playlist and load filtered presets
+        // Create playlist (always needed; will be populated by scanPresets → reloadPlaylist)
         if let playlist = projectm_playlist_create(handle) {
             playlistHandle = playlist
-            reloadPlaylist()
+        }
+
+        // Ensure presets exist on disk; download in background on first run if empty.
+        ensurePresetsAvailable(at: presetsPath) { [weak self] in
+            guard let self else { return }
+            self.scanPresets(at: presetsPath)
+            self.reloadPlaylist()
         }
 
         // Start display link
         startDisplayLink()
 
         print("[ProjectMHelper] projectM initialized: \(width)x\(height)")
+    }
+
+    // MARK: - Preset Bootstrap (first-run download)
+
+    private static let presetsArchiveURL = URL(
+        string: "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/refs/heads/master.zip"
+    )!
+
+    private func ensurePresetsAvailable(at basePath: String, completion: @escaping () -> Void) {
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(atPath: basePath, withIntermediateDirectories: true)
+
+        if hasMilkPresets(at: basePath) {
+            completion()
+            return
+        }
+
+        print("[ProjectMHelper] No presets found at \(basePath) — downloading…")
+
+        URLSession.shared.downloadTask(with: VisualizerController.presetsArchiveURL) { [weak self] tmpURL, _, error in
+            guard let self else { return }
+            guard let tmpURL, error == nil else {
+                print("[ProjectMHelper] Preset download failed: \(error?.localizedDescription ?? "unknown")")
+                DispatchQueue.main.async { completion() }
+                return
+            }
+
+            let zipURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("systemeq-presets-\(UUID().uuidString).zip")
+            do {
+                try FileManager.default.moveItem(at: tmpURL, to: zipURL)
+            } catch {
+                print("[ProjectMHelper] Failed to stage preset archive: \(error)")
+                DispatchQueue.main.async { completion() }
+                return
+            }
+
+            self.extractPresetArchive(zipURL: zipURL, into: basePath)
+            try? FileManager.default.removeItem(at: zipURL)
+
+            DispatchQueue.main.async { completion() }
+        }.resume()
+    }
+
+    private func hasMilkPresets(at basePath: String) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(atPath: basePath) else { return false }
+        while let path = enumerator.nextObject() as? String {
+            if path.hasSuffix(".milk") { return true }
+        }
+        return false
+    }
+
+    private func extractPresetArchive(zipURL: URL, into basePath: String) {
+        let stagingDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("systemeq-presets-extract-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stagingDir) }
+
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        unzip.arguments = ["-q", zipURL.path, "-d", stagingDir.path]
+        do {
+            try unzip.run()
+            unzip.waitUntilExit()
+        } catch {
+            print("[ProjectMHelper] unzip failed to launch: \(error)")
+            return
+        }
+        guard unzip.terminationStatus == 0 else {
+            print("[ProjectMHelper] unzip exited with status \(unzip.terminationStatus)")
+            return
+        }
+
+        // Archive root is `presets-cream-of-the-crop-master/` — move its contents into basePath.
+        let fm = FileManager.default
+        guard let roots = try? fm.contentsOfDirectory(at: stagingDir, includingPropertiesForKeys: nil),
+              let archiveRoot = roots.first else {
+            print("[ProjectMHelper] Extracted archive is empty")
+            return
+        }
+
+        guard let entries = try? fm.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil)
+        else { return }
+        let baseURL = URL(fileURLWithPath: basePath)
+        for entry in entries {
+            let dest = baseURL.appendingPathComponent(entry.lastPathComponent)
+            try? fm.removeItem(at: dest)
+            do {
+                try fm.moveItem(at: entry, to: dest)
+            } catch {
+                print("[ProjectMHelper] Failed to install \(entry.lastPathComponent): \(error)")
+            }
+        }
+
+        let installed = (try? fm.contentsOfDirectory(atPath: basePath).count) ?? 0
+        print("[ProjectMHelper] Presets installed (\(installed) entries) at \(basePath)")
     }
 
     // MARK: - Preset Scanning
