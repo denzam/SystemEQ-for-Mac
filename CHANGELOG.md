@@ -6,7 +6,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.4] — 2026-05-16
 
-Robustness pass with a code-quality cleanup.
+Robustness improvements and Code Quality cleanup.
 
 ### Changed
 - Repository-wide `swiftformat` pass to clear pre-existing violations and unblock the Code Quality CI workflow (#12)
