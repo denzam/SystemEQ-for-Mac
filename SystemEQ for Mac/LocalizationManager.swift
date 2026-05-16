@@ -3845,9 +3845,6 @@ public final class LocalizationManager: ObservableObject {
         } else {
             DispatchQueue.main.async(execute: apply)
         }
-        queue.async { [weak self] in
-            self?.saveLanguage()
-        }
     }
 
     private let languageKey = "AppLanguage"
