@@ -14,7 +14,7 @@ Installer UX improvements. No application code changes.
 - `dmg-assets/generate-background.swift` generator script invoked from the release workflow
 
 ### Changed
-- Release workflow (`.github/workflows/release.yml`) copies the README and renders the background before calling `create-dmg`
+- Release workflow (`.github/workflows/release.yml`) copies the `README - HOW TO OPEN.txt` and renders the background before calling `create-dmg`
 
 ## [1.0.0] — 2026-05-10
 
