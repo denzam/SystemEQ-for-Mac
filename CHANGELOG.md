@@ -9,7 +9,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Performance follow-up to v1.0.2.
 
 ### Changed
-- `ProjectMHelper` scans ~9 795 preset files on a `.userInitiated` queue instead of the main thread, eliminating the UI hang seen on first run (#8)
+- `ProjectMHelper` scans ~9,800 preset files on a `.userInitiated` queue instead of the main thread, eliminating the UI hang seen on first run (#8)
 - Preset archive extraction filters out macOS-generated metadata folders (`__MACOSX`, dotfiles) when locating the content root (#8)
 
 ## [1.0.2] — 2026-05-16
