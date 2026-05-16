@@ -4,6 +4,13 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-05-16
+
+Bug-fix release.
+
+### Fixed
+- Visualizer launched with `0 presets` because `~/Library/Application Support/SystemEQ/presets/` was never provisioned by the installer or the Cask — only projectM's idle preset rendered and the category picker was empty. `ProjectMHelper` now downloads `presets-cream-of-the-crop` on first run when the directory is empty, then populates the playlist without a restart
+
 ## [1.0.1] — 2026-05-16
 
 Installer UX improvements. No application code changes.
