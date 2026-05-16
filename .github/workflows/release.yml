@@ -58,21 +58,26 @@ jobs:
           codesign --force --deep --sign - "build/export/SystemEQ for Mac.app"
           codesign --verify --verbose=2 "build/export/SystemEQ for Mac.app"
 
+      - name: Generate DMG background
+        run: |
+          swift dmg-assets/generate-background.swift build/dmg-background.png
+
       - name: Create DMG
         run: |
           mkdir -p build/dmg_content
           cp -R "build/export/SystemEQ for Mac.app" build/dmg_content/
-          ln -s /Applications build/dmg_content/Applications
+          cp "dmg-assets/README - HOW TO OPEN.txt" build/dmg_content/
 
           create-dmg \
             --volname "SystemEQ for Mac" \
+            --background "build/dmg-background.png" \
             --window-pos 200 120 \
             --window-size 600 400 \
-            --icon-size 100 \
-            --icon "SystemEQ for Mac.app" 150 200 \
-            --icon "Applications" 450 200 \
+            --icon-size 96 \
+            --icon "SystemEQ for Mac.app" 160 230 \
+            --icon "README - HOW TO OPEN.txt" 300 320 \
+            --app-drop-link 440 230 \
             --hide-extension "SystemEQ for Mac.app" \
-            --app-drop-link 450 200 \
             --no-internet-enable \
             "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
             build/dmg_content \
