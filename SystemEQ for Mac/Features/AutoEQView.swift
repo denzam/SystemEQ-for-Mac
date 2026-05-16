@@ -486,7 +486,6 @@ struct AutoEQView: View {
         .sheet(isPresented: $showAutoEQSetup) {
             autoEQSetupDialog()
         }
-        .blurOnLanguageChange()
     }
 
     // MARK: - Offline index helpers

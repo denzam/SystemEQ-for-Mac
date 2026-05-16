@@ -4,6 +4,15 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-05-16
+
+Critical hang fix and a rendering regression in AutoEQ.
+
+### Fixed
+
+- App froze on the main thread when switching language after opening and closing the Visualizer. `LocalizationManager.setLanguage(_:)` no longer dispatches the `@Published` write through a `queue.async(.barrier)` that could deadlock against SwiftUI layout-time reads of `localizedString(for:)`; the getter is now lock-free and the save runs on a background queue without a barrier
+- AutoEQ window labels ("Type a model name to search", "Band Mode", "Favorites", "Mapped Preview") rendered upside-down after a language change. The animated `blur(radius:)` cycle in `ViewBlurModifier` left CALayer transforms in an inconsistent state for the affected Text views; the modifier is now a no-op
+
 ## [1.0.4] — 2026-05-16
 
 Robustness improvements and Code Quality cleanup.
