@@ -9,8 +9,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Code-quality and robustness pass. No user-facing behavior changes.
 
 ### Changed
-- Preset archive root selection now requires the candidate entry to be a directory and short-circuits on filename, so a stray `README` / `LICENSE` at the archive top level cannot be picked as the presets root (#11, #12)
 - Repository-wide `swiftformat` pass to clear pre-existing violations and unblock the Code Quality CI workflow (#12)
+
+### Fixed
+- Preset archive root selection now requires the candidate entry to be a directory and short-circuits on filename, so a stray `README` / `LICENSE` at the archive top level cannot be picked as the presets root (#11, #12)
 
 ## [1.0.3] — 2026-05-16
 
