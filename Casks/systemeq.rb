@@ -1,6 +1,6 @@
 cask "systemeq" do
-  version "1.0.0"
-  sha256 "998b8ffbea44533db68effd0fc17074041e2304c94f9ced1f0d7f5ea1af07339"
+  version "1.0.1"
+  sha256 "9a7258cb6fa22a5e699f7cf54104f0f806469a7b97a822d112a0b27deec5207a"
 
   url "https://github.com/denzam/SystemEQ-for-Mac/releases/download/v#{version}/SystemEQ-v#{version}.dmg"
   name "SystemEQ for Mac"
