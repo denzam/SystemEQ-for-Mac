@@ -478,9 +478,9 @@ class VisualizerController: NSObject {
 
         // Ensure presets exist on disk; download in background on first run if empty.
         ensurePresetsAvailable(at: presetsPath) { [weak self] in
-            guard let self else { return }
-            self.scanPresets(at: presetsPath)
-            self.reloadPlaylist()
+            self?.scanPresetsAsync(at: presetsPath) { [weak self] in
+                self?.reloadPlaylist()
+            }
         }
 
         // Start display link
@@ -561,9 +561,13 @@ class VisualizerController: NSObject {
         }
 
         // Archive root is `presets-cream-of-the-crop-master/` — move its contents into basePath.
+        // Skip macOS-generated metadata folders (`__MACOSX`) and dotfiles so we don't pick them as the root.
         let fm = FileManager.default
         guard let roots = try? fm.contentsOfDirectory(at: stagingDir, includingPropertiesForKeys: nil),
-              let archiveRoot = roots.first else {
+              let archiveRoot = roots.first(where: {
+                  let name = $0.lastPathComponent
+                  return !name.hasPrefix("__") && !name.hasPrefix(".")
+              }) else {
             print("[ProjectMHelper] Extracted archive is empty")
             return
         }
@@ -587,59 +591,64 @@ class VisualizerController: NSObject {
 
     // MARK: - Preset Scanning
 
-    private func scanPresets(at basePath: String) {
-        let fileManager = FileManager.default
-        allPresets = []
-        var categories = Set<String>()
+    /// Enumerates ~10k preset files and stats each one — ~hundreds of ms even on SSD,
+    /// so the I/O runs on a background queue and only the property writes hop to main.
+    private func scanPresetsAsync(at basePath: String, completion: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileManager = FileManager.default
+            var presets: [PresetInfo] = []
+            var categories = Set<String>()
 
-        guard let enumerator = fileManager.enumerator(atPath: basePath) else {
-            print("[ProjectMHelper] Failed to enumerate presets at \(basePath)")
-            return
-        }
-
-        while let relativePath = enumerator.nextObject() as? String {
-            guard relativePath.hasSuffix(".milk") else { continue }
-
-            let fullPath = (basePath as NSString).appendingPathComponent(relativePath)
-
-            // Get file size for weight classification
-            var fileSize = 0
-            if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
-               let size = attrs[.size] as? Int {
-                fileSize = size
+            guard let enumerator = fileManager.enumerator(atPath: basePath) else {
+                print("[ProjectMHelper] Failed to enumerate presets at \(basePath)")
+                DispatchQueue.main.async { completion() }
+                return
             }
 
-            // Extract category from path (first directory component)
-            let pathComponents = relativePath.components(separatedBy: "/")
-            let category = pathComponents.count > 1 ? pathComponents[0] : "Uncategorized"
-            categories.insert(category)
+            while let relativePath = enumerator.nextObject() as? String {
+                guard relativePath.hasSuffix(".milk") else { continue }
 
-            // Extract preset name
-            let name = (relativePath as NSString).lastPathComponent
-                .replacingOccurrences(of: ".milk", with: "")
+                let fullPath = (basePath as NSString).appendingPathComponent(relativePath)
 
-            let preset = PresetInfo(
-                path: fullPath,
-                name: name,
-                category: category,
-                weight: PresetWeight.classify(fileSize: fileSize),
-                fileSize: fileSize
-            )
-            allPresets.append(preset)
+                var fileSize = 0
+                if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
+                   let size = attrs[.size] as? Int {
+                    fileSize = size
+                }
+
+                let pathComponents = relativePath.components(separatedBy: "/")
+                let category = pathComponents.count > 1 ? pathComponents[0] : "Uncategorized"
+                categories.insert(category)
+
+                let name = (relativePath as NSString).lastPathComponent
+                    .replacingOccurrences(of: ".milk", with: "")
+
+                presets.append(PresetInfo(
+                    path: fullPath,
+                    name: name,
+                    category: category,
+                    weight: PresetWeight.classify(fileSize: fileSize),
+                    fileSize: fileSize
+                ))
+            }
+
+            let sortedCategories = ["All"] + categories.sorted()
+            let lightCount = presets.count(where: { $0.weight == .light })
+            let mediumCount = presets.count(where: { $0.weight == .medium })
+            let heavyCount = presets.count(where: { $0.weight == .heavy })
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.allPresets = presets
+                self.filteredPresets = presets
+                self.availableCategories = sortedCategories
+                print(
+                    "[ProjectMHelper] Scanned \(presets.count) presets: \(lightCount) light, \(mediumCount) medium, \(heavyCount) heavy"
+                )
+                print("[ProjectMHelper] Categories: \(sortedCategories)")
+                completion()
+            }
         }
-
-        availableCategories = ["All"] + categories.sorted()
-        filteredPresets = allPresets
-
-        // Count by weight
-        let lightCount = allPresets.count(where: { $0.weight == .light })
-        let mediumCount = allPresets.count(where: { $0.weight == .medium })
-        let heavyCount = allPresets.count(where: { $0.weight == .heavy })
-
-        print(
-            "[ProjectMHelper] Scanned \(allPresets.count) presets: \(lightCount) light, \(mediumCount) medium, \(heavyCount) heavy"
-        )
-        print("[ProjectMHelper] Categories: \(availableCategories)")
     }
 
     // MARK: - Broken preset blacklist
