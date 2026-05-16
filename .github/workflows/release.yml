@@ -139,3 +139,29 @@ jobs:
             build/SystemEQ-v${{ steps.version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          SHA256=$(shasum -a 256 "build/SystemEQ-v${VERSION}.dmg" | awk '{print $1}')
+          echo "DMG SHA256: $SHA256"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/denzam/homebrew-systemeq.git" tap
+          cd tap
+
+          sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/systemeq.rb
+          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/systemeq.rb
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "Cask already at v${VERSION}, nothing to do."
+            exit 0
+          fi
+
+          git add Casks/systemeq.rb
+          git commit -m "cask: bump to v${VERSION}"
+          git push origin main
