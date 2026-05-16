@@ -30,6 +30,7 @@ public final class CoreAudioEngine: ObservableObject {
         get { peakMeter.inputPeakLevel }
         set { peakMeter.inputPeakLevel = newValue }
     }
+
     public var outputPeakLevel: Float {
         get { peakMeter.outputPeakLevel }
         set { peakMeter.outputPeakLevel = newValue }
@@ -126,7 +127,8 @@ public final class CoreAudioEngine: ObservableObject {
     // Visualizer callback (called from audio thread)
     public var visualizerCallback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?
     fileprivate var visualizerCounter: Int = 0
-    fileprivate var visualizerInterval: Int = 1024 // ⚡ Update visualizer every ~21ms (48kHz) - halved frequency to reduce CPU
+    fileprivate var visualizerInterval: Int =
+        1024 // ⚡ Update visualizer every ~21ms (48kHz) - halved frequency to reduce CPU
 
     // Test tone
     fileprivate var testToneEnabled: Bool = false
@@ -144,15 +146,16 @@ public final class CoreAudioEngine: ObservableObject {
 
     fileprivate var lastInputBufferFrames: UInt32 = 0
     #if DEBUG
-    fileprivate var maxInputCallbackNanos: UInt64 = 0
-    fileprivate var sumInputCallbackNanos: UInt64 = 0
-    fileprivate var countInputCallbacks: UInt64 = 0
-    fileprivate static let machTimebase: mach_timebase_info_data_t = {
-        var tb = mach_timebase_info_data_t()
-        mach_timebase_info(&tb)
-        return tb
-    }()
-    private var diagStatsTimer: DispatchSourceTimer?
+        fileprivate var maxInputCallbackNanos: UInt64 = 0
+        fileprivate var sumInputCallbackNanos: UInt64 = 0
+        fileprivate var countInputCallbacks: UInt64 = 0
+        fileprivate static let machTimebase: mach_timebase_info_data_t = {
+            var tb = mach_timebase_info_data_t()
+            mach_timebase_info(&tb)
+            return tb
+        }()
+
+        private var diagStatsTimer: DispatchSourceTimer?
     #endif
 
     // Promote each audio callback thread to time-constraint scheduling on its
@@ -193,8 +196,8 @@ public final class CoreAudioEngine: ObservableObject {
         return rate
     }
 
-    // One-shot log of buffer frame size + allowed range at setup.
-    // Useful in bug reports to understand actual device latency.
+    /// One-shot log of buffer frame size + allowed range at setup.
+    /// Useful in bug reports to understand actual device latency.
     private func logDeviceBufferInfo(_ deviceID: AudioDeviceID, label: String) {
         var rangeAddr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyBufferFrameSizeRange,
@@ -858,55 +861,55 @@ public final class CoreAudioEngine: ObservableObject {
             dlog("✅ Core Audio Engine started", category: .engine)
             dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
             #if DEBUG
-            startDiagStatsTimer()
+                startDiagStatsTimer()
             #endif
         } else {
             dlog("❌ Failed to start Core Audio Engine: in=\(s1), out=\(s2)", category: .engine)
         }
     }
 
-    // Audio-thread health timer. Flushes every 30s on main queue; only logs
-    // when something interesting happens (high max, underrun, overrun) so we
-    // don't pollute the console during normal operation.
+    /// Audio-thread health timer. Flushes every 30s on main queue; only logs
+    /// when something interesting happens (high max, underrun, overrun) so we
+    /// don't pollute the console during normal operation.
     private func startDiagStatsTimer() {
         #if DEBUG
-        diagStatsTimer?.cancel()
-        let t = DispatchSource.makeTimerSource(queue: .main)
-        t.schedule(deadline: .now() + 30.0, repeating: 30.0)
-        t.setEventHandler { [weak self] in
-            guard let self else { return }
-            let maxNs = self.maxInputCallbackNanos
-            let sumNs = self.sumInputCallbackNanos
-            let count = self.countInputCallbacks
-            self.maxInputCallbackNanos = 0
-            self.sumInputCallbackNanos = 0
-            self.countInputCallbacks = 0
-            let avgNs = count > 0 ? sumNs / count : 0
-            let diag = self.ringBuffer.snapshotAndResetDiag()
+            diagStatsTimer?.cancel()
+            let t = DispatchSource.makeTimerSource(queue: .main)
+            t.schedule(deadline: .now() + 30.0, repeating: 30.0)
+            t.setEventHandler { [weak self] in
+                guard let self else { return }
+                let maxNs = self.maxInputCallbackNanos
+                let sumNs = self.sumInputCallbackNanos
+                let count = self.countInputCallbacks
+                self.maxInputCallbackNanos = 0
+                self.sumInputCallbackNanos = 0
+                self.countInputCallbacks = 0
+                let avgNs = count > 0 ? sumNs / count : 0
+                let diag = self.ringBuffer.snapshotAndResetDiag()
 
-            let bufFrames = self.lastInputBufferFrames
-            let deadlineNs: UInt64 = bufFrames > 0
-                ? UInt64(Double(bufFrames) / self.currentSampleRate * 1_000_000_000)
-                : 0
-            let nearDeadline = deadlineNs > 0 && maxNs > deadlineNs / 2
-            if nearDeadline || diag.underruns > 0 || diag.overruns > 0 {
-                dlog(
-                    "⚠️ Audio health: max=\(maxNs / 1000)µs avg=\(avgNs / 1000)µs " +
-                    "(deadline=\(deadlineNs / 1000)µs) under=\(diag.underruns) over=\(diag.overruns)",
-                    level: .warning,
-                    category: .engine
-                )
+                let bufFrames = self.lastInputBufferFrames
+                let deadlineNs: UInt64 = bufFrames > 0
+                    ? UInt64(Double(bufFrames) / self.currentSampleRate * 1_000_000_000)
+                    : 0
+                let nearDeadline = deadlineNs > 0 && maxNs > deadlineNs / 2
+                if nearDeadline || diag.underruns > 0 || diag.overruns > 0 {
+                    dlog(
+                        "⚠️ Audio health: max=\(maxNs / 1000)µs avg=\(avgNs / 1000)µs " +
+                            "(deadline=\(deadlineNs / 1000)µs) under=\(diag.underruns) over=\(diag.overruns)",
+                        level: .warning,
+                        category: .engine
+                    )
+                }
             }
-        }
-        t.resume()
-        diagStatsTimer = t
+            t.resume()
+            diagStatsTimer = t
         #endif
     }
 
     private func stopDiagStatsTimer() {
         #if DEBUG
-        diagStatsTimer?.cancel()
-        diagStatsTimer = nil
+            diagStatsTimer?.cancel()
+            diagStatsTimer = nil
         #endif
     }
 
@@ -930,7 +933,7 @@ public final class CoreAudioEngine: ObservableObject {
         ringBuffer.reset()
 
         #if DEBUG
-        stopDiagStatsTimer()
+            stopDiagStatsTimer()
         #endif
 
         dlog("🛑 Core Audio Engine stopped", category: .engine)
@@ -1006,7 +1009,7 @@ public final class CoreAudioEngine: ObservableObject {
         defer { cleanupLock.unlock() }
         guard !isCleanedUp else { return }
         isCleanedUp = true
-        
+
         if let iu = inputUnit {
             AudioUnitUninitialize(iu)
             AudioComponentInstanceDispose(iu)
@@ -1267,12 +1270,12 @@ private func renderCallbackFunction(
 }
 
 #if DEBUG
-@inline(__always)
-private func machNanosSince(_ start: UInt64) -> UInt64 {
-    let end = mach_absolute_time()
-    let tb = CoreAudioEngine.machTimebase
-    return (end &- start) &* UInt64(tb.numer) / UInt64(tb.denom)
-}
+    @inline(__always)
+    private func machNanosSince(_ start: UInt64) -> UInt64 {
+        let end = mach_absolute_time()
+        let tb = CoreAudioEngine.machTimebase
+        return (end &- start) &* UInt64(tb.numer) / UInt64(tb.denom)
+    }
 #endif
 
 private func inputCaptureCallbackFunction(
@@ -1284,7 +1287,7 @@ private func inputCaptureCallbackFunction(
     ioData: UnsafeMutablePointer<AudioBufferList>?
 ) -> OSStatus {
     #if DEBUG
-    let diagStart = mach_absolute_time()
+        let diagStart = mach_absolute_time()
     #endif
 
     let engine = Unmanaged<CoreAudioEngine>.fromOpaque(inRefCon).takeUnretainedValue()
@@ -1382,10 +1385,10 @@ private func inputCaptureCallbackFunction(
         }
     }
     #if DEBUG
-    let nanos = machNanosSince(diagStart)
-    if nanos > engine.maxInputCallbackNanos { engine.maxInputCallbackNanos = nanos }
-    engine.sumInputCallbackNanos &+= nanos
-    engine.countInputCallbacks &+= 1
+        let nanos = machNanosSince(diagStart)
+        if nanos > engine.maxInputCallbackNanos { engine.maxInputCallbackNanos = nanos }
+        engine.sumInputCallbackNanos &+= nanos
+        engine.countInputCallbacks &+= 1
     #endif
 
     return noErr

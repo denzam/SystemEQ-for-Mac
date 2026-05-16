@@ -444,7 +444,8 @@ struct WindowContainer<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(useGlassEffect ? AnyView(VisualEffectBackground()) : AnyView(Color(nsColor: .windowBackgroundColor)))
+        .background(useGlassEffect ? AnyView(VisualEffectBackground()) :
+            AnyView(Color(nsColor: .windowBackgroundColor)))
     }
 }
 

@@ -180,7 +180,7 @@ public final class AudioEngine: ObservableObject {
         if let last = sorted.last, freq >= last.frequency { return last.gain }
         for i in 0..<(sorted.count - 1) {
             let lo = sorted[i], hi = sorted[i + 1]
-            if freq >= lo.frequency && freq <= hi.frequency {
+            if freq >= lo.frequency, freq <= hi.frequency {
                 let logLo = log10(lo.frequency)
                 let logHi = log10(hi.frequency)
                 let logF = log10(freq)

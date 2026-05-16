@@ -13,7 +13,6 @@ import Darwin
 import Foundation
 
 enum RealtimeThread {
-
     /// Promote the calling thread to time-constraint scheduling.
     /// Safe to call multiple times — the kernel simply overwrites the policy.
     /// - Parameters:

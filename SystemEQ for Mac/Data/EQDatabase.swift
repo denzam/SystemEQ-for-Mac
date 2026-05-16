@@ -8,7 +8,7 @@
 import Foundation
 import SQLite3
 
-// SQLITE_TRANSIENT tells SQLite to make its own copy of the string
+/// SQLITE_TRANSIENT tells SQLite to make its own copy of the string
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 // MARK: - Models

@@ -2,11 +2,7 @@ import AppKit
 import SwiftUI
 
 struct InfoPopoverButton<Content: View>: View {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
+    @ViewBuilder let content: Content
 
     var body: some View {
         _InfoPopoverAnchor(popoverContent: AnyView(content))
@@ -50,7 +46,8 @@ private struct _InfoPopoverAnchor: NSViewRepresentable {
             self.content = content
         }
 
-        @objc func toggle(_ sender: NSButton) {
+        @objc
+        func toggle(_ sender: NSButton) {
             if let popover, popover.isShown {
                 popover.close()
                 return

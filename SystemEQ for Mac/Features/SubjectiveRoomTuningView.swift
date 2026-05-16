@@ -395,7 +395,8 @@ struct SubjectiveRoomTuningView: View {
                 }) {
                     HStack {
                         Image(systemName: sineSweep.isPlaying ? "stop.fill" : "play.fill")
-                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization.localized(.playTone))
+                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization
+                            .localized(.playTone))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -643,9 +644,9 @@ struct SubjectiveRoomTuningView: View {
                         .fontWeight(.medium)
                 }
                 Text(localization.localized(.resonanceExplanation))
-                .font(AppTypography.label)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    .font(AppTypography.label)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
             .background(Color.blue.opacity(0.1))
@@ -676,10 +677,30 @@ struct SubjectiveRoomTuningView: View {
                 // Vertical buttons instead of segmented picker
                 VStack(spacing: 8) {
                     ForEach([
-                        (ResonancePoint.Severity.mild, localization.localized(.severityMild), "-2 dB", localization.localized(.severityMildDesc)),
-                        (ResonancePoint.Severity.moderate, localization.localized(.severityModerate), "-4 dB", localization.localized(.severityModerateDesc)),
-                        (ResonancePoint.Severity.severe, localization.localized(.severitySevere), "-6 dB", localization.localized(.severitySevereDesc)),
-                        (ResonancePoint.Severity.extreme, localization.localized(.severityExtreme), "-8 dB", localization.localized(.severityExtremeDesc))
+                        (
+                            ResonancePoint.Severity.mild,
+                            localization.localized(.severityMild),
+                            "-2 dB",
+                            localization.localized(.severityMildDesc)
+                        ),
+                        (
+                            ResonancePoint.Severity.moderate,
+                            localization.localized(.severityModerate),
+                            "-4 dB",
+                            localization.localized(.severityModerateDesc)
+                        ),
+                        (
+                            ResonancePoint.Severity.severe,
+                            localization.localized(.severitySevere),
+                            "-6 dB",
+                            localization.localized(.severitySevereDesc)
+                        ),
+                        (
+                            ResonancePoint.Severity.extreme,
+                            localization.localized(.severityExtreme),
+                            "-8 dB",
+                            localization.localized(.severityExtremeDesc)
+                        )
                     ], id: \.0) { severity, name, db, desc in
                         Button(action: {
                             newResonanceSeverity = severity
@@ -810,7 +831,7 @@ struct SubjectiveRoomTuningView: View {
 
         // Average notch gain across all filters to estimate loudness change
         let avgGain = appliedNotchFilters.map(\.gain).reduce(0, +) / Float(appliedNotchFilters.count)
-        gainMatchOffset = -avgGain  // compensate: filters cut, so add back when bypassed
+        gainMatchOffset = -avgGain // compensate: filters cut, so add back when bypassed
 
         abIsFiltered = true
         applyNotchFilters()

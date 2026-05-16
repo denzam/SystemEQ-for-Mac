@@ -16,7 +16,6 @@ import Foundation
 /// Real-time peak level meter for audio buffers
 /// Designed for use in audio render callbacks (lock-free, low overhead)
 public final class PeakMeter: ObservableObject {
-
     // MARK: - Published Properties (Main Thread)
 
     @Published public var inputPeakLevel: Float = 0.0

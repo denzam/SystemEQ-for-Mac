@@ -57,7 +57,6 @@ struct SystemEQ_for_MacApp: App {
                         dlog("Audio access authorized", category: .audio)
                     }
 
-
                     // NOTE: Python AutoEQ Server removed - using SQLite database instead
                     // To restore: see git history for AutoEQServer.swift
 
