@@ -243,9 +243,10 @@ I componenti di terze parti e le rispettive licenze sono elencati in
 - [BlackHole](https://github.com/ExistentialAudio/BlackHole) di Existential Audio — driver audio virtuale
 - [oratory1990](https://www.reddit.com/r/oratory1990/) — misurazioni cuffie e ricerca
 
+Un grazie anche a **Michel**, **Renato**, **David** e **Alberto** per il supporto e i consigli lungo il percorso.
+
 ## 💖 Supporta lo sviluppo
 
-- ☕ [Ko-fi](https://ko-fi.com/denzam)
 - 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denzam)
 - 💝 [GitHub Sponsors](https://github.com/sponsors/denzam)
 

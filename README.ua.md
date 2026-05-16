@@ -241,9 +241,10 @@ SystemEQ — вільне програмне забезпечення. Ти мо
 - [BlackHole](https://github.com/ExistentialAudio/BlackHole) від Existential Audio — віртуальний аудіодрайвер
 - [oratory1990](https://www.reddit.com/r/oratory1990/) — вимірювання навушників та дослідження
 
+Окрема подяка **Michel**, **Renato**, **David** та **Alberto** за підтримку та поради впродовж розробки.
+
 ## 💖 Підтримати розробку
 
-- ☕ [Ko-fi](https://ko-fi.com/denzam)
 - 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denzam)
 - 💝 [GitHub Sponsors](https://github.com/sponsors/denzam)
 

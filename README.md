@@ -242,9 +242,10 @@ Third-party components and their licenses are listed in
 - [BlackHole](https://github.com/ExistentialAudio/BlackHole) by Existential Audio — Virtual audio driver
 - [oratory1990](https://www.reddit.com/r/oratory1990/) — Headphone measurements and research
 
+Also thanks to **Michel**, **Renato**, **David** and **Alberto** for their support and advice along the way.
+
 ## 💖 Support Development
 
-- ☕ [Ko-fi](https://ko-fi.com/denzam)
 - 🍺 [Buy Me a Coffee](https://buymeacoffee.com/denzam)
 - 💝 [GitHub Sponsors](https://github.com/sponsors/denzam)
 
