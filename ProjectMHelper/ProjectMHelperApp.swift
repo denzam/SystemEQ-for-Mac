@@ -568,8 +568,8 @@ class VisualizerController: NSObject {
         ),
             let archiveRoot = roots.first(where: {
                 let name = $0.lastPathComponent
-                let isDir = (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                return isDir && !name.hasPrefix("__") && !name.hasPrefix(".")
+                guard !name.hasPrefix("__"), !name.hasPrefix(".") else { return false }
+                return (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             }) else {
             print("[ProjectMHelper] Extracted archive is empty")
             return

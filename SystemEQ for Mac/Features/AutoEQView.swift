@@ -18,7 +18,7 @@ struct AutoEQView: View {
     enum BandMode: String, CaseIterable, Identifiable { case ten = "10", thirtyOne = "31"; var id: String {
         rawValue
     } }
-private static let indexVersion = 5 // Increment when path logic changes
+    private static let indexVersion = 5 // Increment when path logic changes
     private static let indexUpdateInterval: TimeInterval = 30 * 24 * 3600 // 30 днів (1 місяць)
 
     // MARK: - Localization
@@ -794,7 +794,10 @@ private static let indexVersion = 5 // Increment when path logic changes
             let availableWidth = geo.size.width - dbAxisWidth - 6
             let minSpacing: CGFloat = bandMode == .thirtyOne ? 3 : 5
             let minBarWidth: CGFloat = bandMode == .thirtyOne ? 8 : 14
-            let spacing: CGFloat = max(minSpacing, min(10, (availableWidth - bandCount * minBarWidth) / max(1, bandCount - 1)))
+            let spacing: CGFloat = max(
+                minSpacing,
+                min(10, (availableWidth - bandCount * minBarWidth) / max(1, bandCount - 1))
+            )
             let hitWidth: CGFloat = max(minBarWidth, (availableWidth - spacing * (bandCount - 1)) / bandCount)
             let barWidth: CGFloat = bandMode == .thirtyOne ? max(hitWidth * 0.65, hitWidth - 4) : 14
             let gridDbs: [Int] = [12, 6, 0, -6, -12]
@@ -963,7 +966,7 @@ private static let indexVersion = 5 // Increment when path logic changes
         }
     }
 
-// MARK: - Search helpers
+    // MARK: - Search helpers
 
     private var normalizedQuery: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1405,7 +1408,8 @@ private static let indexVersion = 5 // Increment when path logic changes
         var a0 = 1.0, a1 = 0.0, a2 = 0.0
 
         switch b.type {
-        case .peak, .allPassPEQ:
+        case .allPassPEQ,
+             .peak:
             b0 = 1 + alpha * A
             b1 = -2 * cosW0
             b2 = 1 - alpha * A

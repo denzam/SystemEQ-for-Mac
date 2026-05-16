@@ -186,7 +186,11 @@ public final class BiquadFilterVDSP {
 
     /// Reset filter states (clears delay lines).
     public func reset() {
-        for i in delaysL.indices { delaysL[i] = 0 }
-        for i in delaysR.indices { delaysR[i] = 0 }
+        for i in delaysL.indices {
+            delaysL[i] = 0
+        }
+        for i in delaysR.indices {
+            delaysR[i] = 0
+        }
     }
 }

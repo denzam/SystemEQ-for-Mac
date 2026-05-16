@@ -26,7 +26,7 @@ final class ProjectMHelperClient: ObservableObject {
     @Published private(set) var availableCategories: [String] = ["All"]
     @Published private(set) var currentCategory: String = "All"
     @Published private(set) var currentWeight: String = "All"
-    
+
     @Published var isShuffleEnabled: Bool = true {
         didSet {
             sendCommand("SHUFFLE:\(isShuffleEnabled ? "1" : "0")")
@@ -38,14 +38,14 @@ final class ProjectMHelperClient: ObservableObject {
             sendCommand("LOCK:\(isPresetLocked ? "1" : "0")")
         }
     }
-    
+
     @Published var selectedCategory: String = "All" {
         didSet {
             guard selectedCategory != currentCategory else { return }
             sendCommand("CATEGORY:\(selectedCategory)")
         }
     }
-    
+
     @Published var selectedWeight: String = "All" {
         didSet {
             guard selectedWeight != currentWeight else { return }
@@ -80,10 +80,10 @@ final class ProjectMHelperClient: ObservableObject {
     private var statusUpdateTimer: Timer?
 
     // Lock-free ring buffer for audio (written on real-time audio thread, read on ipcQueue)
-    private let audioRingCapacity = 8192  // must be power of 2
+    private let audioRingCapacity = 8192 // must be power of 2
     nonisolated(unsafe) private var _audioRingBuffer: UnsafeMutablePointer<Float>
     nonisolated(unsafe) private var _audioWriteIdx: SEQAtomicInt32 = seq_atomic_int32_make(0)
-    private var _audioReadIdx: Int32 = 0  // only accessed from ipcQueue
+    private var _audioReadIdx: Int32 = 0 // only accessed from ipcQueue
     private var audioSendTimer: DispatchSourceTimer?
 
     // Pre-allocated send buffer (only touched from ipcQueue inside audioSendTimer handler)
@@ -130,7 +130,8 @@ final class ProjectMHelperClient: ObservableObject {
 
             // Monitor process termination (user closes window).
             // Close socket synchronously so pending writes fail fast instead of blocking/retrying.
-            // SO_NOSIGPIPE already prevents the fatal signal; this just avoids wasted work until MainActor cleanup runs.
+            // SO_NOSIGPIPE already prevents the fatal signal; this just avoids wasted work until MainActor cleanup
+            // runs.
             process.terminationHandler = { [weak self] _ in
                 if let self {
                     let sock = self.getSocket()
@@ -305,7 +306,7 @@ final class ProjectMHelperClient: ObservableObject {
                 withUnsafeMutablePointer(to: &addr.sun_path) { sunPathPtr in
                     let rawPtr = UnsafeMutableRawPointer(sunPathPtr).assumingMemoryBound(to: CChar.self)
                     strncpy(rawPtr, sourcePtr, maxPathLength - 1)
-                rawPtr[maxPathLength - 1] = 0
+                    rawPtr[maxPathLength - 1] = 0
                 }
             }
 
@@ -442,7 +443,11 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     /// Called from real-time audio thread — lock-free, no heap allocation
-    nonisolated private func processAudioData(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frameCount: Int) {
+    nonisolated private func processAudioData(
+        left: UnsafePointer<Float>,
+        right: UnsafePointer<Float>,
+        frameCount: Int
+    ) {
         let maxSamples = min(frameCount, 1024)
         let mask = Int32(audioRingCapacity - 1)
         for i in 0..<maxSamples {

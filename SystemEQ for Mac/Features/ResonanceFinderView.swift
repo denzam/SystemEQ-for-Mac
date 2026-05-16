@@ -318,7 +318,8 @@ struct ResonanceFinderView: View {
                 }) {
                     HStack {
                         Image(systemName: sineSweep.isPlaying ? "stop.fill" : "play.fill")
-                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization.localized(.playTone))
+                        Text(sineSweep.isPlaying ? localization.localized(.stopPlayback) : localization
+                            .localized(.playTone))
                     }
                     .frame(maxWidth: .infinity)
                 }

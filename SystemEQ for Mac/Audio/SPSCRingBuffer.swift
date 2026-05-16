@@ -14,7 +14,6 @@ import Accelerate
 import Foundation
 
 public final class SPSCRingBuffer {
-
     // MARK: - Properties
 
     private(set) var left: UnsafeMutablePointer<Float>?
@@ -127,8 +126,13 @@ public final class SPSCRingBuffer {
     }
 
     /// Diagnostic-only relaxed reads (main thread).
-    var writeIndex: Int { loadWriteRelaxed() }
-    var readIndex: Int { loadReadRelaxed() }
+    var writeIndex: Int {
+        loadWriteRelaxed()
+    }
+
+    var readIndex: Int {
+        loadReadRelaxed()
+    }
 
     // MARK: - Write (Producer / Input Callback)
 
@@ -290,8 +294,13 @@ public final class SPSCRingBuffer {
 }
 
 @inline(__always)
-private func interleaveStereo(l: UnsafePointer<Float>, r: UnsafePointer<Float>, out: UnsafeMutablePointer<Float>, count: Int) {
-    for i in 0 ..< count {
+private func interleaveStereo(
+    l: UnsafePointer<Float>,
+    r: UnsafePointer<Float>,
+    out: UnsafeMutablePointer<Float>,
+    count: Int
+) {
+    for i in 0..<count {
         out[i &* 2] = l[i]
         out[i &* 2 &+ 1] = r[i]
     }

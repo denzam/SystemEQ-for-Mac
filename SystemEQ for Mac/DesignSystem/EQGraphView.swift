@@ -59,8 +59,11 @@ struct EQGridBackground: View {
                     path.move(to: CGPoint(x: hPad, y: y))
                     path.addLine(to: CGPoint(x: size.width - hPad, y: y))
                     let isCenter = db == 0
-                    ctx.stroke(path, with: .color(.secondary.opacity(isCenter ? 0.35 : 0.15)),
-                               lineWidth: isCenter ? 1.5 : 0.5)
+                    ctx.stroke(
+                        path,
+                        with: .color(.secondary.opacity(isCenter ? 0.35 : 0.15)),
+                        lineWidth: isCenter ? 1.5 : 0.5
+                    )
                 }
 
                 for freq in freqLabels {
@@ -97,7 +100,9 @@ struct EQCurveView: View {
     let height: CGFloat
     let hPad: CGFloat
 
-    private var accentColor: Color { Color.accentColor }
+    private var accentColor: Color {
+        Color.accentColor
+    }
 
     private var points: [CGPoint] {
         bands.map { band in
@@ -181,9 +186,17 @@ struct EQBandHandle: View {
     @State private var isDragging = false
     @State private var dragStartGain: Float = 0
 
-    private var handleX: CGFloat { eqXFor(freq: band.frequency, width: size.width, hPad: hPad) }
-    private var handleY: CGFloat { eqYFor(gain: gain, height: size.height) }
-    private var midY: CGFloat { size.height / 2 }
+    private var handleX: CGFloat {
+        eqXFor(freq: band.frequency, width: size.width, hPad: hPad)
+    }
+
+    private var handleY: CGFloat {
+        eqYFor(gain: gain, height: size.height)
+    }
+
+    private var midY: CGFloat {
+        size.height / 2
+    }
 
     private var fillColor: Color {
         if gain == 0 { return Color.secondary.opacity(0.5) }

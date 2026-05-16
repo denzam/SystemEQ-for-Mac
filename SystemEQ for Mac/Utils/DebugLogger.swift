@@ -8,7 +8,7 @@ import Foundation
 #if DEBUG
 
     /// Категорії логування для фільтрації
-    enum LogCategory: String, Sendable {
+    enum LogCategory: String {
         case audio = "🔊 Audio"
         case engine = "⚙️ Engine"
         case routing = "🔀 Routing"
@@ -22,7 +22,7 @@ import Foundation
     }
 
     /// Рівні важливості
-    enum LogLevel: Int, Comparable, Sendable {
+    enum LogLevel: Int, Comparable {
         case verbose = 0 // Детальна інформація (рідко потрібна)
         case debug = 1 // Debug інформація
         case info = 2 // Загальна інформація
@@ -221,12 +221,25 @@ import Foundation
     // В Release stub'и приймають ті ж типи що й DEBUG — інакше Swift не резолвить `.audio` / `.error`
     // на call-site (бо `Any?` не має member'ів enum). Тіло порожнє — optimizer видалить виклики.
 
-    enum LogCategory: String, Sendable {
-        case audio, engine, routing, eq, preset, ui, network, database, calibration, general
+    enum LogCategory: String {
+        case audio
+        case engine
+        case routing
+        case eq
+        case preset
+        case ui
+        case network
+        case database
+        case calibration
+        case general
     }
 
-    enum LogLevel: Int, Sendable {
-        case verbose, debug, info, warning, error
+    enum LogLevel: Int {
+        case verbose
+        case debug
+        case info
+        case warning
+        case error
     }
 
     @inline(__always)

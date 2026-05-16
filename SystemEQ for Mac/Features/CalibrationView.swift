@@ -261,10 +261,26 @@ struct CalibrationView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach([
-                    ("1️⃣", localization.localized(.calibrationPreparation), localization.localized(.calibrationPreparationDesc)),
-                    ("2️⃣", localization.localized(.calibrationReference1000), localization.localized(.calibrationReference1000Desc)),
-                    ("3️⃣", localization.localized(.calibrationAdjustFrequencies), localization.localized(.calibrationAdjustFrequenciesDesc)),
-                    ("4️⃣", localization.localized(.calibrationVerification), localization.localized(.calibrationVerificationDesc))
+                    (
+                        "1️⃣",
+                        localization.localized(.calibrationPreparation),
+                        localization.localized(.calibrationPreparationDesc)
+                    ),
+                    (
+                        "2️⃣",
+                        localization.localized(.calibrationReference1000),
+                        localization.localized(.calibrationReference1000Desc)
+                    ),
+                    (
+                        "3️⃣",
+                        localization.localized(.calibrationAdjustFrequencies),
+                        localization.localized(.calibrationAdjustFrequenciesDesc)
+                    ),
+                    (
+                        "4️⃣",
+                        localization.localized(.calibrationVerification),
+                        localization.localized(.calibrationVerificationDesc)
+                    )
                 ], id: \.1) { emoji, title, desc in
                     HStack(alignment: .top, spacing: 8) {
                         Text(emoji)
@@ -311,11 +327,13 @@ struct CalibrationView: View {
                             HStack {
                                 Image(systemName: mode.icon)
                                     .font(.title2)
-                                Text(localization.localized(mode == .clean ? .calibrationModeClean : .calibrationModeCombined))
+                                Text(localization
+                                    .localized(mode == .clean ? .calibrationModeClean : .calibrationModeCombined))
                                     .font(.headline)
                             }
 
-                            Text(localization.localized(mode == .clean ? .calibrationModeCleanDesc : .calibrationModeCombinedDesc))
+                            Text(localization
+                                .localized(mode == .clean ? .calibrationModeCleanDesc : .calibrationModeCombinedDesc))
                                 .font(AppTypography.label)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)

@@ -167,7 +167,8 @@ final class StatusItemController: NSObject {
         }
     }
 
-    @objc private func toggleEQ() {
+    @objc
+    private func toggleEQ() {
         let newValue = !AudioEngine.shared.isEnabled
         AudioEngine.shared.setEnabled(newValue)
         CoreAudioEngine.shared.setEnabled(newValue)
@@ -178,14 +179,16 @@ final class StatusItemController: NSObject {
         )
     }
 
-    @objc private func openMain() {
+    @objc
+    private func openMain() {
         NSApp.activate(ignoringOtherApps: true)
         if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
             win.makeKeyAndOrderFront(nil)
         }
     }
 
-    @objc private func quit() {
+    @objc
+    private func quit() {
         NSApp.terminate(nil)
     }
 }

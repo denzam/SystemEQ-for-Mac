@@ -688,7 +688,7 @@ public enum LocalizedString: String, CaseIterable {
     case runSetupAssistant
     case launchAtLoginHelp
 
-    // SubjectiveRoomTuningView tabs
+    /// SubjectiveRoomTuningView tabs
     case tuningTab
 
     // Calibration Activation Alert

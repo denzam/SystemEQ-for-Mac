@@ -105,7 +105,7 @@ struct VisualizerView: View {
 
     // MARK: - Visualization Canvas
 
-    @ViewBuilder private var visualizationCanvas: some View {
+    private var visualizationCanvas: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black
@@ -174,10 +174,10 @@ struct VisualizerView: View {
 
     private func toggleFullscreen() {
         // Use native macOS fullscreen via window toggle
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { 
-            $0.identifier?.rawValue == FeatureID.visualizer.rawValue 
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: {
+            $0.identifier?.rawValue == FeatureID.visualizer.rawValue
         }) else { return }
-        
+
         window.toggleFullScreen(nil)
     }
 
