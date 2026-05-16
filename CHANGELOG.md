@@ -87,5 +87,10 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.0.6]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.6
+[1.0.5]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.5
+[1.0.4]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.4
+[1.0.3]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.3
+[1.0.2]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.2
 [1.0.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.1
 [1.0.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.0
