@@ -1,7 +1,9 @@
+import AppKit
 import AVFoundation
 import CoreAudio
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Favorites Model
 
@@ -23,11 +25,11 @@ struct AutoEQView: View {
 
     // MARK: - Localization
 
-    @ObservedObject private var localization = LocalizationManager.shared
+    @StateObject private var localization = LocalizationManager.shared
 
     // MARK: - Audio Engine (ObservableObject для реактивності)
 
-    @ObservedObject private var audioEngine = AudioEngine.shared
+    @StateObject private var audioEngine = AudioEngine.shared
 
     // MARK: - Active Preset Tracking
 
@@ -67,7 +69,34 @@ struct AutoEQView: View {
     @State private var searchError: String?
     @State private var offlineIndex: [OfflineIndexEntry] = []
     @State private var isBuildingIndex: Bool = false
-    @State private var indexStatus: String?
+    @State private var indexStatusRaw: IndexStatusKind?
+
+    private enum IndexStatusKind: Equatable {
+        case updated(count: Int, timestamp: TimeInterval)
+        case updatedNow(count: Int)
+        case updating
+        case building
+        case error(String)
+        case raw(String)
+    }
+
+    private var indexStatus: String? {
+        guard let kind = indexStatusRaw else { return nil }
+        switch kind {
+        case let .updated(count, ts):
+            return String(format: localization.localized(.indexUpdated), count, formatIndexAge(ts))
+        case let .updatedNow(count):
+            return String(format: localization.localized(.indexUpdated), count, localization.localized(.indexToday))
+        case .updating:
+            return localization.localized(.updatingIndex)
+        case .building:
+            return localization.localized(.buildingIndex)
+        case let .error(s):
+            return s
+        case let .raw(s):
+            return s
+        }
+    }
     @State private var preampDB: Double?
     @State private var preampDB10: Double? // Preamp для 10-band
     @State private var preampDB31: Double? // Preamp для 31-band
@@ -203,42 +232,55 @@ struct AutoEQView: View {
 
                 // MARK: - Search Section
 
-                HStack {
-                    Text(localization.localized(.autoEQTypeModelName))
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            TextField(localization.localized(.searchHeadphonesModel), text: $searchText)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 300)
-                                .disableAutocorrection(true)
-
-                            Button(localization.localized(.autoEQQuickImport)) {
-                                importFromDatabase(searchText)
-                            }
-                            .disabled(searchText.isEmpty)
-                            .help(localization.localized(.quickImportHelp))
-                        }
-                        if let e = searchError {
-                            Text(e)
-                                .font(AppTypography.bodySmall)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if isSearching { ProgressView().controlSize(.small) }
-                    if isBuildingIndex {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button(action: { Task { await buildOrUpdateIndex() } }) {
-                            Image(systemName: "arrow.clockwise").imageScale(.medium)
-                        }
-                    }
-                    if let s = indexStatus {
-                        Text(s)
+                Grid(alignment: .top, horizontalSpacing: 8, verticalSpacing: 6) {
+                    GridRow {
+                        Text(localization.localized(.autoEQTypeModelName))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .font(AppTypography.bodySmall)
+                            .padding(.top, 4)
+                        TextField(localization.localized(.searchHeadphonesModel), text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 220)
+                            .disableAutocorrection(true)
+                        Button(localization.localized(.autoEQQuickImport)) {
+                            importFromDatabase(searchText)
+                        }
+                        .disabled(searchText.isEmpty)
+                        .help(localization.localized(.quickImportHelp))
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if isSearching { ProgressView().controlSize(.small) }
+                            if isBuildingIndex {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Button(action: { Task { await buildOrUpdateIndex() } }) {
+                                    Image(systemName: "arrow.clockwise").imageScale(.medium)
+                                }
+                            }
+                            if let s = indexStatus {
+                                Text(s)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .font(AppTypography.bodySmall)
+                            }
+                        }
                     }
+                    GridRow {
+                        Color.clear.frame(height: 0)
+                        Color.clear.frame(height: 0)
+                        Button {
+                            importPresetFromFile()
+                        } label: {
+                            Label(localization.localized(.autoEQImportFile), systemImage: "doc.badge.plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .help(localization.localized(.autoEQImportFileHelp))
+                        Color.clear.frame(height: 0)
+                    }
+                }
+                if let e = searchError {
+                    Text(e)
+                        .font(AppTypography.bodySmall)
+                        .foregroundStyle(.secondary)
                 }
 
                 Picker(localization.localized(.autoEQBandMode), selection: $bandMode) {
@@ -258,7 +300,19 @@ struct AutoEQView: View {
                             parsed = parsed31
                             preampDB = preampDB31
                         }
-                        // mapped оновиться автоматично через .task(id: parsed)
+                        // Forces remap+apply for the new band mode even when parsed didn't change
+                        // (custom-imported parametric presets share parsed10 === parsed31).
+                        mapped = mappedBands()
+                        applyEQDebounceTask?.cancel()
+                        applyEQDebounceTask = Task {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                if !mapped.isEmpty, audioEngine.isEnabled {
+                                    applyToAudioEngine()
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -461,17 +515,12 @@ struct AutoEQView: View {
                         OfflineIndexCache.self,
                         from: Data(contentsOf: indexDiskPath() ?? URL(fileURLWithPath: ""))
                     ) {
-                        let ageStr = formatIndexAge(cache.lastUpdate)
-                        indexStatus = String(
-                            format: localization.localized(.indexUpdated),
-                            result.entries.count,
-                            ageStr
-                        )
+                        indexStatusRaw = .updated(count: result.entries.count, timestamp: cache.lastUpdate)
                     }
 
                     // Автоматичне оновлення якщо індекс застарів
                     if result.needsUpdate {
-                        indexStatus = localization.localized(.updatingIndex)
+                        indexStatusRaw = .updating
                         Task { await buildOrUpdateIndex() }
                     }
                 } else if let bundled = loadOfflineIndexFromBundle() {
@@ -603,16 +652,16 @@ struct AutoEQView: View {
     private func buildOrUpdateIndex() async {
         guard !isBuildingIndex else { return }
         isBuildingIndex = true
-        indexStatus = localization.localized(.buildingIndex)
+        indexStatusRaw = .building
         defer { isBuildingIndex = false }
         // Clear old cache before building
         clearIndexCache()
         do {
-            guard let url = URL(string: AppConstants.URLs.autoEQIndex) else { indexStatus = "Invalid URL"; return }
+            guard let url = URL(string: AppConstants.URLs.autoEQIndex) else { indexStatusRaw = .raw("Invalid URL"); return }
             let (data, resp) = try await cachedSession.data(from: url)
             guard let http = resp as? HTTPURLResponse,
                   (200...299).contains(http.statusCode)
-            else { indexStatus = localization.localized(.httpError); return }
+            else { indexStatusRaw = .error(localization.localized(.httpError)); return }
             let text = String(data: data, encoding: .utf8) ?? ""
             var map: [String: OfflineIndexEntry] = [:]
             // Match markdown links: [text](./path) - capture everything between (./ and ) at end of line
@@ -680,17 +729,13 @@ struct AutoEQView: View {
             saveOfflineIndexToDisk(out)
             offlineIndex = out
             indexTruncated = false
-            indexStatus = String(
-                format: localization.localized(.indexUpdated),
-                out.count,
-                localization.localized(.indexToday)
-            )
+            indexStatusRaw = .updatedNow(count: out.count)
             if !normalizedQuery.isEmpty {
                 let local = offlineSearch(normalizedQuery)
                 candidates = rank(local, query: normalizedQuery)
             }
         } catch {
-            indexStatus = friendlyNetworkError(error)
+            indexStatusRaw = .error(friendlyNetworkError(error))
         }
     }
 
@@ -1299,6 +1344,74 @@ struct AutoEQView: View {
     // MARK: - Database Import (New - Fast!)
 
     @MainActor
+    private func importPresetFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.plainText, .text]
+        panel.message = localization.localized(.autoEQImportFileHelp)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            searchError = localization.localized(.autoEQImportFileError)
+            return
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var bands: [ParsedBand] = []
+        var preamp: Double?
+
+        let apo = parseEqualizerAPOFormat(text: trimmed)
+        if !apo.bands.isEmpty {
+            bands = apo.bands
+            preamp = apo.preamp
+        } else if trimmed.contains("GraphicEQ:") || trimmed.contains("FixedBandEQ:") {
+            bands = parseGraphicEQ(text: trimmed)
+        } else if trimmed.contains("### Fixed Band EQ") {
+            let parsed = parseFixedBandTable(text: trimmed, bands: bandMode == .ten ? 10 : 31)
+            if !parsed.isEmpty {
+                bands = parsed
+                preamp = parsePreamp(text: trimmed)
+            }
+        }
+
+        guard !bands.isEmpty else {
+            searchError = localization.localized(.autoEQImportFileError)
+            return
+        }
+
+        let presetName = url.deletingPathExtension().lastPathComponent
+
+        parsed10 = bands
+        parsed31 = bands
+        parsed = bands
+        preampDB10 = preamp
+        preampDB31 = preamp
+        preampDB = preamp
+        rawText = text
+        activePresetName = presetName
+        activePresetSource = "Custom"
+        activePresetTarget = nil
+        searchError = nil
+
+        applyEQDebounceTask?.cancel()
+        applyEQDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            if !Task.isCancelled {
+                await MainActor.run {
+                    applyToAudioEngine()
+                }
+            }
+        }
+
+        dlog(
+            "Custom preset imported: \(presetName), \(bands.count) filters, preamp: \(preamp ?? 0)",
+            level: .info,
+            category: .network
+        )
+    }
+
     private func importFromDatabase(_ searchQuery: String) {
         searchError = nil
 
@@ -1559,6 +1672,60 @@ struct AutoEQView: View {
         }
 
         return []
+    }
+
+    private func parseEqualizerAPOFormat(text: String) -> (bands: [ParsedBand], preamp: Double?) {
+        var bands: [ParsedBand] = []
+        var preamp: Double?
+
+        let filterPattern = #"Filter\s+\d+\s*:\s*ON\s+(\w+)\s+Fc\s+([\d.]+)\s*Hz\s+Gain\s+(-?[\d.]+)\s*dB\s+Q\s+([\d.]+)"#
+        let preampPattern = #"Preamp\s*:\s*(-?[\d.]+)\s*dB"#
+
+        if let regex = try? NSRegularExpression(pattern: preampPattern, options: .caseInsensitive) {
+            let nsRange = NSRange(text.startIndex..., in: text)
+            if let match = regex.firstMatch(in: text, range: nsRange),
+               let r = Range(match.range(at: 1), in: text),
+               let v = Double(text[r]) {
+                preamp = v
+            }
+        }
+
+        guard let regex = try? NSRegularExpression(pattern: filterPattern, options: .caseInsensitive) else {
+            return ([], preamp)
+        }
+
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: nsRange)
+        for m in matches {
+            guard m.numberOfRanges >= 5,
+                  let typeR = Range(m.range(at: 1), in: text),
+                  let fcR = Range(m.range(at: 2), in: text),
+                  let gainR = Range(m.range(at: 3), in: text),
+                  let qR = Range(m.range(at: 4), in: text),
+                  let fc = Double(text[fcR]),
+                  let gain = Double(text[gainR]),
+                  let q = Double(text[qR]) else { continue }
+
+            let type = mapAPOFilterType(String(text[typeR]))
+            bands.append(ParsedBand(freq: fc, gain: gain, q: q, type: type))
+        }
+
+        return (bands, preamp)
+    }
+
+    private func mapAPOFilterType(_ token: String) -> FilterType {
+        let upper = token.uppercased()
+        switch upper {
+        case "PK", "PEQ", "BELL": return .peak
+        case "LS", "LSC", "LOWSHELF": return .lowShelf
+        case "HS", "HSC", "HIGHSHELF": return .highShelf
+        case "LP", "LPQ", "LOWPASS": return .lowPass
+        case "HP", "HPQ", "HIGHPASS": return .highPass
+        case "AP": return .allPass
+        case "BP": return .bandPass
+        case "NO", "NOTCH": return .notch
+        default: return .peak
+        }
     }
 
     private func parseGraphicEQ(text: String) -> [ParsedBand] {

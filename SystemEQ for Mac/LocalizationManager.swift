@@ -242,6 +242,10 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQAddToFavorites
     case searchHeadphonesModel
     case quickImportHelp
+    case autoEQImportFile
+    case autoEQImportFileHelp
+    case autoEQImportFileError
+    case autoEQImportFileSuccess
     case removeFromFavorites
     case addToFavorites
     case indexUpdated
@@ -3386,6 +3390,26 @@ private enum LocalizationData {
                     .english: "Import directly from database (instant!)",
                     .italian: "Importa direttamente dal database (istantaneo!)",
                     .ukrainian: "Імпорт безпосередньо з бази даних (миттєво!)"
+                ],
+                .autoEQImportFile: [
+                    .english: "Import .txt",
+                    .italian: "Importa .txt",
+                    .ukrainian: "Імпорт .txt"
+                ],
+                .autoEQImportFileHelp: [
+                    .english: "Import your own preset (.txt) — AutoEQ, EqualizerAPO, REW, spinorama formats",
+                    .italian: "Importa il tuo preset (.txt) — formati AutoEQ, EqualizerAPO, REW, spinorama",
+                    .ukrainian: "Імпортувати власний пресет (.txt) — формати AutoEQ, EqualizerAPO, REW, spinorama"
+                ],
+                .autoEQImportFileError: [
+                    .english: "Unrecognized preset format",
+                    .italian: "Formato preset non riconosciuto",
+                    .ukrainian: "Невідомий формат пресету"
+                ],
+                .autoEQImportFileSuccess: [
+                    .english: "Imported %d filters",
+                    .italian: "Importati %d filtri",
+                    .ukrainian: "Імпортовано %d фільтрів"
                 ],
                 .removeFromFavorites: [
                     .english: "Remove from favorites",
