@@ -4,6 +4,22 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-05-30
+
+New AutoEQ import feature plus localization fixes.
+
+### Added
+- AutoEQ window now supports importing user-supplied `.txt` presets via a new "Import .txt" button. Auto-detects four formats: AutoEQ Parametric, AutoEQ GraphicEQ, AutoEQ FixedBandEQ, and EqualizerAPO (incl. Peak / Low Shelf / High Shelf / Low Pass / High Pass filters). Parametric bands are expanded to the current 10/31-band grid via the existing biquad-response math in `EQConverter`, so the audio hot path (`BiquadFilterVDSP`, `SPSCRingBuffer`, `CoreAudioEngine`) is unchanged
+- Four new localized strings (EN/IT/UK) for the import button, tooltip, success and error messages
+
+### Fixed
+- AutoEQ window no longer kept stale English text in the index-status label ("Index: N (updated X weeks ago)") after switching language while the window was open. The status is now derived from raw `(count, timestamp)` state and reformatted on every redraw, so a language change is reflected immediately
+- AutoEQ window now refreshes its localized labels live when the language is changed from the Settings window. `LocalizationManager` and `AudioEngine` are held via `@StateObject` instead of `@ObservedObject`, which guarantees the `@Published` subscription survives container-driven view rebuilds
+- Switching band mode (10 ↔ 31) right after importing a custom parametric preset now re-maps and re-applies bands even when the cached `parsed10` and `parsed31` arrays share the same instance
+
+### Changed
+- CI: bumped `softprops/action-gh-release` from `v2` to `v3` to move the release workflow off the deprecated Node.js 20 runtime ahead of GitHub's mid-2026 cutoff
+
 ## [1.0.6] — 2026-05-16
 
 Follow-up to v1.0.5.
@@ -87,6 +103,7 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.0.7]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.7
 [1.0.6]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.6
 [1.0.5]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.5
 [1.0.4]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.4

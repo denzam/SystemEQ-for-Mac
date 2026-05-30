@@ -103,7 +103,7 @@ jobs:
           echo "zip_size=$ZIP_SIZE" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "SystemEQ for Mac v${{ steps.version.outputs.version }}"
           tag_name: "v${{ steps.version.outputs.version }}"
