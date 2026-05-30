@@ -1,6 +1,0 @@
-module ProjectMBridge [system] {
-    header "ProjectMBridge.h"
-    link "projectM-4"
-    link "projectM-4-playlist"
-    export *
-}
