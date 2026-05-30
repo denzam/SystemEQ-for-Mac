@@ -97,6 +97,7 @@ struct AutoEQView: View {
             return s
         }
     }
+
     @State private var preampDB: Double?
     @State private var preampDB10: Double? // Preamp для 10-band
     @State private var preampDB31: Double? // Preamp для 31-band
@@ -657,7 +658,8 @@ struct AutoEQView: View {
         // Clear old cache before building
         clearIndexCache()
         do {
-            guard let url = URL(string: AppConstants.URLs.autoEQIndex) else { indexStatusRaw = .raw("Invalid URL"); return }
+            guard let url = URL(string: AppConstants.URLs.autoEQIndex)
+            else { indexStatusRaw = .raw("Invalid URL"); return }
             let (data, resp) = try await cachedSession.data(from: url)
             guard let http = resp as? HTTPURLResponse,
                   (200...299).contains(http.statusCode)
@@ -1716,14 +1718,25 @@ struct AutoEQView: View {
     private func mapAPOFilterType(_ token: String) -> FilterType {
         let upper = token.uppercased()
         switch upper {
-        case "PK", "PEQ", "BELL": return .peak
-        case "LS", "LSC", "LOWSHELF": return .lowShelf
-        case "HS", "HSC", "HIGHSHELF": return .highShelf
-        case "LP", "LPQ", "LOWPASS": return .lowPass
-        case "HP", "HPQ", "HIGHPASS": return .highPass
+        case "BELL",
+             "PEQ",
+             "PK": return .peak
+        case "LOWSHELF",
+             "LS",
+             "LSC": return .lowShelf
+        case "HIGHSHELF",
+             "HS",
+             "HSC": return .highShelf
+        case "LOWPASS",
+             "LP",
+             "LPQ": return .lowPass
+        case "HIGHPASS",
+             "HP",
+             "HPQ": return .highPass
         case "AP": return .allPass
         case "BP": return .bandPass
-        case "NO", "NOTCH": return .notch
+        case "NO",
+             "NOTCH": return .notch
         default: return .peak
         }
     }
