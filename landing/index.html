@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SystemEQ for Mac — System-wide Parametric Equalizer</title>
+<meta name="description" content="Free, open-source system-wide parametric audio equalizer for macOS. AutoEQ presets, calibration tools, room tuning, MilkDrop visualizer. Powered by BlackHole." />
+<meta name="theme-color" content="#0a0a0c" />
+<meta property="og:title" content="SystemEQ for Mac" />
+<meta property="og:description" content="System-wide parametric audio equalizer for macOS. Free and open source." />
+<meta property="og:type" content="website" />
+<style>
+  *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0c;
+    --bg-elev: #131318;
+    --bg-card: #17171d;
+    --border: #2a2a33;
+    --text: #e8e8ed;
+    --text-dim: #9a9aa6;
+    --text-mute: #6b6b78;
+    --accent: #0a84ff;
+    --accent-hover: #2a94ff;
+    --accent-soft: rgba(10, 132, 255, 0.12);
+    --warn: #ff9f0a;
+    --ok: #30d158;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow: 0 8px 32px rgba(0,0,0,0.35);
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); }
+  img { max-width: 100%; display: block; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10, 10, 12, 0.8);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .brand { font-weight: 600; font-size: 16px; color: var(--text); letter-spacing: -0.01em; }
+  .brand span { color: var(--accent); }
+  .nav-links { display: flex; gap: 24px; }
+  .nav-links a { color: var(--text-dim); font-size: 14px; font-weight: 500; }
+  .nav-links a:hover { color: var(--text); }
+  @media (max-width: 640px) { .nav-links { display: none; } }
+
+  /* Hero */
+  .hero {
+    padding: 96px 0 80px;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(10, 132, 255, 0.15), transparent 70%),
+      var(--bg);
+  }
+  .hero h1 {
+    font-size: clamp(40px, 6vw, 64px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    margin-bottom: 20px;
+  }
+  .hero h1 span {
+    background: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero p.tagline {
+    font-size: clamp(17px, 2vw, 20px);
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0 auto 36px;
+  }
+  .badges {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .cta-group { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 14px 24px;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 600;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-hover); color: white; transform: translateY(-1px); }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { background: var(--bg-card); border-color: var(--text-mute); color: var(--text); }
+
+  /* Sections */
+  section { padding: 80px 0; }
+  section h2 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  section .sub {
+    color: var(--text-dim);
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto 56px;
+    font-size: 16px;
+  }
+
+  /* Features grid */
+  .features { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .feature:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .feature-icon {
+    width: 44px; height: 44px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    margin-bottom: 16px;
+  }
+  .feature h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.01em; }
+  .feature p { color: var(--text-dim); font-size: 14px; line-height: 1.5; }
+
+  /* How it works */
+  .how-bg { background: var(--bg-elev); }
+  .steps { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 20px; }
+  .step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+  }
+  .step-num {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .step h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .step p { color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+  .flow {
+    text-align: center;
+    color: var(--text-mute);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    margin-top: 32px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+  }
+  .flow strong { color: var(--accent); }
+
+  /* Screenshots */
+  .gallery { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .shot {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .shot:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .shot img, .shot video { aspect-ratio: 4/3; object-fit: cover; object-position: top; background: #000; width: 100%; display: block; }
+  .shot-label { padding: 14px 16px; font-size: 13px; color: var(--text-dim); font-weight: 500; display: flex; align-items: center; justify-content: space-between; }
+  .shot-label .live { background: var(--accent-soft); color: var(--accent); font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; letter-spacing: 0.02em; }
+
+  /* Lightbox */
+  .lightbox {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.92);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 24px;
+    cursor: zoom-out;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img, .lightbox video { max-width: 95vw; max-height: 95vh; border-radius: 8px; box-shadow: var(--shadow); }
+  .lightbox-close {
+    position: absolute; top: 20px; right: 24px;
+    color: white; font-size: 32px; cursor: pointer;
+    background: none; border: none;
+  }
+
+  /* Install */
+  .install-bg { background: var(--bg-elev); }
+  .install-grid { display: grid; gap: 16px; }
+  .install-step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+  }
+  .install-step .num {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+  }
+  .install-step .body { flex: 1; min-width: 0; }
+  .install-step h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .install-step p { color: var(--text-dim); font-size: 14px; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text);
+    word-break: break-all;
+  }
+  pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    margin-top: 10px;
+    overflow-x: auto;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: 13px; }
+  .note {
+    background: rgba(255, 159, 10, 0.08);
+    border: 1px solid rgba(255, 159, 10, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 14px 18px;
+    margin-top: 24px;
+    color: var(--warn);
+    font-size: 14px;
+  }
+  .note strong { color: #ffb84a; }
+
+  /* Support */
+  .support-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); max-width: 760px; margin: 0 auto; }
+  .support-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    text-align: center;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .support-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .support-card .emoji { font-size: 32px; margin-bottom: 12px; display: block; }
+  .support-card h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .support-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 16px; }
+
+  /* Footer */
+  footer {
+    padding: 48px 0 64px;
+    border-top: 1px solid var(--border);
+    color: var(--text-mute);
+    font-size: 13px;
+    text-align: center;
+  }
+  footer .links { display: flex; gap: 20px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+  footer .links a { color: var(--text-dim); }
+  footer .credit { color: var(--text-mute); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="brand">SystemEQ<span>.</span></div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#install">Install</a>
+      <a href="#support">Support</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <h1>System-wide audio EQ<br/>for <span>macOS</span></h1>
+    <p class="tagline">A free, open-source parametric equalizer with calibration tools, AutoEQ presets, room tuning and a MilkDrop visualizer — all running natively on your Mac.</p>
+    <div class="badges">
+      <span class="badge">Free &amp; Open Source</span>
+      <span class="badge">GPLv3</span>
+      <span class="badge">macOS 13+</span>
+      <span class="badge">EN · IT · UK</span>
+      <span class="badge">No telemetry</span>
+    </div>
+    <div class="cta-group">
+      <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Download Latest Release</a>
+      <a class="btn btn-secondary" href="https://github.com/denzam/SystemEQ-for-Mac">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="container">
+    <h2>Everything you need to tune your sound</h2>
+    <p class="sub">SystemEQ is more than an equalizer — it's a complete audio shaping suite.</p>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🎛</div>
+        <h3>10 or 31-band EQ</h3>
+        <p>Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for zero-latency processing.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎧</div>
+        <h3>8,850+ AutoEQ presets</h3>
+        <p>Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📐</div>
+        <h3>Equal Loudness Calibration</h3>
+        <p>Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🏠</div>
+        <h3>Subjective Room Tuning</h3>
+        <p>Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📊</div>
+        <h3>Resonance Finder</h3>
+        <p>Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔀</div>
+        <h3>Flexible audio routing</h3>
+        <p>Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎨</div>
+        <h3>MilkDrop visualizer</h3>
+        <p>Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>Low latency, low CPU</h3>
+        <p>Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🌍</div>
+        <h3>Multilingual</h3>
+        <p>Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="how-bg">
+  <div class="container">
+    <h2>How it works</h2>
+    <p class="sub">macOS doesn't expose a system-wide audio EQ — so SystemEQ uses the BlackHole virtual driver to route, process and output your audio.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h4>Set BlackHole as system output</h4>
+        <p>All app audio (Spotify, Safari, system sounds) flows into BlackHole 2ch.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h4>SystemEQ captures it</h4>
+        <p>The app reads audio from BlackHole using a native CoreAudio AUHAL input.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h4>Biquad filters apply</h4>
+        <p>Your EQ curve is applied in real time via vDSP-accelerated biquad cascades.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h4>Output to your device</h4>
+        <p>Processed audio is sent to your physical output — speakers, headphones, DAC.</p>
+      </div>
+    </div>
+    <div class="flow">
+      App audio → <strong>BlackHole 2ch</strong> → SystemEQ → biquad filters → <strong>Your output device</strong>
+    </div>
+  </div>
+</section>
+
+<section id="screenshots">
+  <div class="container">
+    <h2>See it in action</h2>
+    <p class="sub">Click any screenshot to enlarge.</p>
+    <div class="gallery">
+      <div class="shot" onclick="openLightbox('screenshots/01-main.png')">
+        <img src="screenshots/01-main.png" alt="Main menu" loading="lazy" />
+        <div class="shot-label">Main menu</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/02-eq-10.png')">
+        <img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" />
+        <div class="shot-label">10-band equalizer</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/03-eq-31.png')">
+        <img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" />
+        <div class="shot-label">31-band equalizer</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/04-calibration.png')">
+        <img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" />
+        <div class="shot-label">Equal loudness calibration</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/05-room-tuning.png')">
+        <img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" />
+        <div class="shot-label">Subjective room tuning</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/06-resonance.png')">
+        <img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" />
+        <div class="shot-label">Resonance finder</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/07-autoeq.png')">
+        <img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" />
+        <div class="shot-label">AutoEQ preset library</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/08-routing.png')">
+        <img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" />
+        <div class="shot-label">Audio routing</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/09-settings.jpeg')">
+        <img src="screenshots/09-settings.jpeg" alt="Settings" loading="lazy" />
+        <div class="shot-label">Settings &amp; languages</div>
+      </div>
+      <div class="shot" onclick="openLightbox('screenshots/10-visualizer.png')">
+        <img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" />
+        <div class="shot-label">MilkDrop visualizer</div>
+      </div>
+      <div class="shot" onclick="openVideo('screenshots/10-visualizer.mov')">
+        <video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline></video>
+        <div class="shot-label">Visualizer in action <span class="live">LIVE · click for sound</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="install-bg">
+  <div class="container">
+    <h2>Install</h2>
+    <p class="sub">SystemEQ is unsigned — distributed as a free open-source build outside the App Store. Setup takes ~2 minutes.</p>
+    <div class="install-grid">
+      <div class="install-step">
+        <div class="num">1</div>
+        <div class="body">
+          <h4>Install BlackHole 2ch</h4>
+          <p>The virtual audio driver SystemEQ uses to capture system audio.</p>
+          <pre><code>brew install blackhole-2ch</code></pre>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">2</div>
+        <div class="body">
+          <h4>Download SystemEQ</h4>
+          <p>Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.</p>
+          <a class="btn btn-primary" style="margin-top: 10px; padding: 10px 18px; font-size: 14px;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Download from GitHub Releases</a>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">3</div>
+        <div class="body">
+          <h4>Allow unsigned app on first launch</h4>
+          <p>macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p>
+          <pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">4</div>
+        <div class="body">
+          <h4>Set system output to BlackHole 2ch</h4>
+          <p>In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).</p>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">5</div>
+        <div class="body">
+          <h4>(Alternative) Build from source</h4>
+          <p>Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.
+    </div>
+  </div>
+</section>
+
+<section id="support">
+  <div class="container">
+    <h2>Support the project</h2>
+    <p class="sub">SystemEQ is free forever. If it makes your audio better, consider supporting development — completely optional.</p>
+    <div class="support-grid">
+      <a class="support-card" href="https://github.com/sponsors/denzam">
+        <span class="emoji">💖</span>
+        <h4>GitHub Sponsors</h4>
+        <p>Monthly or one-time</p>
+        <span class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;">Sponsor</span>
+      </a>
+      <a class="support-card" href="https://github.com/denzam/SystemEQ-for-Mac">
+        <span class="emoji">☕</span>
+        <h4>Buy Me a Coffee</h4>
+        <p>One-time tip — link in the app</p>
+        <span class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;">Open app</span>
+      </a>
+      <a class="support-card" href="https://github.com/denzam/SystemEQ-for-Mac">
+        <span class="emoji">⭐</span>
+        <h4>Star on GitHub</h4>
+        <p>Free, helps visibility</p>
+        <span class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;">Star repo</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="links">
+      <a href="https://github.com/denzam/SystemEQ-for-Mac">GitHub</a>
+      <a href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Releases</a>
+      <a href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/LICENSE">License (GPLv3)</a>
+      <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ project</a>
+      <a href="https://existential.audio/blackhole/">BlackHole</a>
+    </div>
+    <div class="credit">© 2026 Denys Zamorniak · SystemEQ for Mac · Released under GPLv3 · Made with care, not capital</div>
+  </div>
+</footer>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="closeLightbox(event)" aria-label="Close">×</button>
+  <img id="lightbox-img" src="" alt="" style="display:none;" />
+  <video id="lightbox-video" controls playsinline style="display:none;"></video>
+</div>
+
+<script>
+  function openLightbox(src) {
+    const lb = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
+    const vid = document.getElementById('lightbox-video');
+    vid.style.display = 'none'; vid.pause(); vid.src = '';
+    img.src = src; img.style.display = 'block';
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function openVideo(src) {
+    const lb = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
+    const vid = document.getElementById('lightbox-video');
+    img.style.display = 'none'; img.src = '';
+    vid.src = src; vid.style.display = 'block';
+    vid.muted = false; vid.loop = true; vid.currentTime = 0;
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    vid.play().catch(() => { vid.muted = true; vid.play(); });
+  }
+  function closeLightbox(e) {
+    if (e && e.target.tagName === 'VIDEO') return;
+    const lb = document.getElementById('lightbox');
+    const vid = document.getElementById('lightbox-video');
+    vid.pause(); vid.src = '';
+    lb.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLightbox();
+  });
+</script>
+</body>
+</html>
