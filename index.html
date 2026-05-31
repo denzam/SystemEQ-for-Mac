@@ -884,7 +884,7 @@
         io.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.05, rootMargin: '0px 0px 60px 0px' });
+  }, { threshold: 0.2, rootMargin: '0px 0px -15% 0px' });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
   // Parallax — lerp-smoothed continuous rAF loop (desktop only)
