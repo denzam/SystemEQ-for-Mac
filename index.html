@@ -144,6 +144,19 @@
     .bg-mesh .blob { animation: none; }
   }
 
+  /* iOS Safari struggles with large blurred fixed children — fall back to
+     a static multi-stop radial-gradient on the mesh container itself. */
+  @media (max-width: 720px) {
+    .bg-mesh .blob { display: none; }
+    .bg-mesh {
+      background:
+        radial-gradient(ellipse 90% 50% at 15% 12%, rgba(10, 132, 255, 0.55) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 50% at 90% 45%, rgba(94, 92, 230, 0.5) 0%, transparent 60%),
+        radial-gradient(ellipse 90% 45% at 50% 95%, rgba(255, 55, 95, 0.4) 0%, transparent 65%),
+        #000;
+    }
+  }
+
   /* === Nav === */
   nav {
     position: sticky; top: 0; z-index: 100;
