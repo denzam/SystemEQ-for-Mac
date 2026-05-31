@@ -125,14 +125,14 @@
   .cursor-glow {
     position: fixed;
     top: 0; left: 0;
-    width: 520px; height: 520px;
+    width: 340px; height: 340px;
     pointer-events: none;
     z-index: -1;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(94,92,230,0.18) 0%, rgba(10,132,255,0.08) 35%, transparent 70%);
+    background: radial-gradient(circle, rgba(94,92,230,0.22) 0%, rgba(10,132,255,0.1) 35%, transparent 70%);
     transform: translate(-50%, -50%) translate3d(0, 0, 0);
     opacity: 0;
-    transition: opacity 0.5s ease;
+    transition: opacity 0.3s ease;
     will-change: transform, opacity;
     mix-blend-mode: screen;
   }
@@ -905,8 +905,8 @@
     }, { passive: true });
     window.addEventListener('pointerleave', () => glow.classList.remove('visible'));
     const tickGlow = () => {
-      gx += (mx - gx) * 0.12;
-      gy += (my - gy) * 0.12;
+      gx += (mx - gx) * 0.28;
+      gy += (my - gy) * 0.28;
       glow.style.transform = `translate3d(${gx}px, ${gy}px, 0) translate(-50%, -50%)`;
       requestAnimationFrame(tickGlow);
     };
