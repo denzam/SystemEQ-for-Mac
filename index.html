@@ -216,7 +216,7 @@
 
   /* === Hero === */
   .hero {
-    padding: calc(clamp(72px, 14vh, 140px) + 72px) 0 clamp(56px, 10vh, 110px);
+    padding: calc(clamp(72px, 14vh, 140px) + 64px) 0 clamp(56px, 10vh, 110px);
     text-align: center;
     position: relative;
   }
@@ -669,7 +669,7 @@
 
   /* === Mobile === */
   @media (max-width: 640px) {
-    .hero { padding: 48px 0 32px; }
+    .hero { padding: calc(56px + 64px) 0 32px; }
     .eyebrow { margin-bottom: 16px; padding: 5px 12px; font-size: 11px; }
     h1.hero-title { margin-bottom: 16px; }
     .hero-sub { margin-bottom: 24px; }
