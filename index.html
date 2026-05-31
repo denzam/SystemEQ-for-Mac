@@ -905,8 +905,8 @@
     }, { passive: true });
     window.addEventListener('pointerleave', () => glow.classList.remove('visible'));
     const tickGlow = () => {
-      gx += (mx - gx) * 0.28;
-      gy += (my - gy) * 0.28;
+      gx += (mx - gx) * 0.55;
+      gy += (my - gy) * 0.55;
       glow.style.transform = `translate3d(${gx}px, ${gy}px, 0) translate(-50%, -50%)`;
       requestAnimationFrame(tickGlow);
     };
