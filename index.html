@@ -350,10 +350,10 @@
   /* === Reveal animations === */
   .reveal {
     opacity: 0;
-    transform: translateY(36px);
-    transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: translateY(48px) scale(0.97);
+    transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1), transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .reveal.in { opacity: 1; transform: translateY(0); }
+  .reveal.in { opacity: 1; transform: translateY(0) scale(1); }
   .reveal-delay-1 { transition-delay: 0.08s; }
   .reveal-delay-2 { transition-delay: 0.16s; }
   .reveal-delay-3 { transition-delay: 0.24s; }
@@ -775,15 +775,15 @@
     <h2 class="section-title reveal">Everything you need<br/>to tune your sound.</h2>
     <p class="section-sub reveal">More than an equalizer — a complete audio shaping suite for macOS.</p>
     <div class="features">
-      <div class="feature reveal"><div class="feature-icon">🎛</div><h3>10 or 31-band EQ</h3><p>Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for low-latency processing.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🎧</div><h3>8,850+ AutoEQ presets</h3><p>Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.</p></div>
-      <div class="feature reveal"><div class="feature-icon">📐</div><h3>Equal Loudness Calibration</h3><p>Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🏠</div><h3>Subjective Room Tuning</h3><p>Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.</p></div>
-      <div class="feature reveal"><div class="feature-icon">📊</div><h3>Resonance Finder</h3><p>Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🔀</div><h3>Flexible audio routing</h3><p>Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🎨</div><h3>MilkDrop visualizer</h3><p>Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p></div>
-      <div class="feature reveal"><div class="feature-icon">⚡</div><h3>Low latency, low CPU</h3><p>Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🌍</div><h3>Multilingual</h3><p>Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p></div>
+      <div class="feature reveal" style="transition-delay:0s"><div class="feature-icon">🎛</div><h3>10 or 31-band EQ</h3><p>Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for low-latency processing.</p></div>
+      <div class="feature reveal" style="transition-delay:0.08s"><div class="feature-icon">🎧</div><h3>8,850+ AutoEQ presets</h3><p>Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.</p></div>
+      <div class="feature reveal" style="transition-delay:0.16s"><div class="feature-icon">📐</div><h3>Equal Loudness Calibration</h3><p>Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.</p></div>
+      <div class="feature reveal" style="transition-delay:0.24s"><div class="feature-icon">🏠</div><h3>Subjective Room Tuning</h3><p>Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.</p></div>
+      <div class="feature reveal" style="transition-delay:0.32s"><div class="feature-icon">📊</div><h3>Resonance Finder</h3><p>Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.</p></div>
+      <div class="feature reveal" style="transition-delay:0.40s"><div class="feature-icon">🔀</div><h3>Flexible audio routing</h3><p>Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.</p></div>
+      <div class="feature reveal" style="transition-delay:0.48s"><div class="feature-icon">🎨</div><h3>MilkDrop visualizer</h3><p>Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p></div>
+      <div class="feature reveal" style="transition-delay:0.56s"><div class="feature-icon">⚡</div><h3>Low latency, low CPU</h3><p>Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p></div>
+      <div class="feature reveal" style="transition-delay:0.64s"><div class="feature-icon">🌍</div><h3>Multilingual</h3><p>Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p></div>
     </div>
   </div>
 </section>
@@ -883,7 +883,7 @@
         io.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+  }, { threshold: 0.1, rootMargin: '0px 0px -4% 0px' });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
   // Parallax — lerp-smoothed continuous rAF loop (desktop only)
