@@ -448,7 +448,7 @@
     transform: translateY(-4px);
     border-color: var(--border-strong);
     box-shadow: 0 16px 40px rgba(0,0,0,0.5);
-    outline: none;
+    outline: 3px solid transparent;
   }
   .shot:focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 16px 40px rgba(0,0,0,0.5); }
   .shot img, .shot video {
@@ -846,6 +846,8 @@
     img.src = src; img.style.display = 'block';
     lb.classList.add('open');
     document.body.style.overflow = 'hidden';
+    lb.lastActiveElement = document.activeElement;
+    lb.querySelector('.lightbox-close').focus();
   }
   function openVideo(src) {
     const lb = document.getElementById('lightbox');
@@ -856,6 +858,8 @@
     vid.muted = false; vid.loop = true;
     lb.classList.add('open');
     document.body.style.overflow = 'hidden';
+    lb.lastActiveElement = document.activeElement;
+    lb.querySelector('.lightbox-close').focus();
     vid.play().catch(() => { vid.muted = true; vid.play(); });
   }
   function closeLightbox(e) {
@@ -865,11 +869,15 @@
     vid.pause(); vid.removeAttribute('src'); vid.load();
     lb.classList.remove('open');
     document.body.style.overflow = '';
+    if (lb.lastActiveElement) {
+      lb.lastActiveElement.focus();
+      lb.lastActiveElement = null;
+    }
   }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeLightbox();
-    } else if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('shot')) {
+    } else if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.shot')) {
       e.preventDefault();
       e.target.click();
     }
