@@ -684,8 +684,10 @@
       <span class="badge">EN · IT · UK</span>
       <span class="badge">8,850+ AutoEQ presets</span>
     </div>
-    <div class="hero-preview reveal reveal-delay-3 parallax" data-speed="0.15">
-      <img src="screenshots/01-main.png" alt="SystemEQ for Mac main menu" />
+    <div class="hero-preview reveal reveal-delay-3">
+      <div class="parallax" data-speed="0.08">
+        <img src="screenshots/01-main.png" alt="SystemEQ for Mac main menu" />
+      </div>
     </div>
   </div>
 </header>
@@ -807,23 +809,32 @@
   }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
-  // Parallax (desktop only; throttled via rAF; respects reduced-motion)
+  // Parallax — lerp-smoothed continuous rAF loop (desktop only)
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
   if (!reducedMotion && !isCoarsePointer) {
-    const parallaxEls = document.querySelectorAll('.parallax');
-    let ticking = false;
-    const update = () => {
+    const parallaxEls = Array.from(document.querySelectorAll('.parallax'));
+    const state = parallaxEls.map(el => ({
+      el,
+      speed: parseFloat(el.dataset.speed) || 0.08,
+      current: 0,
+      target: 0
+    }));
+    const updateTargets = () => {
       const y = window.scrollY;
-      parallaxEls.forEach(el => {
-        const speed = parseFloat(el.dataset.speed) || 0.1;
-        el.style.transform = `translate3d(0, ${y * speed * -1}px, 0)`;
-      });
-      ticking = false;
+      state.forEach(s => { s.target = -y * s.speed; });
     };
-    window.addEventListener('scroll', () => {
-      if (!ticking) { requestAnimationFrame(update); ticking = true; }
-    }, { passive: true });
+    const tick = () => {
+      state.forEach(s => {
+        s.current += (s.target - s.current) * 0.08;
+        if (Math.abs(s.target - s.current) < 0.05) s.current = s.target;
+        s.el.style.transform = `translate3d(0, ${s.current.toFixed(2)}px, 0)`;
+      });
+      requestAnimationFrame(tick);
+    };
+    window.addEventListener('scroll', updateTargets, { passive: true });
+    updateTargets();
+    requestAnimationFrame(tick);
   }
 
   // Pointer-tracked glow on feature cards (desktop only)
