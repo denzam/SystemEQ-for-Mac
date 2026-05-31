@@ -350,10 +350,11 @@
   /* === Reveal animations === */
   .reveal {
     opacity: 0;
-    transform: translateY(40px) scale(0.94);
-    transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform: translateY(32px);
+    transition: opacity 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    will-change: transform, opacity;
   }
-  .reveal.in { opacity: 1; transform: translateY(0) scale(1); }
+  .reveal.in { opacity: 1; transform: translateY(0); }
   .reveal-delay-1 { transition-delay: 0.08s; }
   .reveal-delay-2 { transition-delay: 0.16s; }
   .reveal-delay-3 { transition-delay: 0.24s; }
@@ -883,7 +884,7 @@
         io.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.1, rootMargin: '0px 0px -4% 0px' });
+  }, { threshold: 0.05, rootMargin: '0px 0px 60px 0px' });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
   // Parallax — lerp-smoothed continuous rAF loop (desktop only)
