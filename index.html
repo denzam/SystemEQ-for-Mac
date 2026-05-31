@@ -348,46 +348,30 @@
   }
 
   /* === Reveal animations === */
-  @keyframes reveal-in {
-    from { opacity: 0; transform: translateY(28px); }
-    to   { opacity: 1; transform: translateY(0); }
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                transform 0.55s cubic-bezier(0.34, 1.4, 0.64, 1);
   }
-
-  @supports (animation-timeline: view()) {
-    .reveal {
-      animation: reveal-in 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-      animation-timeline: view();
-      animation-range: entry 0% entry 35%;
-    }
-    .reveal-delay-1, .reveal-delay-2, .reveal-delay-3 { animation-delay: 0s; }
-  }
-
-  @supports not (animation-timeline: view()) {
-    .reveal {
-      opacity: 0;
-      transform: translateY(28px);
-      transition: opacity 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                  transform 0.55s cubic-bezier(0.34, 1.4, 0.64, 1);
-    }
-    .reveal.in { opacity: 1; transform: translateY(0); }
-    .reveal-delay-1 { transition-delay: 0.08s; }
-    .reveal-delay-2 { transition-delay: 0.16s; }
-    .reveal-delay-3 { transition-delay: 0.24s; }
-  }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+  .reveal-delay-1 { transition-delay: 0.08s; }
+  .reveal-delay-2 { transition-delay: 0.16s; }
+  .reveal-delay-3 { transition-delay: 0.24s; }
 
   /* Stagger for card groups */
-  .features .feature:nth-child(1), .support-grid > *:nth-child(1), .install-grid > *:nth-child(1) { animation-delay: 0s; }
-  .features .feature:nth-child(2), .support-grid > *:nth-child(2), .install-grid > *:nth-child(2) { animation-delay: 0.07s; }
-  .features .feature:nth-child(3), .support-grid > *:nth-child(3), .install-grid > *:nth-child(3) { animation-delay: 0.14s; }
-  .features .feature:nth-child(4), .install-grid > *:nth-child(4) { animation-delay: 0.21s; }
-  .features .feature:nth-child(5), .install-grid > *:nth-child(5) { animation-delay: 0.28s; }
-  .features .feature:nth-child(6), .install-grid > *:nth-child(6) { animation-delay: 0.35s; }
-  .features .feature:nth-child(7) { animation-delay: 0.42s; }
-  .features .feature:nth-child(8) { animation-delay: 0.49s; }
-  .features .feature:nth-child(9) { animation-delay: 0.56s; }
+  .features .feature:nth-child(1), .support-grid > *:nth-child(1), .install-grid > *:nth-child(1) { transition-delay: 0s; }
+  .features .feature:nth-child(2), .support-grid > *:nth-child(2), .install-grid > *:nth-child(2) { transition-delay: 0.07s; }
+  .features .feature:nth-child(3), .support-grid > *:nth-child(3), .install-grid > *:nth-child(3) { transition-delay: 0.14s; }
+  .features .feature:nth-child(4), .install-grid > *:nth-child(4) { transition-delay: 0.21s; }
+  .features .feature:nth-child(5), .install-grid > *:nth-child(5) { transition-delay: 0.28s; }
+  .features .feature:nth-child(6), .install-grid > *:nth-child(6) { transition-delay: 0.35s; }
+  .features .feature:nth-child(7) { transition-delay: 0.42s; }
+  .features .feature:nth-child(8) { transition-delay: 0.49s; }
+  .features .feature:nth-child(9) { transition-delay: 0.56s; }
 
   @media (prefers-reduced-motion: reduce) {
-    .reveal { animation: none; opacity: 1; transform: none; transition: none; }
+    .reveal { opacity: 1; transform: none; transition: none; }
   }
 
   /* Parallax wrapper — uses transform from JS */
