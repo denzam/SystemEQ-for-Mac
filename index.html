@@ -33,6 +33,7 @@
     --accent: #0a84ff;
     --accent-hover: #409cff;
     --accent-glow: rgba(10, 132, 255, 0.4);
+    --yellow: #f5c518;
     --purple: #5e5ce6;
     --green: #30d158;
     --orange: #ff9f0a;
@@ -86,21 +87,21 @@
     width: 60vw; height: 60vw;
     background: radial-gradient(circle, #0a84ff 0%, transparent 70%);
     top: -20vw; left: -10vw;
-    opacity: 0.55;
+    opacity: 0.5;
     animation: float1 22s ease-in-out infinite;
   }
   .bg-mesh .b2 {
-    width: 50vw; height: 50vw;
-    background: radial-gradient(circle, #5e5ce6 0%, transparent 70%);
-    top: 30vh; right: -15vw;
-    opacity: 0.55;
+    width: 55vw; height: 55vw;
+    background: radial-gradient(circle, #f5c518 0%, transparent 70%);
+    bottom: -15vw; right: -10vw;
+    opacity: 0.32;
     animation: float2 28s ease-in-out infinite;
   }
   .bg-mesh .b3 {
-    width: 45vw; height: 45vw;
-    background: radial-gradient(circle, #ff375f 0%, transparent 70%);
-    bottom: -15vw; left: 30vw;
-    opacity: 0.3;
+    width: 40vw; height: 40vw;
+    background: radial-gradient(circle, #0a84ff 0%, transparent 70%);
+    top: 50vh; left: 35vw;
+    opacity: 0.28;
     animation: float3 35s ease-in-out infinite;
   }
   @keyframes float1 {
@@ -129,7 +130,7 @@
     pointer-events: none;
     z-index: -1;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(94,92,230,0.22) 0%, rgba(10,132,255,0.1) 35%, transparent 70%);
+    background: radial-gradient(circle, rgba(10,132,255,0.24) 0%, rgba(245,197,24,0.1) 40%, transparent 70%);
     transform: translate(-50%, -50%) translate3d(0, 0, 0);
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -145,14 +146,15 @@
   }
 
   /* iOS Safari struggles with large blurred fixed children — fall back to
-     a static multi-stop radial-gradient on the mesh container itself. */
+     a static multi-stop radial-gradient on the mesh container itself.
+     Palette: soft blue + soft yellow (Ukrainian flag, intentionally muted). */
   @media (max-width: 720px) {
     .bg-mesh .blob { display: none; }
     .bg-mesh {
       background:
-        radial-gradient(ellipse 90% 50% at 15% 12%, rgba(10, 132, 255, 0.55) 0%, transparent 60%),
-        radial-gradient(ellipse 80% 50% at 90% 45%, rgba(94, 92, 230, 0.5) 0%, transparent 60%),
-        radial-gradient(ellipse 90% 45% at 50% 95%, rgba(255, 55, 95, 0.4) 0%, transparent 65%),
+        radial-gradient(ellipse 95% 55% at 12% 10%, rgba(10, 132, 255, 0.5) 0%, transparent 60%),
+        radial-gradient(ellipse 95% 50% at 88% 92%, rgba(245, 197, 24, 0.28) 0%, transparent 60%),
+        radial-gradient(ellipse 70% 40% at 50% 50%, rgba(10, 132, 255, 0.22) 0%, transparent 65%),
         #000;
     }
   }
