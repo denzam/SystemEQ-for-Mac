@@ -161,12 +161,13 @@
 
   /* === Nav === */
   nav {
-    position: sticky; top: 0; z-index: 100;
-    background: rgba(0,0,0,0.6);
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(0,0,0,0.72);
     backdrop-filter: saturate(180%) blur(24px);
     -webkit-backdrop-filter: saturate(180%) blur(24px);
     border-bottom: 1px solid var(--border);
     padding-top: var(--safe-top);
+    box-shadow: 0 1px 24px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04);
   }
   .nav-inner {
     display: flex; align-items: center; justify-content: space-between;
@@ -215,7 +216,7 @@
 
   /* === Hero === */
   .hero {
-    padding: clamp(72px, 14vh, 140px) 0 clamp(56px, 10vh, 110px);
+    padding: calc(clamp(72px, 14vh, 140px) + 56px) 0 clamp(56px, 10vh, 110px);
     text-align: center;
     position: relative;
   }
