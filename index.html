@@ -80,7 +80,7 @@
     position: absolute;
     border-radius: 50%;
     filter: blur(80px);
-    will-change: transform;
+    transform: translateZ(0);
   }
   .bg-mesh .b1 {
     width: 60vw; height: 60vw;
@@ -743,7 +743,7 @@
     </div>
     <div class="hero-preview reveal reveal-delay-3">
       <div class="parallax" data-speed="0.08">
-        <img src="screenshots/01-main.png" alt="SystemEQ for Mac main menu" />
+        <img src="screenshots/01-main.png" alt="SystemEQ for Mac main menu" width="1000" height="1800" fetchpriority="high" decoding="async" />
       </div>
     </div>
   </div>
@@ -791,17 +791,17 @@
     <h2 class="section-title reveal">See it in action.</h2>
     <p class="section-sub reveal">Tap any tile to enlarge. The visualizer plays with sound when expanded.</p>
     <div class="gallery">
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Main menu" onclick="openLightbox('screenshots/01-main.png')"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" /><div class="shot-label">Main menu</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="10-band equalizer" onclick="openLightbox('screenshots/02-eq-10.png')"><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" /><div class="shot-label">10-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="31-band equalizer" onclick="openLightbox('screenshots/03-eq-31.png')"><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" /><div class="shot-label">31-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Equal loudness calibration" onclick="openLightbox('screenshots/04-calibration.png')"><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" /><div class="shot-label">Equal loudness calibration</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Subjective room tuning" onclick="openLightbox('screenshots/05-room-tuning.png')"><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" /><div class="shot-label">Subjective room tuning</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Resonance finder" onclick="openLightbox('screenshots/06-resonance.png')"><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" /><div class="shot-label">Resonance finder</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="AutoEQ preset library" onclick="openLightbox('screenshots/07-autoeq.png')"><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" /><div class="shot-label">AutoEQ preset library</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Audio routing" onclick="openLightbox('screenshots/08-routing.png')"><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" /><div class="shot-label">Audio routing</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Settings and languages" onclick="openLightbox('screenshots/09-settings.jpeg')"><img src="screenshots/09-settings.jpeg" alt="Settings" loading="lazy" /><div class="shot-label">Settings &amp; languages</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="MilkDrop visualizer menu" onclick="openLightbox('screenshots/10-visualizer.png')"><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" /><div class="shot-label">MilkDrop visualizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Visualizer in action — tap for sound" onclick="openVideo('screenshots/10-visualizer.mov')"><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline></video><div class="shot-label">Visualizer in action <span class="live">LIVE · tap for sound</span></div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Main menu" onclick="openLightbox('screenshots/01-main.png')"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><div class="shot-label">Main menu</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="10-band equalizer" onclick="openLightbox('screenshots/02-eq-10.png')"><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><div class="shot-label">10-band equalizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="31-band equalizer" onclick="openLightbox('screenshots/03-eq-31.png')"><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><div class="shot-label">31-band equalizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Equal loudness calibration" onclick="openLightbox('screenshots/04-calibration.png')"><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><div class="shot-label">Equal loudness calibration</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Subjective room tuning" onclick="openLightbox('screenshots/05-room-tuning.png')"><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><div class="shot-label">Subjective room tuning</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Resonance finder" onclick="openLightbox('screenshots/06-resonance.png')"><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><div class="shot-label">Resonance finder</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="AutoEQ preset library" onclick="openLightbox('screenshots/07-autoeq.png')"><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><div class="shot-label">AutoEQ preset library</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Audio routing" onclick="openLightbox('screenshots/08-routing.png')"><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><div class="shot-label">Audio routing</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Settings and languages" onclick="openLightbox('screenshots/09-settings.jpeg')"><img src="screenshots/09-settings.jpeg" alt="Settings" loading="lazy" decoding="async" /><div class="shot-label">Settings &amp; languages</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="MilkDrop visualizer menu" onclick="openLightbox('screenshots/10-visualizer.png')"><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><div class="shot-label">MilkDrop visualizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Visualizer in action — tap for sound" onclick="openVideo('screenshots/10-visualizer.mov')"><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><div class="shot-label">Visualizer in action <span class="live">LIVE · tap for sound</span></div></div>
     </div>
   </div>
 </section>
@@ -972,6 +972,6 @@
 </script>
 
 <script data-goatcounter="https://systemeqformac.goatcounter.com/count"
-        async src="//gc.zgo.at/count.js"></script>
+        defer src="//gc.zgo.at/count.js"></script>
 </body>
 </html>
