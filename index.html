@@ -122,6 +122,24 @@
     opacity: 0.35;
     background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   }
+  .cursor-glow {
+    position: fixed;
+    top: 0; left: 0;
+    width: 520px; height: 520px;
+    pointer-events: none;
+    z-index: -1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(94,92,230,0.18) 0%, rgba(10,132,255,0.08) 35%, transparent 70%);
+    transform: translate(-50%, -50%) translate3d(0, 0, 0);
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    will-change: transform, opacity;
+    mix-blend-mode: screen;
+  }
+  .cursor-glow.visible { opacity: 1; }
+  @media (pointer: coarse), (prefers-reduced-motion: reduce) {
+    .cursor-glow { display: none; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .bg-mesh .blob { animation: none; }
   }
@@ -626,6 +644,8 @@
   }
   footer .links a:hover { color: var(--text); }
   footer .credit { color: var(--text-mute); font-size: 12px; line-height: 1.6; }
+  footer .credit a { color: var(--text-dim); transition: color 0.2s ease; }
+  footer .credit a:hover { color: var(--text); }
 
   /* === Mobile === */
   @media (max-width: 640px) {
@@ -652,6 +672,7 @@
   <div class="blob b3"></div>
 </div>
 <div class="bg-grain" aria-hidden="true"></div>
+<div class="cursor-glow" id="cursorGlow" aria-hidden="true"></div>
 
 <nav>
   <div class="container nav-inner">
@@ -787,7 +808,7 @@
       <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ project</a>
       <a href="https://existential.audio/blackhole/">BlackHole</a>
     </div>
-    <div class="credit">© 2026 Denys Zamorniak · SystemEQ for Mac · Released under GPLv3<br/>Made with care, not capital</div>
+    <div class="credit">© 2026 <a href="https://github.com/denzam">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with care, not capital</div>
   </div>
 </footer>
 
@@ -835,6 +856,25 @@
     window.addEventListener('scroll', updateTargets, { passive: true });
     updateTargets();
     requestAnimationFrame(tick);
+  }
+
+  // Soft cursor-tracked background glow (desktop only)
+  if (!isCoarsePointer && !reducedMotion) {
+    const glow = document.getElementById('cursorGlow');
+    let mx = window.innerWidth / 2, my = window.innerHeight / 2;
+    let gx = mx, gy = my;
+    window.addEventListener('pointermove', (e) => {
+      mx = e.clientX; my = e.clientY;
+      glow.classList.add('visible');
+    }, { passive: true });
+    window.addEventListener('pointerleave', () => glow.classList.remove('visible'));
+    const tickGlow = () => {
+      gx += (mx - gx) * 0.12;
+      gy += (my - gy) * 0.12;
+      glow.style.transform = `translate3d(${gx}px, ${gy}px, 0) translate(-50%, -50%)`;
+      requestAnimationFrame(tickGlow);
+    };
+    requestAnimationFrame(tickGlow);
   }
 
   // Pointer-tracked glow on feature cards (desktop only)
