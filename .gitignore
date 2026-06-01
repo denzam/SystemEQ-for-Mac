@@ -186,3 +186,5 @@ dist/
 
 # Internal docs (not for public)
 Docs/internal/
+
+.claude/
