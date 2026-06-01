@@ -110,11 +110,12 @@ func generateIndex() async throws {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let jsonData = try encoder.encode(entries)
     
-    let cwd = FileManager.default.currentDirectoryPath
-    let scriptsDir = cwd + "/Scripts"
-    let dir = FileManager.default.fileExists(atPath: scriptsDir) ? scriptsDir : cwd
-    let outputPath = dir + "/AutoEqIndex.json"
-    try jsonData.write(to: URL(fileURLWithPath: outputPath))
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let scriptsDir = cwd.appendingPathComponent("Scripts")
+    let dir = FileManager.default.fileExists(atPath: scriptsDir.path) ? scriptsDir : cwd
+    let outputURL = dir.appendingPathComponent("AutoEqIndex.json")
+    let outputPath = outputURL.path
+    try jsonData.write(to: outputURL)
     
     print("✅ Індекс збережено в: \(outputPath)")
     print("📊 Розмір файлу: \(jsonData.count / 1024) KB")
