@@ -206,6 +206,55 @@
     white-space: nowrap;
   }
   .nav-cta:hover { transform: scale(1.04); background: #fff; }
+
+  /* Language switcher */
+  .lang-switch { position: relative; flex-shrink: 0; }
+  .lang-btn {
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 7px 11px; border-radius: 999px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
+  }
+  .lang-btn:hover { background: rgba(255,255,255,0.1); border-color: var(--border-strong); color: var(--text); }
+  .lang-btn .flag { font-size: 16px; line-height: 1; }
+  .lang-btn .chevron {
+    width: 9px; height: 9px; opacity: 0.6;
+    transition: transform 0.25s ease;
+  }
+  .lang-switch.open .lang-btn .chevron { transform: rotate(180deg); }
+  .lang-menu {
+    position: absolute; top: calc(100% + 8px); right: 0;
+    min-width: 168px;
+    background: rgba(20,20,24,0.92);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(255,255,255,0.05);
+    opacity: 0; transform: translateY(-8px) scale(0.97);
+    transform-origin: top right;
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .lang-switch.open .lang-menu { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  .lang-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: none; border: none; cursor: pointer;
+    color: var(--text-dim); font-size: 14px; font-weight: 500;
+    padding: 9px 11px; border-radius: 9px; text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .lang-menu button .flag { font-size: 18px; line-height: 1; }
+  .lang-menu button:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+  .lang-menu button.active { color: var(--text); }
+  .lang-menu button .check { margin-left: auto; color: var(--accent); opacity: 0; }
+  .lang-menu button.active .check { opacity: 1; }
+
   @media (max-width: 860px) {
     .nav-links { display: none; }
   }
@@ -347,43 +396,89 @@
     padding: 0 12px;
   }
 
-  /* === Reveal animations === */
+  /* === Reveal animations ===
+     Driven by @keyframes (not transition) so they never clash with the
+     hover transitions cards declare for transform/border/shadow.
+     Hidden by default; the .in class (added by IntersectionObserver) runs
+     the animation. animation-fill-mode keeps the end state. */
+  /* No filter:blur() in the animation — blur re-rasterizes the element every
+     frame and shimmers on iOS GPUs. opacity + translate + scale give the same
+     soft "rise into focus" feel and composite cleanly. */
+  @keyframes reveal-in {
+    from { opacity: 0; transform: translateY(28px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes reveal-out {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(28px) scale(0.98); }
+  }
   .reveal {
     opacity: 0;
-    transform: translateY(28px) scale(0.97);
-    transition: opacity 0.65s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                transform 0.65s cubic-bezier(0.34, 1.4, 0.64, 1),
-                filter 0.65s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    filter: blur(4px);
+    /* promote to its own layer once, up front — toggling will-change per
+       animation is what makes iOS Safari flicker. Keep it stable. */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
-  .reveal.in { opacity: 1; transform: translateY(0) scale(1); filter: blur(0px); }
+  .reveal.in {
+    animation: reveal-in 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  }
+  .reveal.out {
+    /* no stagger on exit, and animation-delay is reset to 0 below */
+    animation: reveal-out 0.55s cubic-bezier(0.4, 0, 0.7, 0.2) forwards;
+    animation-delay: 0s !important;
+  }
 
-  /* cards with overflow:hidden — skip blur to avoid clipping */
-  .feature.reveal, .shot.reveal, .install-step.reveal, .support-card.reveal {
-    filter: none;
-    transform: translateY(28px) scale(0.97);
+  /* Cards holding a raster screenshot (overflow:hidden + border-radius):
+     animating transform/scale/blur on them re-rasterizes the clipped image
+     every frame → it shimmers like flickering light, especially on iOS.
+     Fade these in with opacity ONLY — no transform, no blur. Rock steady. */
+  @keyframes reveal-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
-  .feature.reveal.in, .shot.reveal.in, .install-step.reveal.in, .support-card.reveal.in {
-    filter: none;
-    transform: translateY(0) scale(1);
+  @keyframes reveal-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
   }
-  .reveal-delay-1 { transition-delay: 0.08s; }
-  .reveal-delay-2 { transition-delay: 0.16s; }
-  .reveal-delay-3 { transition-delay: 0.24s; }
+  .shot.reveal, .hero-preview.reveal {
+    transform: none;
+    backface-visibility: visible;
+    -webkit-backface-visibility: visible;
+  }
+  .shot.reveal.in,  .hero-preview.reveal.in  { animation: reveal-fade 0.7s ease forwards; }
+  .shot.reveal.out, .hero-preview.reveal.out { animation: reveal-fade-out 0.5s ease forwards; animation-delay: 0s !important; }
 
-  /* Stagger for card groups */
-  .features .feature:nth-child(1), .support-grid > *:nth-child(1), .install-grid > *:nth-child(1) { transition-delay: 0s; }
-  .features .feature:nth-child(2), .support-grid > *:nth-child(2), .install-grid > *:nth-child(2) { transition-delay: 0.07s; }
-  .features .feature:nth-child(3), .support-grid > *:nth-child(3), .install-grid > *:nth-child(3) { transition-delay: 0.14s; }
-  .features .feature:nth-child(4), .install-grid > *:nth-child(4) { transition-delay: 0.21s; }
-  .features .feature:nth-child(5), .install-grid > *:nth-child(5) { transition-delay: 0.28s; }
-  .features .feature:nth-child(6), .install-grid > *:nth-child(6) { transition-delay: 0.35s; }
-  .features .feature:nth-child(7) { transition-delay: 0.42s; }
-  .features .feature:nth-child(8) { transition-delay: 0.49s; }
-  .features .feature:nth-child(9) { transition-delay: 0.56s; }
+  /* cards have overflow:hidden — blur on the element itself is fine (only
+     children clip), so the same fog-in works everywhere. */
+  .reveal-delay-1.in { animation-delay: 0.08s; }
+  .reveal-delay-2.in { animation-delay: 0.16s; }
+  .reveal-delay-3.in { animation-delay: 0.24s; }
+
+  /* Stagger for card groups — animation-delay instead of transition-delay */
+  .features .feature:nth-child(1).in, .support-grid > *:nth-child(1).in, .install-grid > *:nth-child(1).in { animation-delay: 0s; }
+  .features .feature:nth-child(2).in, .support-grid > *:nth-child(2).in, .install-grid > *:nth-child(2).in { animation-delay: 0.07s; }
+  .features .feature:nth-child(3).in, .support-grid > *:nth-child(3).in, .install-grid > *:nth-child(3).in { animation-delay: 0.14s; }
+  .features .feature:nth-child(4).in, .install-grid > *:nth-child(4).in { animation-delay: 0.21s; }
+  .features .feature:nth-child(5).in, .install-grid > *:nth-child(5).in { animation-delay: 0.28s; }
+  .features .feature:nth-child(6).in, .install-grid > *:nth-child(6).in { animation-delay: 0.35s; }
+  .features .feature:nth-child(7).in { animation-delay: 0.42s; }
+  .features .feature:nth-child(8).in { animation-delay: 0.49s; }
+  .features .feature:nth-child(9).in { animation-delay: 0.56s; }
+  .gallery .shot:nth-child(1).in { animation-delay: 0s; }
+  .gallery .shot:nth-child(2).in { animation-delay: 0.06s; }
+  .gallery .shot:nth-child(3).in { animation-delay: 0.12s; }
+  .gallery .shot:nth-child(4).in { animation-delay: 0.18s; }
+  .gallery .shot:nth-child(5).in { animation-delay: 0.24s; }
+  .gallery .shot:nth-child(6).in { animation-delay: 0.3s; }
+  .gallery .shot:nth-child(7).in { animation-delay: 0.36s; }
+  .gallery .shot:nth-child(8).in { animation-delay: 0.42s; }
+  .gallery .shot:nth-child(9).in { animation-delay: 0.48s; }
+  .gallery .shot:nth-child(10).in { animation-delay: 0.54s; }
+  .gallery .shot:nth-child(11).in { animation-delay: 0.6s; }
 
   @media (prefers-reduced-motion: reduce) {
-    .reveal { opacity: 1; transform: none; transition: none; }
+    .reveal { opacity: 1; animation: none !important; }
   }
 
   /* Parallax wrapper — uses transform from JS */
@@ -744,6 +839,33 @@
     footer .links a { padding: 4px 0; font-size: 12px; }
   }
 </style>
+<link rel="canonical" href="https://denzam.github.io/SystemEQ-for-Mac/" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "SystemEQ for Mac",
+  "operatingSystem": "macOS 13+",
+  "applicationCategory": "MultimediaApplication",
+  "applicationSubCategory": "Audio Equalizer",
+  "description": "Free, open-source system-wide parametric audio equalizer for macOS. AutoEQ presets, calibration tools, room tuning, MilkDrop visualizer. Powered by BlackHole.",
+  "url": "https://denzam.github.io/SystemEQ-for-Mac/",
+  "downloadUrl": "https://github.com/denzam/SystemEQ-for-Mac/releases/latest",
+  "softwareVersion": "1.0.7",
+  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+  "image": "https://denzam.github.io/SystemEQ-for-Mac/og-image.png",
+  "author": {
+    "@type": "Person",
+    "name": "Denys Zamorniak",
+    "url": "https://github.com/denzam"
+  },
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
 </head>
 <body>
 
@@ -762,29 +884,41 @@
       SystemEQ for Mac
     </div>
     <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#how">How it works</a>
-      <a href="#screenshots">Screenshots</a>
-      <a href="#install">Install</a>
+      <a href="#features" data-i18n="nav.features">Features</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#screenshots" data-i18n="nav.screenshots">Screenshots</a>
+      <a href="#install" data-i18n="nav.install">Install</a>
     </div>
-    <a class="nav-cta" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Download</a>
+    <div class="lang-switch" id="langSwitch">
+      <button class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-label="Select language">
+        <span class="flag" id="langFlag">🇬🇧</span>
+        <span id="langLabel">EN</span>
+        <svg class="chevron" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="lang-menu" role="menu">
+        <button type="button" role="menuitem" data-lang="en"><span class="flag">🇬🇧</span> English <span class="check">✓</span></button>
+        <button type="button" role="menuitem" data-lang="it"><span class="flag">🇮🇹</span> Italiano <span class="check">✓</span></button>
+        <button type="button" role="menuitem" data-lang="uk"><span class="flag">🇺🇦</span> Українська <span class="check">✓</span></button>
+      </div>
+    </div>
+    <a class="nav-cta" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="nav.download">Download</a>
   </div>
 </nav>
 
 <header class="hero">
   <div class="container">
-    <div class="eyebrow reveal"><span class="dot"></span> Free &amp; open source · macOS 13+</div>
-    <h1 class="hero-title reveal reveal-delay-1">SystemEQ<br/><span class="accent">for Mac.</span></h1>
-    <p class="hero-sub reveal reveal-delay-2">A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.</p>
+    <div class="eyebrow reveal"><span class="dot"></span> <span data-i18n="hero.eyebrow">Free &amp; open source · macOS 13+</span></div>
+    <h1 class="hero-title reveal reveal-delay-1">SystemEQ<br/><span class="accent" data-i18n="hero.titleAccent">for Mac.</span></h1>
+    <p class="hero-sub reveal reveal-delay-2" data-i18n="hero.sub">A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.</p>
     <div class="cta-group reveal reveal-delay-3">
-      <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Download Latest Release</a>
-      <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac">View on GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="hero.ctaDownload">Download Latest Release</a>
+      <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac" data-i18n="hero.ctaGithub">View on GitHub</a>
     </div>
     <div class="badges reveal reveal-delay-3">
       <span class="badge">GPLv3</span>
-      <span class="badge">No telemetry</span>
+      <span class="badge" data-i18n="hero.badgeTelemetry">No telemetry</span>
       <span class="badge">EN · IT · UK</span>
-      <span class="badge">8,850+ AutoEQ presets</span>
+      <span class="badge" data-i18n="hero.badgePresets">8,850+ AutoEQ presets</span>
     </div>
     <div class="hero-preview reveal reveal-delay-3">
       <div class="parallax" data-speed="0.08">
@@ -796,86 +930,86 @@
 
 <section id="features">
   <div class="container">
-    <div class="section-label reveal">Features</div>
-    <h2 class="section-title reveal">Everything you need<br/>to tune your sound.</h2>
-    <p class="section-sub reveal">More than an equalizer — a complete audio shaping suite for macOS.</p>
+    <div class="section-label reveal" data-i18n="features.label">Features</div>
+    <h2 class="section-title reveal" data-i18n-html="features.title">Everything you need<br/>to tune your sound.</h2>
+    <p class="section-sub reveal" data-i18n="features.sub">More than an equalizer — a complete audio shaping suite for macOS.</p>
     <div class="features">
-      <div class="feature reveal"><div class="feature-icon">🎛</div><h3>10 or 31-band EQ</h3><p>Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for low-latency processing.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🎧</div><h3>8,850+ AutoEQ presets</h3><p>Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.</p></div>
-      <div class="feature reveal"><div class="feature-icon">📐</div><h3>Equal Loudness Calibration</h3><p>Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🏠</div><h3>Subjective Room Tuning</h3><p>Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.</p></div>
-      <div class="feature reveal"><div class="feature-icon">📊</div><h3>Resonance Finder</h3><p>Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🔀</div><h3>Flexible audio routing</h3><p>Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🎨</div><h3>MilkDrop visualizer</h3><p>Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p></div>
-      <div class="feature reveal"><div class="feature-icon">⚡</div><h3>Low latency, low CPU</h3><p>Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p></div>
-      <div class="feature reveal"><div class="feature-icon">🌍</div><h3>Multilingual</h3><p>Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🎛</div><h3 data-i18n="features.f1.title">10 or 31-band EQ</h3><p data-i18n="features.f1.body">Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for low-latency processing.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🎧</div><h3 data-i18n="features.f2.title">8,850+ AutoEQ presets</h3><p data-i18n-html="features.f2.body">Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.</p></div>
+      <div class="feature reveal"><div class="feature-icon">📐</div><h3 data-i18n="features.f3.title">Equal Loudness Calibration</h3><p data-i18n="features.f3.body">Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🏠</div><h3 data-i18n="features.f4.title">Subjective Room Tuning</h3><p data-i18n="features.f4.body">Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.</p></div>
+      <div class="feature reveal"><div class="feature-icon">📊</div><h3 data-i18n="features.f5.title">Resonance Finder</h3><p data-i18n="features.f5.body">Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🔀</div><h3 data-i18n="features.f6.title">Flexible audio routing</h3><p data-i18n="features.f6.body">Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🎨</div><h3 data-i18n="features.f7.title">MilkDrop visualizer</h3><p data-i18n="features.f7.body">Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p></div>
+      <div class="feature reveal"><div class="feature-icon">⚡</div><h3 data-i18n="features.f8.title">Low latency, low CPU</h3><p data-i18n="features.f8.body">Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p></div>
+      <div class="feature reveal"><div class="feature-icon">🌍</div><h3 data-i18n="features.f9.title">Multilingual</h3><p data-i18n="features.f9.body">Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p></div>
     </div>
   </div>
 </section>
 
 <section id="how">
   <div class="container">
-    <div class="section-label reveal">How it works</div>
-    <h2 class="section-title reveal">Audio flows through<br/>BlackHole.</h2>
-    <p class="section-sub reveal">macOS doesn't expose a system-wide audio EQ — so SystemEQ uses the BlackHole virtual driver to route, process and output your audio.</p>
+    <div class="section-label reveal" data-i18n="how.label">How it works</div>
+    <h2 class="section-title reveal" data-i18n-html="how.title">Audio flows through<br/>BlackHole.</h2>
+    <p class="section-sub reveal" data-i18n="how.sub">macOS doesn't expose a system-wide audio EQ — so SystemEQ uses the BlackHole virtual driver to route, process and output your audio.</p>
     <div class="flow-card reveal">
       <div class="steps">
-        <div class="step"><div class="step-num">1</div><h4>Set BlackHole as system output</h4><p>All app audio (Spotify, Safari, system sounds) flows into BlackHole 2ch.</p></div>
-        <div class="step"><div class="step-num">2</div><h4>SystemEQ captures it</h4><p>The app reads audio from BlackHole using a native CoreAudio AUHAL input.</p></div>
-        <div class="step"><div class="step-num">3</div><h4>Biquad filters apply</h4><p>Your EQ curve is applied in real time via vDSP-accelerated biquad cascades.</p></div>
-        <div class="step"><div class="step-num">4</div><h4>Output to your device</h4><p>Processed audio is sent to your physical output — speakers, headphones, DAC.</p></div>
+        <div class="step"><div class="step-num">1</div><h4 data-i18n="how.s1.title">Set BlackHole as system output</h4><p data-i18n="how.s1.body">All app audio (Spotify, Safari, system sounds) flows into BlackHole 2ch.</p></div>
+        <div class="step"><div class="step-num">2</div><h4 data-i18n="how.s2.title">SystemEQ captures it</h4><p data-i18n="how.s2.body">The app reads audio from BlackHole using a native CoreAudio AUHAL input.</p></div>
+        <div class="step"><div class="step-num">3</div><h4 data-i18n="how.s3.title">Biquad filters apply</h4><p data-i18n="how.s3.body">Your EQ curve is applied in real time via vDSP-accelerated biquad cascades.</p></div>
+        <div class="step"><div class="step-num">4</div><h4 data-i18n="how.s4.title">Output to your device</h4><p data-i18n="how.s4.body">Processed audio is sent to your physical output — speakers, headphones, DAC.</p></div>
       </div>
-      <div class="flow-diagram">App audio<span class="arrow">→</span><strong>BlackHole 2ch</strong><span class="arrow">→</span>SystemEQ<span class="arrow">→</span>biquad filters<span class="arrow">→</span><strong>Output device</strong></div>
+      <div class="flow-diagram"><span data-i18n="how.diagApp">App audio</span><span class="arrow">→</span><strong>BlackHole 2ch</strong><span class="arrow">→</span>SystemEQ<span class="arrow">→</span><span data-i18n="how.diagFilters">biquad filters</span><span class="arrow">→</span><strong data-i18n="how.diagOutput">Output device</strong></div>
     </div>
   </div>
 </section>
 
 <section id="screenshots">
   <div class="container">
-    <div class="section-label reveal">Gallery</div>
-    <h2 class="section-title reveal">See it in action.</h2>
-    <p class="section-sub reveal">Tap any tile to enlarge. The visualizer plays with sound when expanded.</p>
+    <div class="section-label reveal" data-i18n="gallery.label">Gallery</div>
+    <h2 class="section-title reveal" data-i18n="gallery.title">See it in action.</h2>
+    <p class="section-sub reveal" data-i18n="gallery.sub">Tap any tile to enlarge. The visualizer plays with sound when expanded.</p>
     <div class="gallery">
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Main menu" onclick="openLightbox('screenshots/01-main.png')"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><div class="shot-label">Main menu</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="10-band equalizer" onclick="openLightbox('screenshots/02-eq-10.png')"><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><div class="shot-label">10-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="31-band equalizer" onclick="openLightbox('screenshots/03-eq-31.png')"><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><div class="shot-label">31-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Equal loudness calibration" onclick="openLightbox('screenshots/04-calibration.png')"><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><div class="shot-label">Equal loudness calibration</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Subjective room tuning" onclick="openLightbox('screenshots/05-room-tuning.png')"><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><div class="shot-label">Subjective room tuning</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Resonance finder" onclick="openLightbox('screenshots/06-resonance.png')"><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><div class="shot-label">Resonance finder</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="AutoEQ preset library" onclick="openLightbox('screenshots/07-autoeq.png')"><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><div class="shot-label">AutoEQ preset library</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Audio routing" onclick="openLightbox('screenshots/08-routing.png')"><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><div class="shot-label">Audio routing</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Settings and languages" onclick="openLightbox('screenshots/09-settings.jpeg')"><img src="screenshots/09-settings.jpeg" alt="Settings" loading="lazy" decoding="async" /><div class="shot-label">Settings &amp; languages</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="MilkDrop visualizer menu" onclick="openLightbox('screenshots/10-visualizer.png')"><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><div class="shot-label">MilkDrop visualizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Visualizer in action — tap for sound" onclick="openVideo('screenshots/10-visualizer.mov')"><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><div class="shot-label">Visualizer in action <span class="live">LIVE · tap for sound</span></div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Main menu" onclick="openLightbox('screenshots/01-main.png')"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.main">Main menu</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="10-band equalizer" onclick="openLightbox('screenshots/02-eq-10.png')"><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.eq10">10-band equalizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="31-band equalizer" onclick="openLightbox('screenshots/03-eq-31.png')"><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.eq31">31-band equalizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Equal loudness calibration" onclick="openLightbox('screenshots/04-calibration.png')"><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.calibration">Equal loudness calibration</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Subjective room tuning" onclick="openLightbox('screenshots/05-room-tuning.png')"><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.roomTuning">Subjective room tuning</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Resonance finder" onclick="openLightbox('screenshots/06-resonance.png')"><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.resonance">Resonance finder</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="AutoEQ preset library" onclick="openLightbox('screenshots/07-autoeq.png')"><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.autoeq">AutoEQ preset library</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Audio routing" onclick="openLightbox('screenshots/08-routing.png')"><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.routing">Audio routing</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Settings and languages" onclick="openLightbox('screenshots/09-settings.jpeg')"><img src="screenshots/09-settings.jpeg" alt="Settings" loading="lazy" decoding="async" /><div class="shot-label" data-i18n-html="shot.settings">Settings &amp; languages</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="MilkDrop visualizer menu" onclick="openLightbox('screenshots/10-visualizer.png')"><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.visualizerMenu">MilkDrop visualizer</div></div>
+      <div class="shot reveal" tabindex="0" role="button" aria-label="Visualizer in action — tap for sound" onclick="openVideo('screenshots/10-visualizer.mov')"><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><div class="shot-label"><span data-i18n="shot.visualizerLive">Visualizer in action</span> <span class="live" data-i18n="shot.liveTag">LIVE · tap for sound</span></div></div>
     </div>
   </div>
 </section>
 
 <section id="install">
   <div class="container">
-    <div class="section-label reveal">Install</div>
-    <h2 class="section-title reveal">Get started in 2 minutes.</h2>
-    <p class="section-sub reveal">SystemEQ is distributed as a free open-source build outside the App Store.</p>
+    <div class="section-label reveal" data-i18n="install.label">Install</div>
+    <h2 class="section-title reveal" data-i18n="install.title">Get started in 2 minutes.</h2>
+    <p class="section-sub reveal" data-i18n="install.sub">SystemEQ is distributed as a free open-source build outside the App Store.</p>
     <div class="install-grid">
-      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4>Install BlackHole 2ch</h4><p>The virtual audio driver SystemEQ uses to capture system audio.</p><pre><code>brew install blackhole-2ch</code></pre></div></div>
-      <div class="install-step reveal"><div class="num">2</div><div class="body"><h4>Download SystemEQ</h4><p>Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Download from GitHub Releases</a></div></div>
-      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4>Allow unsigned app on first launch</h4><p>macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div>
-      <div class="install-step reveal"><div class="num">4</div><div class="body"><h4>Set system output to BlackHole 2ch</h4><p>In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).</p></div></div>
-      <div class="install-step reveal"><div class="num">5</div><div class="body"><h4>(Alternative) Build from source</h4><p>Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p></div></div>
+      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">Install BlackHole 2ch</h4><p data-i18n="install.s1.body">The virtual audio driver SystemEQ uses to capture system audio.</p><pre><code>brew install blackhole-2ch</code></pre></div></div>
+      <div class="install-step reveal"><div class="num">2</div><div class="body"><h4 data-i18n="install.s2.title">Download SystemEQ</h4><p data-i18n-html="install.s2.body">Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="install.s2.btn">Download from GitHub Releases</a></div></div>
+      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Allow unsigned app on first launch</h4><p data-i18n-html="install.s3.body">macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div>
+      <div class="install-step reveal"><div class="num">4</div><div class="body"><h4 data-i18n="install.s4.title">Set system output to BlackHole 2ch</h4><p data-i18n-html="install.s4.body">In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).</p></div></div>
+      <div class="install-step reveal"><div class="num">5</div><div class="body"><h4 data-i18n="install.s5.title">(Alternative) Build from source</h4><p data-i18n="install.s5.body">Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p></div></div>
     </div>
-    <div class="note reveal"><strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.</div>
+    <div class="note reveal" data-i18n-html="install.note"><strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.</div>
   </div>
 </section>
 
 <section id="support">
   <div class="container">
-    <div class="section-label reveal">Support</div>
-    <h2 class="section-title reveal">Made with care,<br/>not capital.</h2>
-    <p class="section-sub reveal">SystemEQ is free forever. If it makes your audio better, consider supporting development — completely optional.</p>
+    <div class="section-label reveal" data-i18n="support.label">Support</div>
+    <h2 class="section-title reveal" data-i18n-html="support.title">Made with ❤️<br/>for the audio community.</h2>
+    <p class="section-sub reveal" data-i18n="support.sub">SystemEQ is free forever. If it makes your audio better, consider supporting development — completely optional.</p>
     <div class="support-grid">
-      <a class="support-card reveal" href="https://github.com/sponsors/denzam"><span class="emoji">💖</span><h4>GitHub Sponsors</h4><p>Monthly or one-time</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;">Sponsor</span></a>
-      <a class="support-card reveal" href="https://github.com/denzam/SystemEQ-for-Mac"><span class="emoji">☕</span><h4>Buy Me a Coffee</h4><p>One-time tip — link in the app</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;">Open app</span></a>
-      <a class="support-card reveal" href="https://github.com/denzam/SystemEQ-for-Mac"><span class="emoji">⭐</span><h4>Star on GitHub</h4><p>Free, helps visibility</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;">Star repo</span></a>
+      <a class="support-card reveal" href="https://github.com/sponsors/denzam"><span class="emoji">💖</span><h4 data-i18n="support.c1.title">GitHub Sponsors</h4><p data-i18n="support.c1.body">Monthly or one-time</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;" data-i18n="support.c1.btn">Sponsor</span></a>
+      <a class="support-card reveal" href="https://github.com/denzam/SystemEQ-for-Mac"><span class="emoji">☕</span><h4 data-i18n="support.c2.title">Buy Me a Coffee</h4><p data-i18n="support.c2.body">One-time tip — link in the app</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;" data-i18n="support.c2.btn">Open app</span></a>
+      <a class="support-card reveal" href="https://github.com/denzam/SystemEQ-for-Mac"><span class="emoji">⭐</span><h4 data-i18n="support.c3.title">Star on GitHub</h4><p data-i18n="support.c3.body">Free, helps visibility</p><span class="btn btn-ghost" style="padding: 8px 18px; font-size: 13px; min-height: auto;" data-i18n="support.c3.btn">Star repo</span></a>
     </div>
   </div>
 </section>
@@ -884,12 +1018,12 @@
   <div class="container">
     <div class="links">
       <a href="https://github.com/denzam/SystemEQ-for-Mac">GitHub</a>
-      <a href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest">Releases</a>
-      <a href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/LICENSE">License (GPLv3)</a>
-      <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ project</a>
+      <a href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="footer.releases">Releases</a>
+      <a href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/LICENSE" data-i18n="footer.license">License (GPLv3)</a>
+      <a href="https://github.com/jaakkopasanen/AutoEq" data-i18n="footer.autoeq">AutoEQ project</a>
       <a href="https://existential.audio/blackhole/">BlackHole</a>
     </div>
-    <div class="credit">© 2026 <a href="https://github.com/denzam">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with care, not capital</div>
+    <div class="credit" data-i18n-html="footer.credit">© 2026 <a href="https://github.com/denzam">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with ❤️ for the audio community</div>
   </div>
 </footer>
 
@@ -900,17 +1034,374 @@
 </div>
 
 <script>
-  // Reveal on scroll
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('in');
-      } else {
-        entry.target.classList.remove('in');
-      }
+  // === i18n ===
+  const I18N = {
+    en: {
+      "nav.features": "Features",
+      "nav.how": "How it works",
+      "nav.screenshots": "Screenshots",
+      "nav.install": "Install",
+      "nav.download": "Download",
+      "hero.eyebrow": "Free &amp; open source · macOS 13+",
+      "hero.titleAccent": "for Mac.",
+      "hero.sub": "A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.",
+      "hero.ctaDownload": "Download Latest Release",
+      "hero.ctaGithub": "View on GitHub",
+      "hero.badgeTelemetry": "No telemetry",
+      "hero.badgePresets": "8,850+ AutoEQ presets",
+      "features.label": "Features",
+      "features.title": "Everything you need<br/>to tune your sound.",
+      "features.sub": "More than an equalizer — a complete audio shaping suite for macOS.",
+      "features.f1.title": "10 or 31-band EQ",
+      "features.f1.body": "Switch between simple 10-band or precision 31-band parametric equalizer. vDSP-accelerated biquad filters for low-latency processing.",
+      "features.f2.title": "8,850+ AutoEQ presets",
+      "features.f2.body": "Built-in SQLite database with presets for thousands of headphones from the AutoEQ project. Import any <code>.txt</code> preset file.",
+      "features.f3.title": "Equal Loudness Calibration",
+      "features.f3.body": "Compensate for your headphones and your hearing through interactive ear-based calibration. Clean or combined modes, 10 or 31-band precision.",
+      "features.f4.title": "Subjective Room Tuning",
+      "features.f4.body": "Personal room tuning based on your hearing. Test specific frequencies manually and add notch filters for problem resonances.",
+      "features.f5.title": "Resonance Finder",
+      "features.f5.body": "Automatic sine sweep to identify booming or ringing frequencies in your room or headphones. Mark and tame them with one click.",
+      "features.f6.title": "Flexible audio routing",
+      "features.f6.body": "Pick any input/output device. Live audio level meters, test tone generator, and one-click EQ enable/disable.",
+      "features.f7.title": "MilkDrop visualizer",
+      "features.f7.body": "Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.",
+      "features.f8.title": "Low latency, low CPU",
+      "features.f8.body": "Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.",
+      "features.f9.title": "Multilingual",
+      "features.f9.body": "Full interface localization in English, Italian and Ukrainian. Switch language on the fly.",
+      "how.label": "How it works",
+      "how.title": "Audio flows through<br/>BlackHole.",
+      "how.sub": "macOS doesn't expose a system-wide audio EQ — so SystemEQ uses the BlackHole virtual driver to route, process and output your audio.",
+      "how.s1.title": "Set BlackHole as system output",
+      "how.s1.body": "All app audio (Spotify, Safari, system sounds) flows into BlackHole 2ch.",
+      "how.s2.title": "SystemEQ captures it",
+      "how.s2.body": "The app reads audio from BlackHole using a native CoreAudio AUHAL input.",
+      "how.s3.title": "Biquad filters apply",
+      "how.s3.body": "Your EQ curve is applied in real time via vDSP-accelerated biquad cascades.",
+      "how.s4.title": "Output to your device",
+      "how.s4.body": "Processed audio is sent to your physical output — speakers, headphones, DAC.",
+      "how.diagApp": "App audio",
+      "how.diagFilters": "biquad filters",
+      "how.diagOutput": "Output device",
+      "gallery.label": "Gallery",
+      "gallery.title": "See it in action.",
+      "gallery.sub": "Tap any tile to enlarge. The visualizer plays with sound when expanded.",
+      "shot.main": "Main menu",
+      "shot.eq10": "10-band equalizer",
+      "shot.eq31": "31-band equalizer",
+      "shot.calibration": "Equal loudness calibration",
+      "shot.roomTuning": "Subjective room tuning",
+      "shot.resonance": "Resonance finder",
+      "shot.autoeq": "AutoEQ preset library",
+      "shot.routing": "Audio routing",
+      "shot.settings": "Settings &amp; languages",
+      "shot.visualizerMenu": "MilkDrop visualizer",
+      "shot.visualizerLive": "Visualizer in action",
+      "shot.liveTag": "LIVE · tap for sound",
+      "install.label": "Install",
+      "install.title": "Get started in 2 minutes.",
+      "install.sub": "SystemEQ is distributed as a free open-source build outside the App Store.",
+      "install.s1.title": "Install BlackHole 2ch",
+      "install.s1.body": "The virtual audio driver SystemEQ uses to capture system audio.",
+      "install.s2.title": "Download SystemEQ",
+      "install.s2.body": "Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.",
+      "install.s2.btn": "Download from GitHub Releases",
+      "install.s3.title": "Allow unsigned app on first launch",
+      "install.s3.body": "macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:",
+      "install.s4.title": "Set system output to BlackHole 2ch",
+      "install.s4.body": "In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).",
+      "install.s5.title": "(Alternative) Build from source",
+      "install.s5.body": "Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.",
+      "install.note": "<strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.",
+      "support.label": "Support",
+      "support.title": "Made with ❤️<br/>for the audio community.",
+      "support.sub": "SystemEQ is free forever. If it makes your audio better, consider supporting development — completely optional.",
+      "support.c1.title": "GitHub Sponsors",
+      "support.c1.body": "Monthly or one-time",
+      "support.c1.btn": "Sponsor",
+      "support.c2.title": "Buy Me a Coffee",
+      "support.c2.body": "One-time tip — link in the app",
+      "support.c2.btn": "Open app",
+      "support.c3.title": "Star on GitHub",
+      "support.c3.body": "Free, helps visibility",
+      "support.c3.btn": "Star repo",
+      "footer.releases": "Releases",
+      "footer.license": "License (GPLv3)",
+      "footer.autoeq": "AutoEQ project",
+      "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with ❤️ for the audio community"
+    },
+    it: {
+      "nav.features": "Funzioni",
+      "nav.how": "Come funziona",
+      "nav.screenshots": "Screenshot",
+      "nav.install": "Installazione",
+      "nav.download": "Scarica",
+      "hero.eyebrow": "Gratuito e open source · macOS 13+",
+      "hero.titleAccent": "for Mac.",
+      "hero.sub": "Un equalizzatore parametrico di sistema con strumenti di calibrazione, preset AutoEQ, taratura della stanza e un visualizzatore MilkDrop in tempo reale — tutto in esecuzione nativa sul tuo Mac.",
+      "hero.ctaDownload": "Scarica l'ultima versione",
+      "hero.ctaGithub": "Guarda su GitHub",
+      "hero.badgeTelemetry": "Nessuna telemetria",
+      "hero.badgePresets": "8.850+ preset AutoEQ",
+      "features.label": "Funzioni",
+      "features.title": "Tutto ciò che serve<br/>per regolare il tuo suono.",
+      "features.sub": "Più di un equalizzatore — una suite completa di modellazione audio per macOS.",
+      "features.f1.title": "EQ a 10 o 31 bande",
+      "features.f1.body": "Passa da un equalizzatore parametrico semplice a 10 bande a uno di precisione a 31 bande. Filtri biquad accelerati con vDSP per un'elaborazione a bassa latenza.",
+      "features.f2.title": "8.850+ preset AutoEQ",
+      "features.f2.body": "Database SQLite integrato con preset per migliaia di cuffie dal progetto AutoEQ. Importa qualsiasi file preset <code>.txt</code>.",
+      "features.f3.title": "Calibrazione Equal Loudness",
+      "features.f3.body": "Compensa le tue cuffie e il tuo udito tramite una calibrazione interattiva basata sull'orecchio. Modalità pulita o combinata, precisione a 10 o 31 bande.",
+      "features.f4.title": "Taratura soggettiva della stanza",
+      "features.f4.body": "Taratura personale della stanza basata sul tuo udito. Testa manualmente frequenze specifiche e aggiungi filtri notch per le risonanze problematiche.",
+      "features.f5.title": "Ricerca risonanze",
+      "features.f5.body": "Sweep sinusoidale automatico per identificare frequenze rimbombanti o fischianti nella stanza o nelle cuffie. Segnalale e attenuale con un clic.",
+      "features.f6.title": "Instradamento audio flessibile",
+      "features.f6.body": "Scegli qualsiasi dispositivo di ingresso/uscita. Misuratori di livello in tempo reale, generatore di toni di test e attivazione/disattivazione EQ con un clic.",
+      "features.f7.title": "Visualizzatore MilkDrop",
+      "features.f7.body": "Il visualizzatore ProjectM/MilkDrop integrato reagisce al tuo audio in tempo reale. Blocca o mescola i preset.",
+      "features.f8.title": "Bassa latenza, basso consumo CPU",
+      "features.f8.body": "Motore nativo CoreAudio (AUHAL) a doppio I/O con ring buffer lock-free. Ottimizzato per l'audio in tempo reale.",
+      "features.f9.title": "Multilingua",
+      "features.f9.body": "Localizzazione completa dell'interfaccia in inglese, italiano e ucraino. Cambia lingua al volo.",
+      "how.label": "Come funziona",
+      "how.title": "L'audio passa attraverso<br/>BlackHole.",
+      "how.sub": "macOS non espone un EQ audio di sistema — quindi SystemEQ usa il driver virtuale BlackHole per instradare, elaborare e riprodurre il tuo audio.",
+      "how.s1.title": "Imposta BlackHole come uscita di sistema",
+      "how.s1.body": "Tutto l'audio delle app (Spotify, Safari, suoni di sistema) confluisce in BlackHole 2ch.",
+      "how.s2.title": "SystemEQ lo cattura",
+      "how.s2.body": "L'app legge l'audio da BlackHole tramite un ingresso nativo CoreAudio AUHAL.",
+      "how.s3.title": "Si applicano i filtri biquad",
+      "how.s3.body": "La tua curva EQ viene applicata in tempo reale tramite cascate biquad accelerate con vDSP.",
+      "how.s4.title": "Uscita verso il tuo dispositivo",
+      "how.s4.body": "L'audio elaborato viene inviato alla tua uscita fisica — altoparlanti, cuffie, DAC.",
+      "how.diagApp": "Audio app",
+      "how.diagFilters": "filtri biquad",
+      "how.diagOutput": "Dispositivo di uscita",
+      "gallery.label": "Galleria",
+      "gallery.title": "Guardalo in azione.",
+      "gallery.sub": "Tocca una qualsiasi anteprima per ingrandirla. Il visualizzatore riproduce l'audio quando è espanso.",
+      "shot.main": "Menu principale",
+      "shot.eq10": "Equalizzatore a 10 bande",
+      "shot.eq31": "Equalizzatore a 31 bande",
+      "shot.calibration": "Calibrazione equal loudness",
+      "shot.roomTuning": "Taratura soggettiva della stanza",
+      "shot.resonance": "Ricerca risonanze",
+      "shot.autoeq": "Libreria preset AutoEQ",
+      "shot.routing": "Instradamento audio",
+      "shot.settings": "Impostazioni e lingue",
+      "shot.visualizerMenu": "Visualizzatore MilkDrop",
+      "shot.visualizerLive": "Visualizzatore in azione",
+      "shot.liveTag": "LIVE · tocca per l'audio",
+      "install.label": "Installazione",
+      "install.title": "Inizia in 2 minuti.",
+      "install.sub": "SystemEQ è distribuito come build open source gratuita al di fuori dell'App Store.",
+      "install.s1.title": "Installa BlackHole 2ch",
+      "install.s1.body": "Il driver audio virtuale che SystemEQ usa per catturare l'audio di sistema.",
+      "install.s2.title": "Scarica SystemEQ",
+      "install.s2.body": "Scarica l'ultimo <code>.dmg</code> dalle Release di GitHub e trascina l'app in <code>/Applications</code>.",
+      "install.s2.btn": "Scarica dalle Release di GitHub",
+      "install.s3.title": "Consenti l'app non firmata al primo avvio",
+      "install.s3.body": "macOS bloccherà l'app perché non è autenticata. Fai clic destro sull'app in <code>/Applications</code> → <strong>Apri</strong>, oppure rimuovi il flag di quarantena:",
+      "install.s4.title": "Imposta l'uscita di sistema su BlackHole 2ch",
+      "install.s4.body": "In <strong>Impostazioni di Sistema → Suono → Uscita</strong>, scegli <code>BlackHole 2ch</code>. Poi in SystemEQ seleziona il tuo vero dispositivo di uscita (altoparlanti, cuffie, DAC).",
+      "install.s5.title": "(Alternativa) Compila dal sorgente",
+      "install.s5.body": "Apri il progetto Xcode su macOS con Xcode 16.2+ e compila per il tuo Mac locale.",
+      "install.note": "<strong>Perché non firmata?</strong> SystemEQ è un progetto gratuito sostenuto da donazioni. Un certificato Apple Developer ID costa 99 $/anno — invece, il codice sorgente è completamente aperto su GitHub così puoi verificarlo e compilarlo tu stesso.",
+      "support.label": "Sostieni",
+      "support.title": "Fatto con ❤️<br/>per la community audio.",
+      "support.sub": "SystemEQ è gratuito per sempre. Se migliora il tuo audio, valuta di sostenere lo sviluppo — del tutto facoltativo.",
+      "support.c1.title": "GitHub Sponsors",
+      "support.c1.body": "Mensile o una tantum",
+      "support.c1.btn": "Sostieni",
+      "support.c2.title": "Buy Me a Coffee",
+      "support.c2.body": "Donazione una tantum — link nell'app",
+      "support.c2.btn": "Apri l'app",
+      "support.c3.title": "Metti una stella su GitHub",
+      "support.c3.body": "Gratis, aiuta la visibilità",
+      "support.c3.btn": "Stella al repo",
+      "footer.releases": "Release",
+      "footer.license": "Licenza (GPLv3)",
+      "footer.autoeq": "Progetto AutoEQ",
+      "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Rilasciato sotto GPLv3<br/>Fatto con ❤️ per la community audio"
+    },
+    uk: {
+      "nav.features": "Можливості",
+      "nav.how": "Як це працює",
+      "nav.screenshots": "Скриншоти",
+      "nav.install": "Встановлення",
+      "nav.download": "Завантажити",
+      "hero.eyebrow": "Безкоштовний і з відкритим кодом · macOS 13+",
+      "hero.titleAccent": "for Mac.",
+      "hero.sub": "Системний параметричний еквалайзер з інструментами калібрування, пресетами AutoEQ, налаштуванням кімнати та живим візуалізатором MilkDrop — усе працює нативно на вашому Mac.",
+      "hero.ctaDownload": "Завантажити останній реліз",
+      "hero.ctaGithub": "Переглянути на GitHub",
+      "hero.badgeTelemetry": "Без телеметрії",
+      "hero.badgePresets": "8 850+ пресетів AutoEQ",
+      "features.label": "Можливості",
+      "features.title": "Усе необхідне,<br/>щоб налаштувати ваш звук.",
+      "features.sub": "Більше, ніж еквалайзер — повноцінний набір інструментів обробки звуку для macOS.",
+      "features.f1.title": "EQ на 10 або 31 смугу",
+      "features.f1.body": "Перемикайтеся між простим 10-смуговим і точним 31-смуговим параметричним еквалайзером. Біквадратні фільтри з прискоренням vDSP для обробки з низькою затримкою.",
+      "features.f2.title": "8 850+ пресетів AutoEQ",
+      "features.f2.body": "Вбудована база даних SQLite з пресетами для тисяч навушників із проєкту AutoEQ. Імпортуйте будь-який файл пресету <code>.txt</code>.",
+      "features.f3.title": "Калібрування рівної гучності",
+      "features.f3.body": "Компенсуйте свої навушники та свій слух за допомогою інтерактивного калібрування на основі вуха. Чистий або комбінований режим, точність 10 чи 31 смуга.",
+      "features.f4.title": "Суб'єктивне налаштування кімнати",
+      "features.f4.body": "Особисте налаштування кімнати на основі вашого слуху. Перевіряйте конкретні частоти вручну та додавайте notch-фільтри для проблемних резонансів.",
+      "features.f5.title": "Пошук резонансів",
+      "features.f5.body": "Автоматичний синусоїдальний свіп для виявлення гулких чи дзвінких частот у вашій кімнаті або навушниках. Позначте та приборкайте їх одним кліком.",
+      "features.f6.title": "Гнучка маршрутизація звуку",
+      "features.f6.body": "Оберіть будь-який пристрій входу/виходу. Живі індикатори рівня звуку, генератор тестового тону та увімкнення/вимкнення EQ одним кліком.",
+      "features.f7.title": "Візуалізатор MilkDrop",
+      "features.f7.body": "Вбудований візуалізатор ProjectM/MilkDrop реагує на ваш звук у реальному часі. Фіксуйте або перемішуйте пресети.",
+      "features.f8.title": "Низька затримка, мале навантаження ЦП",
+      "features.f8.body": "Нативний двонапрямний рушій CoreAudio (AUHAL) із lock-free кільцевими буферами. Оптимізовано для звуку в реальному часі.",
+      "features.f9.title": "Багатомовність",
+      "features.f9.body": "Повна локалізація інтерфейсу англійською, італійською та українською. Перемикайте мову на льоту.",
+      "how.label": "Як це працює",
+      "how.title": "Звук проходить через<br/>BlackHole.",
+      "how.sub": "macOS не надає системного аудіо-еквалайзера — тож SystemEQ використовує віртуальний драйвер BlackHole, щоб маршрутизувати, обробляти й виводити ваш звук.",
+      "how.s1.title": "Встановіть BlackHole системним виходом",
+      "how.s1.body": "Увесь звук застосунків (Spotify, Safari, системні звуки) надходить у BlackHole 2ch.",
+      "how.s2.title": "SystemEQ його захоплює",
+      "how.s2.body": "Застосунок читає звук із BlackHole через нативний вхід CoreAudio AUHAL.",
+      "how.s3.title": "Застосовуються біквадратні фільтри",
+      "how.s3.body": "Ваша крива EQ застосовується в реальному часі через каскади біквадратних фільтрів із прискоренням vDSP.",
+      "how.s4.title": "Вивід на ваш пристрій",
+      "how.s4.body": "Оброблений звук надсилається на ваш фізичний вихід — колонки, навушники, ЦАП.",
+      "how.diagApp": "Звук застосунків",
+      "how.diagFilters": "біквад-фільтри",
+      "how.diagOutput": "Пристрій виводу",
+      "gallery.label": "Галерея",
+      "gallery.title": "Подивіться в дії.",
+      "gallery.sub": "Торкніться будь-якої плитки, щоб збільшити. Візуалізатор відтворюється зі звуком у розгорнутому вигляді.",
+      "shot.main": "Головне меню",
+      "shot.eq10": "10-смуговий еквалайзер",
+      "shot.eq31": "31-смуговий еквалайзер",
+      "shot.calibration": "Калібрування рівної гучності",
+      "shot.roomTuning": "Суб'єктивне налаштування кімнати",
+      "shot.resonance": "Пошук резонансів",
+      "shot.autoeq": "Бібліотека пресетів AutoEQ",
+      "shot.routing": "Маршрутизація звуку",
+      "shot.settings": "Налаштування та мови",
+      "shot.visualizerMenu": "Візуалізатор MilkDrop",
+      "shot.visualizerLive": "Візуалізатор у дії",
+      "shot.liveTag": "НАЖИВО · торкніться для звуку",
+      "install.label": "Встановлення",
+      "install.title": "Почніть за 2 хвилини.",
+      "install.sub": "SystemEQ розповсюджується як безкоштовна збірка з відкритим кодом поза App Store.",
+      "install.s1.title": "Встановіть BlackHole 2ch",
+      "install.s1.body": "Віртуальний аудіодрайвер, який SystemEQ використовує для захоплення системного звуку.",
+      "install.s2.title": "Завантажте SystemEQ",
+      "install.s2.body": "Візьміть останній <code>.dmg</code> з GitHub Releases і перетягніть застосунок у <code>/Applications</code>.",
+      "install.s2.btn": "Завантажити з GitHub Releases",
+      "install.s3.title": "Дозвольте непідписаний застосунок при першому запуску",
+      "install.s3.body": "macOS заблокує застосунок, бо він не нотаризований. Клацніть правою кнопкою по застосунку в <code>/Applications</code> → <strong>Відкрити</strong>, або зніміть прапорець карантину:",
+      "install.s4.title": "Встановіть системний вихід на BlackHole 2ch",
+      "install.s4.body": "У <strong>Системних параметрах → Звук → Вихід</strong> оберіть <code>BlackHole 2ch</code>. Потім у SystemEQ виберіть свій справжній пристрій виводу (колонки, навушники, ЦАП).",
+      "install.s5.title": "(Альтернатива) Зберіть із вихідного коду",
+      "install.s5.body": "Відкрийте проєкт Xcode на macOS з Xcode 16.2+ і зберіть для свого Mac.",
+      "install.note": "<strong>Чому непідписаний?</strong> SystemEQ — безкоштовний проєкт на пожертвах. Сертифікат Apple Developer ID коштує $99/рік — натомість вихідний код повністю відкритий на GitHub, тож ви можете перевірити та зібрати його самостійно.",
+      "support.label": "Підтримка",
+      "support.title": "Зроблено з ❤️<br/>для аудіоспільноти.",
+      "support.sub": "SystemEQ безкоштовний назавжди. Якщо він покращує ваш звук, подумайте про підтримку розробки — цілком за бажанням.",
+      "support.c1.title": "GitHub Sponsors",
+      "support.c1.body": "Щомісяця або одноразово",
+      "support.c1.btn": "Підтримати",
+      "support.c2.title": "Buy Me a Coffee",
+      "support.c2.body": "Разовий внесок — посилання в застосунку",
+      "support.c2.btn": "Відкрити застосунок",
+      "support.c3.title": "Зірка на GitHub",
+      "support.c3.body": "Безкоштовно, допомагає видимості",
+      "support.c3.btn": "Поставити зірку",
+      "footer.releases": "Релізи",
+      "footer.license": "Ліцензія (GPLv3)",
+      "footer.autoeq": "Проєкт AutoEQ",
+      "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Випущено під GPLv3<br/>Зроблено з ❤️ для аудіоспільноти"
+    }
+  };
+  const LANG_META = {
+    en: { flag: "🇬🇧", label: "EN" },
+    it: { flag: "🇮🇹", label: "IT" },
+    uk: { flag: "🇺🇦", label: "UA" }
+  };
+
+  function applyLang(lang) {
+    if (!I18N[lang]) lang = "en";
+    const dict = I18N[lang];
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const v = dict[el.getAttribute("data-i18n")];
+      if (v != null) el.innerHTML = v;
     });
-  }, { threshold: 0.15, rootMargin: '0px 0px -10% 0px' });
-  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+    document.querySelectorAll("[data-i18n-html]").forEach(el => {
+      const v = dict[el.getAttribute("data-i18n-html")];
+      if (v != null) el.innerHTML = v;
+    });
+    document.getElementById("langFlag").textContent = LANG_META[lang].flag;
+    document.getElementById("langLabel").textContent = LANG_META[lang].label;
+    document.querySelectorAll(".lang-menu button").forEach(b => {
+      b.classList.toggle("active", b.dataset.lang === lang);
+    });
+    try { localStorage.setItem("seq-lang", lang); } catch (e) {}
+  }
+
+  (function initLang() {
+    let lang;
+    try { lang = localStorage.getItem("seq-lang"); } catch (e) {}
+    if (!lang) {
+      const nav = (navigator.language || "en").slice(0, 2).toLowerCase();
+      lang = I18N[nav] ? nav : "en";
+    }
+    const sw = document.getElementById("langSwitch");
+    const btn = document.getElementById("langBtn");
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = sw.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.querySelectorAll(".lang-menu button").forEach(b => {
+      b.addEventListener("click", () => {
+        applyLang(b.dataset.lang);
+        sw.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+    document.addEventListener("click", (e) => {
+      if (!sw.contains(e.target)) { sw.classList.remove("open"); btn.setAttribute("aria-expanded", "false"); }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { sw.classList.remove("open"); btn.setAttribute("aria-expanded", "false"); }
+    });
+    applyLang(lang);
+  })();
+
+  // Reveal on scroll.
+  // The flicker came from an element parked right on a single trigger edge:
+  // tiny scroll jitter crossed it back and forth, restarting the animation
+  // every frame. Fix = HYSTERESIS via two separate observers with a wide gap
+  // between the reveal edge and the hide edge. Once revealed, an element won't
+  // hide again until it is almost entirely off-screen, and won't re-reveal
+  // until it's well back inside — so jitter near any single edge does nothing.
+  const revealIO = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const cl = entry.target.classList;
+      if (!cl.contains('in')) { cl.remove('out'); cl.add('in'); }
+    });
+  }, { threshold: 0, rootMargin: '0px 0px -12% 0px' });    // reveal when 12% into view
+
+  const hideIO = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) return;                    // still at least slightly visible → keep shown
+      const cl = entry.target.classList;
+      if (cl.contains('in')) { cl.remove('in'); cl.add('out'); }
+    });
+  }, { threshold: 0, rootMargin: '8% 0px 8% 0px' });       // hide soon after it leaves the viewport edge
+
+  document.querySelectorAll('.reveal').forEach(el => { revealIO.observe(el); hideIO.observe(el); });
 
   // Parallax — lerp-smoothed continuous rAF loop (desktop only)
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
