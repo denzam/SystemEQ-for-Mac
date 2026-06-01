@@ -1,12 +1,26 @@
 # SystemEQ for Mac
 
-**Professional system-wide equalizer for macOS 13+**
+**Free, open-source system-wide parametric equalizer for macOS 13+**
+
+Tune every sound on your Mac — Spotify, YouTube, Apple Music, anything.
+10/31-band parametric EQ with an 8,665-headphone AutoEQ database, hearing
+calibration, and a real-time visualizer. No subscriptions, no telemetry.
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Download](https://img.shields.io/github/v/release/denzam/SystemEQ-for-Mac?label=download)](https://github.com/denzam/SystemEQ-for-Mac/releases/latest)
+[![Website](https://img.shields.io/badge/website-denzam.github.io-black)](https://denzam.github.io/SystemEQ-for-Mac/)
 
 > 🇬🇧 English | 🇺🇦 [Українська](README.ua.md) | 🇮🇹 [Italiano](README.it.md)
+
+![SystemEQ for Mac — main window](Docs/screenshots/01-main.png)
+
+## 📸 Screenshots
+
+| Parametric EQ | AutoEQ Database | Calibration | Visualizer |
+| :---: | :---: | :---: | :---: |
+| [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibration](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizer](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
 
 ## ✨ Features
 
