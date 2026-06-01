@@ -259,9 +259,10 @@
   @media (max-width: 860px) {
     .nav-links { display: none; }
   }
-  @media (max-width: 420px) {
+  @media (max-width: 480px) {
+    .nav-inner { gap: 10px; }
     .brand { font-size: 14px; }
-    .nav-cta { padding: 7px 12px; font-size: 12px; }
+    .nav-cta { display: none; }
   }
 
   /* === Hero === */
@@ -739,6 +740,112 @@
   }
   .note strong { color: var(--orange); }
 
+  /* === Copy code === */
+  .codeblock { position: relative; }
+  .codeblock .copy-btn {
+    position: absolute;
+    top: 8px; right: 8px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+  .codeblock .copy-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); border-color: var(--border-strong); }
+  .codeblock .copy-btn.copied { color: var(--green); border-color: rgba(48,209,88,0.4); background: rgba(48,209,88,0.1); }
+  .codeblock pre { padding-right: 84px; }
+
+  /* === GitHub stars + version badge === */
+  .nav-star {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 13px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  .nav-star:hover { border-color: var(--border-strong); background: rgba(255,255,255,0.08); }
+  .nav-star svg { width: 15px; height: 15px; color: var(--text); }
+  .nav-star .star-label { letter-spacing: -0.01em; }
+  .nav-star .star-count { font-variant-numeric: tabular-nums; color: var(--text-mute); font-weight: 500; }
+  .nav-star .star-count::before { content: "("; }
+  .nav-star .star-count::after { content: ")"; }
+  .nav-star .star-count:empty { display: none; }
+  .nav-star[hidden] { display: none; }
+  .hero-version {
+    font-size: 13px; color: var(--text-mute);
+    margin-top: 14px; font-variant-numeric: tabular-nums;
+  }
+  .hero-version[hidden] { display: none; }
+  .hero-version strong { color: var(--text-dim); font-weight: 600; }
+
+  /* === FAQ === */
+  .faq { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .faq-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    transition: border-color 0.3s ease;
+  }
+  .faq-item.open { border-color: var(--border-strong); }
+  .faq-q {
+    width: 100%;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 18px 22px;
+    background: none; border: none; text-align: left;
+    color: var(--text);
+    font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .faq-q .faq-icon {
+    flex-shrink: 0;
+    width: 20px; height: 20px;
+    position: relative;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    color: var(--text-dim);
+  }
+  .faq-item.open .faq-q .faq-icon { transform: rotate(45deg); color: var(--accent); }
+  .faq-icon::before, .faq-icon::after {
+    content: ""; position: absolute; background: currentColor; border-radius: 2px;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+  }
+  .faq-icon::before { width: 14px; height: 2px; }
+  .faq-icon::after { width: 2px; height: 14px; }
+  .faq-a {
+    max-height: 0; overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .faq-a-inner { padding: 0 22px 20px; color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+  .faq-a-inner code { font-size: 12px; }
+  .faq-a-inner a { color: var(--accent); }
+  .faq-a-inner a:hover { color: var(--accent-hover); }
+
+  /* === Changelog === */
+  .changelog { max-width: 720px; margin: 0 auto; position: relative; padding-left: 28px; }
+  .changelog::before {
+    content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px;
+    width: 2px; background: linear-gradient(180deg, var(--accent), transparent);
+  }
+  .cl-item { position: relative; padding-bottom: 26px; }
+  .cl-item:last-child { padding-bottom: 0; }
+  .cl-item::before {
+    content: ""; position: absolute; left: -27px; top: 5px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--bg); border: 2px solid var(--accent);
+  }
+  .cl-ver { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+  .cl-ver h4 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  .cl-ver .cl-date { font-size: 12px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+  .cl-item p { color: var(--text-dim); font-size: 14px; line-height: 1.55; }
+  .changelog-link { display: block; text-align: center; margin-top: 28px; color: var(--accent); font-size: 14px; font-weight: 500; }
+  .changelog-link:hover { color: var(--accent-hover); }
+
   /* === Support === */
   .support-grid {
     display: grid;
@@ -843,6 +950,23 @@
     .support-card h4 { font-size: 16px; }
     .support-card p { margin-bottom: 12px; }
 
+    .codeblock .copy-btn { top: 6px; right: 6px; padding: 4px 9px; font-size: 11px; }
+    .codeblock pre { padding-right: 14px; padding-top: 38px; }
+
+    .hero-version { margin-top: 12px; font-size: 12px; }
+
+    .faq { gap: 10px; }
+    .faq-q { padding: 15px 16px; font-size: 14px; gap: 12px; }
+    .faq-q .faq-icon { width: 18px; height: 18px; }
+    .faq-a-inner { padding: 0 16px 16px; font-size: 13px; }
+
+    .changelog { padding-left: 22px; }
+    .cl-item { padding-bottom: 20px; }
+    .cl-item::before { left: -21px; width: 10px; height: 10px; }
+    .cl-ver h4 { font-size: 15px; }
+    .cl-item p { font-size: 13px; }
+    .changelog-link { margin-top: 22px; font-size: 13px; }
+
     footer { padding: 36px 0 calc(28px + var(--safe-bot)); }
     footer .links { gap: 16px; margin-bottom: 12px; }
     footer .links a { padding: 4px 0; font-size: 12px; }
@@ -897,7 +1021,13 @@
       <a href="#how" data-i18n="nav.how">How it works</a>
       <a href="#screenshots" data-i18n="nav.screenshots">Screenshots</a>
       <a href="#install" data-i18n="nav.install">Install</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
     </div>
+    <a class="nav-star" id="navStar" href="https://github.com/denzam/SystemEQ-for-Mac" hidden aria-label="Star on GitHub">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span class="star-label">Star</span>
+      <span class="star-count" id="navStarCount"></span>
+    </a>
     <div class="lang-switch" id="langSwitch">
       <button class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-label="Select language">
         <span class="flag" id="langFlag">🇬🇧</span>
@@ -923,6 +1053,7 @@
       <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="hero.ctaDownload">Download Latest Release</a>
       <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac" data-i18n="hero.ctaGithub">View on GitHub</a>
     </div>
+    <p class="hero-version reveal reveal-delay-3" id="heroVersion" hidden><span data-i18n="hero.latest">Latest:</span> <strong id="heroVersionTag"></strong> · <span data-i18n="hero.free">free</span></p>
     <div class="badges reveal reveal-delay-3">
       <span class="badge">GPLv3</span>
       <span class="badge" data-i18n="hero.badgeTelemetry">No telemetry</span>
@@ -1000,13 +1131,74 @@
     <h2 class="section-title reveal" data-i18n="install.title">Get started in 2 minutes.</h2>
     <p class="section-sub reveal" data-i18n="install.sub">SystemEQ is distributed as a free open-source build outside the App Store.</p>
     <div class="install-grid">
-      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">Install BlackHole 2ch</h4><p data-i18n="install.s1.body">The virtual audio driver SystemEQ uses to capture system audio.</p><pre><code>brew install blackhole-2ch</code></pre></div></div>
+      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">Install BlackHole 2ch</h4><p data-i18n="install.s1.body">The virtual audio driver SystemEQ uses to capture system audio.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew install blackhole-2ch" data-i18n="copy.btn">Copy</button><pre><code>brew install blackhole-2ch</code></pre></div></div></div>
       <div class="install-step reveal"><div class="num">2</div><div class="body"><h4 data-i18n="install.s2.title">Download SystemEQ</h4><p data-i18n-html="install.s2.body">Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="install.s2.btn">Download from GitHub Releases</a></div></div>
-      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Allow unsigned app on first launch</h4><p data-i18n-html="install.s3.body">macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div>
+      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Allow unsigned app on first launch</h4><p data-i18n-html="install.s3.body">macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p><div class="codeblock"><button class="copy-btn" type="button" data-copy='xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"' data-i18n="copy.btn">Copy</button><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div></div>
       <div class="install-step reveal"><div class="num">4</div><div class="body"><h4 data-i18n="install.s4.title">Set system output to BlackHole 2ch</h4><p data-i18n-html="install.s4.body">In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).</p></div></div>
       <div class="install-step reveal"><div class="num">5</div><div class="body"><h4 data-i18n="install.s5.title">(Alternative) Build from source</h4><p data-i18n="install.s5.body">Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p></div></div>
     </div>
     <div class="note reveal" data-i18n-html="install.note"><strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.</div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="container">
+    <div class="section-label reveal" data-i18n="faq.label">FAQ</div>
+    <h2 class="section-title reveal" data-i18n="faq.title">Common questions.</h2>
+    <p class="section-sub reveal" data-i18n="faq.sub">Everything you might wonder before installing.</p>
+    <div class="faq">
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q1">Is SystemEQ safe to use even though it's unsigned?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a1">Yes. The app is unsigned only because an Apple Developer ID costs $99/year. The full source code is public on <a href="https://github.com/denzam/SystemEQ-for-Mac">GitHub</a> — you can read every line and build it yourself. There is no telemetry and no network access beyond optional preset downloads.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q2">Why do I need BlackHole?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a2">macOS has no public API for a system-wide audio EQ. BlackHole is a free, open-source virtual driver that lets SystemEQ capture all system audio, process it, and send it back to your real output device.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q3">Does it collect any data?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a3">No telemetry, no analytics, no account. The only network requests are optional: downloading the AutoEQ database update and visualizer presets, both from public sources.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q4">Will it add latency to my audio?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a4">Latency is minimal. SystemEQ uses a native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers and vDSP-accelerated biquad filters, designed for real-time processing with low CPU usage.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q5">How much does it cost?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a5">It's free and open source forever, released under GPLv3. There's no paid tier. Donations are completely optional and only support development.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q6">How do I uninstall it?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a6">Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall blackhole-2ch</code> if you no longer need it.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="changelog">
+  <div class="container">
+    <div class="section-label reveal" data-i18n="changelog.label">Changelog</div>
+    <h2 class="section-title reveal" data-i18n="changelog.title">Actively maintained.</h2>
+    <p class="section-sub reveal" data-i18n="changelog.sub">Recent releases — see the full history on GitHub.</p>
+    <div class="changelog reveal">
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.0.7</h4><span class="cl-date">2026-05-30</span></div>
+        <p data-i18n="changelog.v107">AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.</p>
+      </div>
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.0.6</h4><span class="cl-date">2026-05-16</span></div>
+        <p data-i18n="changelog.v106">Fixed a language-save race in LocalizationManager that could persist a stale value.</p>
+      </div>
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.0.5</h4><span class="cl-date">2026-05-16</span></div>
+        <p data-i18n="changelog.v105">Resolved a main-thread hang when switching language after using the visualizer, plus an AutoEQ label rendering regression.</p>
+      </div>
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.0.0</h4><span class="cl-date">2026-05-10</span></div>
+        <p data-i18n="changelog.v100">First public release — 10/31-band EQ, 8,850+ AutoEQ presets, calibration, BlackHole integration and the MilkDrop visualizer.</p>
+      </div>
+    </div>
+    <a class="changelog-link reveal" href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/CHANGELOG.md" data-i18n="changelog.link">View full changelog →</a>
   </div>
 </section>
 
@@ -1140,6 +1332,34 @@
       "footer.license": "License (GPLv3)",
       "footer.autoeq": "AutoEQ project",
       "footer.views": "page views",
+      "nav.faq": "FAQ",
+      "hero.latest": "Latest:",
+      "hero.free": "free",
+      "copy.btn": "Copy",
+      "copy.done": "Copied!",
+      "faq.label": "FAQ",
+      "faq.title": "Common questions.",
+      "faq.sub": "Everything you might wonder before installing.",
+      "faq.q1": "Is SystemEQ safe to use even though it's unsigned?",
+      "faq.a1": "Yes. The app is unsigned only because an Apple Developer ID costs $99/year. The full source code is public on <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — you can read every line and build it yourself. There is no telemetry and no network access beyond optional preset downloads.",
+      "faq.q2": "Why do I need BlackHole?",
+      "faq.a2": "macOS has no public API for a system-wide audio EQ. BlackHole is a free, open-source virtual driver that lets SystemEQ capture all system audio, process it, and send it back to your real output device.",
+      "faq.q3": "Does it collect any data?",
+      "faq.a3": "No telemetry, no analytics, no account. The only network requests are optional: downloading the AutoEQ database update and visualizer presets, both from public sources.",
+      "faq.q4": "Will it add latency to my audio?",
+      "faq.a4": "Latency is minimal. SystemEQ uses a native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers and vDSP-accelerated biquad filters, designed for real-time processing with low CPU usage.",
+      "faq.q5": "How much does it cost?",
+      "faq.a5": "It's free and open source forever, released under GPLv3. There's no paid tier. Donations are completely optional and only support development.",
+      "faq.q6": "How do I uninstall it?",
+      "faq.a6": "Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall blackhole-2ch</code> if you no longer need it.",
+      "changelog.label": "Changelog",
+      "changelog.title": "Actively maintained.",
+      "changelog.sub": "Recent releases — see the full history on GitHub.",
+      "changelog.v107": "AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.",
+      "changelog.v106": "Fixed a language-save race in LocalizationManager that could persist a stale value.",
+      "changelog.v105": "Resolved a main-thread hang when switching language after using the visualizer, plus an AutoEQ label rendering regression.",
+      "changelog.v100": "First public release — 10/31-band EQ, 8,850+ AutoEQ presets, calibration, BlackHole integration and the MilkDrop visualizer.",
+      "changelog.link": "View full changelog →",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with ❤️ for the audio community"
     },
     it: {
@@ -1236,6 +1456,34 @@
       "footer.license": "Licenza (GPLv3)",
       "footer.autoeq": "Progetto AutoEQ",
       "footer.views": "visualizzazioni",
+      "nav.faq": "FAQ",
+      "hero.latest": "Ultima:",
+      "hero.free": "gratis",
+      "copy.btn": "Copia",
+      "copy.done": "Copiato!",
+      "faq.label": "FAQ",
+      "faq.title": "Domande frequenti.",
+      "faq.sub": "Tutto ciò che potresti chiederti prima di installare.",
+      "faq.q1": "SystemEQ è sicuro da usare anche se non è firmato?",
+      "faq.a1": "Sì. L'app non è firmata solo perché un Apple Developer ID costa 99 $/anno. Il codice sorgente completo è pubblico su <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — puoi leggerne ogni riga e compilarlo tu stesso. Nessuna telemetria e nessun accesso alla rete oltre ai download opzionali dei preset.",
+      "faq.q2": "Perché ho bisogno di BlackHole?",
+      "faq.a2": "macOS non ha alcuna API pubblica per un EQ audio di sistema. BlackHole è un driver virtuale gratuito e open source che permette a SystemEQ di catturare tutto l'audio di sistema, elaborarlo e rimandarlo al tuo dispositivo di uscita reale.",
+      "faq.q3": "Raccoglie qualche dato?",
+      "faq.a3": "Nessuna telemetria, nessuna analisi, nessun account. Le uniche richieste di rete sono opzionali: il download dell'aggiornamento del database AutoEQ e dei preset del visualizzatore, entrambi da fonti pubbliche.",
+      "faq.q4": "Aggiunge latenza al mio audio?",
+      "faq.a4": "La latenza è minima. SystemEQ usa un motore nativo CoreAudio (AUHAL) dual-I/O con ring buffer lock-free e filtri biquad accelerati da vDSP, progettato per l'elaborazione in tempo reale con basso uso della CPU.",
+      "faq.q5": "Quanto costa?",
+      "faq.a5": "È gratuito e open source per sempre, rilasciato sotto GPLv3. Non esiste una versione a pagamento. Le donazioni sono del tutto facoltative e servono solo a sostenere lo sviluppo.",
+      "faq.q6": "Come lo disinstallo?",
+      "faq.a6": "Elimina <code>SystemEQ for Mac.app</code> da <code>/Applications</code> e riporta l'uscita di sistema sul tuo dispositivo reale in Impostazioni di Sistema → Suono. BlackHole può essere rimosso con <code>brew uninstall blackhole-2ch</code> se non ti serve più.",
+      "changelog.label": "Changelog",
+      "changelog.title": "Mantenuto attivamente.",
+      "changelog.sub": "Versioni recenti — la cronologia completa è su GitHub.",
+      "changelog.v107": "Importazione AutoEQ <code>.txt</code> (4 formati rilevati automaticamente) e correzioni di localizzazione live per la finestra AutoEQ.",
+      "changelog.v106": "Corretta una race nel salvataggio della lingua in LocalizationManager che poteva persistere un valore obsoleto.",
+      "changelog.v105": "Risolto un blocco del thread principale al cambio lingua dopo l'uso del visualizzatore, più una regressione nel rendering delle etichette AutoEQ.",
+      "changelog.v100": "Prima versione pubblica — EQ a 10/31 bande, oltre 8.850 preset AutoEQ, calibrazione, integrazione BlackHole e il visualizzatore MilkDrop.",
+      "changelog.link": "Vedi il changelog completo →",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Rilasciato sotto GPLv3<br/>Fatto con ❤️ per la community audio"
     },
     uk: {
@@ -1332,6 +1580,34 @@
       "footer.license": "Ліцензія (GPLv3)",
       "footer.autoeq": "Проєкт AutoEQ",
       "footer.views": "переглядів",
+      "nav.faq": "FAQ",
+      "hero.latest": "Остання:",
+      "hero.free": "безкоштовно",
+      "copy.btn": "Копіювати",
+      "copy.done": "Скопійовано!",
+      "faq.label": "FAQ",
+      "faq.title": "Поширені питання.",
+      "faq.sub": "Усе, що варто знати перед встановленням.",
+      "faq.q1": "Чи безпечно користуватися SystemEQ, якщо застосунок не підписаний?",
+      "faq.a1": "Так. Застосунок не підписаний лише тому, що Apple Developer ID коштує $99/рік. Повний вихідний код відкритий на <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — ви можете прочитати кожен рядок і зібрати його самостійно. Жодної телеметрії й жодного доступу до мережі, окрім опціонального завантаження пресетів.",
+      "faq.q2": "Навіщо потрібен BlackHole?",
+      "faq.a2": "macOS не має публічного API для системного аудіо-еквалайзера. BlackHole — це безкоштовний відкритий віртуальний драйвер, який дозволяє SystemEQ перехоплювати весь системний звук, обробляти його й повертати на ваш реальний пристрій виводу.",
+      "faq.q3": "Чи збирає він якісь дані?",
+      "faq.a3": "Жодної телеметрії, аналітики чи акаунтів. Єдині мережеві запити опціональні: завантаження оновлення бази AutoEQ та пресетів візуалайзера — обидва з публічних джерел.",
+      "faq.q4": "Чи додає він затримку звуку?",
+      "faq.a4": "Затримка мінімальна. SystemEQ використовує нативний рушій CoreAudio (AUHAL) з dual-I/O, lock-free кільцевими буферами та biquad-фільтрами на vDSP, розрахований на обробку в реальному часі з низьким навантаженням на CPU.",
+      "faq.q5": "Скільки це коштує?",
+      "faq.a5": "Це безкоштовно й відкрито назавжди, під ліцензією GPLv3. Платної версії немає. Донати повністю добровільні й лише підтримують розробку.",
+      "faq.q6": "Як його видалити?",
+      "faq.a6": "Видаліть <code>SystemEQ for Mac.app</code> з <code>/Applications</code> і поверніть системний вивід на ваш реальний пристрій у Системних налаштуваннях → Звук. BlackHole можна видалити командою <code>brew uninstall blackhole-2ch</code>, якщо він більше не потрібен.",
+      "changelog.label": "Список змін",
+      "changelog.title": "Активно підтримується.",
+      "changelog.sub": "Останні випуски — повну історію дивіться на GitHub.",
+      "changelog.v107": "Імпорт AutoEQ <code>.txt</code> (4 формати з автовизначенням) та виправлення живої локалізації вікна AutoEQ.",
+      "changelog.v106": "Виправлено гонитву збереження мови в LocalizationManager, яка могла зберегти застаріле значення.",
+      "changelog.v105": "Усунено зависання головного потоку при зміні мови після візуалайзера та регресію рендеру підписів AutoEQ.",
+      "changelog.v100": "Перший публічний реліз — 10/31-смуговий EQ, понад 8 850 пресетів AutoEQ, калібрування, інтеграція BlackHole і візуалайзер MilkDrop.",
+      "changelog.link": "Повний список змін →",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Випущено під GPLv3<br/>Зроблено з ❤️ для аудіоспільноти"
     }
   };
@@ -1532,6 +1808,72 @@
       e.target.click();
     }
   });
+
+  // === Copy-to-clipboard ===
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy');
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        document.body.removeChild(ta);
+      }
+      const lang = document.documentElement.lang || 'en';
+      const done = (I18N[lang] && I18N[lang]['copy.done']) || 'Copied!';
+      const label = (I18N[lang] && I18N[lang]['copy.btn']) || 'Copy';
+      btn.textContent = done;
+      btn.classList.add('copied');
+      btn.removeAttribute('data-i18n');
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.textContent = label;
+        btn.classList.remove('copied');
+        btn.setAttribute('data-i18n', 'copy.btn');
+      }, 1600);
+    });
+  });
+
+  // === FAQ accordion ===
+  document.querySelectorAll('.faq-item').forEach(item => {
+    const q = item.querySelector('.faq-q');
+    const a = item.querySelector('.faq-a');
+    q.addEventListener('click', () => {
+      const open = item.classList.toggle('open');
+      a.style.maxHeight = open ? a.scrollHeight + 'px' : '0';
+    });
+  });
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.faq-item.open .faq-a').forEach(a => {
+      a.style.maxHeight = a.scrollHeight + 'px';
+    });
+  });
+
+  // === Live GitHub stars + latest version ===
+  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac')
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      const n = d.stargazers_count;
+      if (typeof n === 'number') {
+        document.getElementById('navStarCount').textContent =
+          n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : n;
+        document.getElementById('navStar').hidden = false;
+      }
+    })
+    .catch(() => {});
+
+  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases/latest')
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(d => {
+      if (d.tag_name) {
+        document.getElementById('heroVersionTag').textContent = d.tag_name;
+        document.getElementById('heroVersion').hidden = false;
+      }
+    })
+    .catch(() => {});
 </script>
 
 <script data-goatcounter="https://systemeqformac.goatcounter.com/count"
