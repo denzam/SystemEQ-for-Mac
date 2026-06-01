@@ -28,20 +28,18 @@ jobs:
           echo "AutoEQ cloned successfully"
       
       - name: Generate AutoEQ Index
-        working-directory: Scripts
         run: |
-          swift generate_autoeq_index.swift
+          swift Scripts/generate_autoeq_index.swift
           echo "Index generated"
-      
+
       - name: Build EQ Database
-        working-directory: Scripts
         run: |
-          swift build_eq_database.swift
+          swift Scripts/build_eq_database.swift
           echo "Database built"
-      
+
       - name: Copy database to Resources
         run: |
-          cp "Scripts/EQDatabase.db" "SystemEQ for Mac/Resources/EQDatabase.db"
+          cp "SystemEQ for Mac/EQDatabase.db" "SystemEQ for Mac/Resources/EQDatabase.db"
           echo "Database copied to Resources"
       
       - name: Get database stats
