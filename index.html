@@ -785,6 +785,14 @@
   }
   footer .links a:hover { color: var(--text); }
   footer .credit { color: var(--text-mute); font-size: 12px; line-height: 1.6; }
+  footer .pageviews {
+    color: var(--text-dim); font-size: 12px; font-weight: 500;
+    margin-bottom: 14px;
+  }
+  footer .pageviews #pageviewsNum {
+    color: var(--text); font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
   footer .credit a { color: var(--text-dim); transition: color 0.2s ease; }
   footer .credit a:hover { color: var(--text); }
 
@@ -1024,6 +1032,7 @@
       <a href="https://github.com/jaakkopasanen/AutoEq" data-i18n="footer.autoeq">AutoEQ project</a>
       <a href="https://existential.audio/blackhole/">BlackHole</a>
     </div>
+    <div class="pageviews" id="pageviews" hidden><span id="pageviewsNum">—</span> <span data-i18n="footer.views">page views</span></div>
     <div class="credit" data-i18n-html="footer.credit">© 2026 <a href="https://github.com/denzam">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with ❤️ for the audio community</div>
   </div>
 </footer>
@@ -1130,6 +1139,7 @@
       "footer.releases": "Releases",
       "footer.license": "License (GPLv3)",
       "footer.autoeq": "AutoEQ project",
+      "footer.views": "page views",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Released under GPLv3<br/>Made with ❤️ for the audio community"
     },
     it: {
@@ -1225,6 +1235,7 @@
       "footer.releases": "Release",
       "footer.license": "Licenza (GPLv3)",
       "footer.autoeq": "Progetto AutoEQ",
+      "footer.views": "visualizzazioni",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Rilasciato sotto GPLv3<br/>Fatto con ❤️ per la community audio"
     },
     uk: {
@@ -1320,6 +1331,7 @@
       "footer.releases": "Релізи",
       "footer.license": "Ліцензія (GPLv3)",
       "footer.autoeq": "Проєкт AutoEQ",
+      "footer.views": "переглядів",
       "footer.credit": "© 2026 <a href=\"https://github.com/denzam\">denzam</a> · SystemEQ for Mac · Випущено під GPLv3<br/>Зроблено з ❤️ для аудіоспільноти"
     }
   };
@@ -1378,6 +1390,19 @@
     });
     applyLang(lang);
   })();
+
+  // Public page-view counter from GoatCounter. Requires "Allow public access"
+  // enabled in the GoatCounter site settings; otherwise the endpoint 403s and
+  // the row simply stays hidden — no error shown to the visitor.
+  fetch("https://systemeqformac.goatcounter.com/counter/TOTAL.json")
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const n = (d.count || "").toString().trim();
+      if (!n) return;
+      document.getElementById("pageviewsNum").textContent = n;
+      document.getElementById("pageviews").hidden = false;
+    })
+    .catch(() => { /* private stats or offline — leave hidden */ });
 
   // Reveal on scroll.
   // The flicker came from an element parked right on a single trigger edge:
