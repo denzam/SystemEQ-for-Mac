@@ -188,3 +188,7 @@ dist/
 Docs/internal/
 
 .claude/
+
+# Coverage artifacts
+default.profraw
+*.profraw

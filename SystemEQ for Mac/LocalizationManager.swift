@@ -246,6 +246,8 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQImportFileHelp
     case autoEQImportFileError
     case autoEQImportFileSuccess
+    case autoEQSaveToFavorites
+    case autoEQShowSaved
     case removeFromFavorites
     case addToFavorites
     case indexUpdated
@@ -658,6 +660,14 @@ public enum LocalizedString: String, CaseIterable {
     case launchMilkDrop
     case presetCategoryHelp
     case presetWeightHelp
+    case qualityLow
+    case qualityMedium
+    case qualityHigh
+    case visualizerQualityHelp
+    case vizFavoriteHelp
+    case vizPresetListHelp
+    case vizSearchPresets
+    case vizShowFavoritesHelp
     case previousPresetHelp
     case nextPresetHelp
     case randomPresetHelp
@@ -3411,6 +3421,16 @@ private enum LocalizationData {
                     .italian: "Importati %d filtri",
                     .ukrainian: "Імпортовано %d фільтрів"
                 ],
+                .autoEQSaveToFavorites: [
+                    .english: "Save to favorites",
+                    .italian: "Salva nei preferiti",
+                    .ukrainian: "Зберегти в обране"
+                ],
+                .autoEQShowSaved: [
+                    .english: "Show saved presets",
+                    .italian: "Mostra preset salvati",
+                    .ukrainian: "Показати збережені пресети"
+                ],
                 .removeFromFavorites: [
                     .english: "Remove from favorites",
                     .italian: "Rimuovi dai preferiti",
@@ -3586,6 +3606,46 @@ private enum LocalizationData {
                     .english: "Preset weight (GPU load)",
                     .italian: "Peso del preset (carico GPU)",
                     .ukrainian: "Вага пресетів (GPU навантаження)"
+                ],
+                .qualityLow: [
+                    .english: "Quality: Low",
+                    .italian: "Qualità: Bassa",
+                    .ukrainian: "Якість: Низька"
+                ],
+                .qualityMedium: [
+                    .english: "Quality: Medium",
+                    .italian: "Qualità: Media",
+                    .ukrainian: "Якість: Середня"
+                ],
+                .qualityHigh: [
+                    .english: "Quality: High",
+                    .italian: "Qualità: Alta",
+                    .ukrainian: "Якість: Висока"
+                ],
+                .visualizerQualityHelp: [
+                    .english: "Render quality — lower for smooth 60 FPS on heavy presets",
+                    .italian: "Qualità di rendering — più bassa per 60 FPS fluidi sui preset pesanti",
+                    .ukrainian: "Якість рендеру — нижча для плавних 60 FPS на важких пресетах"
+                ],
+                .vizFavoriteHelp: [
+                    .english: "Add current preset to favorites",
+                    .italian: "Aggiungi il preset corrente ai preferiti",
+                    .ukrainian: "Додати поточний пресет в обране"
+                ],
+                .vizPresetListHelp: [
+                    .english: "Browse all presets",
+                    .italian: "Sfoglia tutti i preset",
+                    .ukrainian: "Переглянути всі пресети"
+                ],
+                .vizSearchPresets: [
+                    .english: "Search presets…",
+                    .italian: "Cerca preset…",
+                    .ukrainian: "Пошук пресетів…"
+                ],
+                .vizShowFavoritesHelp: [
+                    .english: "Show favorites only",
+                    .italian: "Mostra solo i preferiti",
+                    .ukrainian: "Лише обрані"
                 ],
                 .previousPresetHelp: [
                     .english: "Previous preset",

@@ -362,6 +362,53 @@ class VisualizerController: NSObject {
     private var performanceProfile: PerformanceProfile = .autoDetect()
     private var activityToken: NSObjectProtocol?
 
+    /// Manual quality override (scales mesh density on top of the auto profile).
+    /// Lower mesh = fewer per-pixel equations = higher FPS on heavy presets.
+    enum VisualQuality: String {
+        case low = "Low"
+        case medium = "Medium"
+        case high = "High"
+
+        var meshScale: Double {
+            switch self {
+            case .low: 0.5
+            case .medium: 0.75
+            case .high: 1.0
+            }
+        }
+
+        /// Множник роздільності рендеру (фрагментні пікселі) — головне для шейдер-важких пресетів.
+        var renderScale: Double {
+            switch self {
+            case .low: 0.5
+            case .medium: 0.75
+            case .high: 1.0
+            }
+        }
+    }
+
+    private var currentQuality: VisualQuality = .high
+
+    // Прапор: змінити backing-розмір GL-поверхні на render-треді під замком (без крадіжки контексту).
+    nonisolated(unsafe) private var needsBackingResize = true
+
+    // FPS measurement (updated once per second on the render thread)
+    private var fpsFrameCount: Int = 0
+    private var fpsWindowStart: CFTimeInterval = CACurrentMediaTime()
+    private var measuredFPS: Int = 0
+
+    // Адаптивний render-scale: дуже важкі пресети самі знижують роздільність, щоб тримати ≥30 FPS.
+    // Множиться на якість користувача; перераховується раз на секунду на render-треді.
+    private var adaptiveScale: Double = 1.0
+    private static let minAdaptiveScale = 0.25
+    private static let targetMinFPS = 30
+
+    // Авто-пропуск + чорний список: пресет, що тримає <30 FPS навіть на мін. роздільності кілька
+    // секунд поспіль, додається в blacklist і авто-перемикається. Ручний вибір зі списку не пропускаємо.
+    private var currentPresetPath: String = ""
+    private var lowFPSSeconds = 0
+    private static let lowFPSSecondsToSkip = 2
+
     // Broken preset blacklist — filled by preset_switch_failed callback, persisted across sessions
     private var brokenPresets: Set<String> = []
     private let blacklistURL: URL = {
@@ -434,7 +481,8 @@ class VisualizerController: NSObject {
         projectm_set_soft_cut_duration(handle, 1.5) // shorter = less dual-render cost
         projectm_set_hard_cut_enabled(handle, false) // avoid mid-song shader compile stalls
         projectm_set_hard_cut_sensitivity(handle, 2.0)
-        projectm_set_mesh_size(handle, profile.meshW, profile.meshH)
+        let (mw, mh) = scaledMesh()
+        projectm_set_mesh_size(handle, mw, mh)
         projectm_set_fps(handle, 60)
         projectm_set_aspect_correction(handle, true)
         print(
@@ -737,6 +785,14 @@ class VisualizerController: NSObject {
         availableCategories
     }
 
+    /// Усі пресети (не лише поточна категорія) як [{name, category, index}].
+    /// index == позиція в allPresets → SELECT трактується як глобальний (див. selectPreset).
+    func getPresetList() -> [[String: Any]] {
+        allPresets.enumerated().map { idx, p in
+            ["name": p.name, "category": p.category, "index": idx]
+        }
+    }
+
     func shutdown() {
         stopDisplayLink()
 
@@ -807,6 +863,11 @@ class VisualizerController: NSObject {
         context.makeCurrentContext()
         CGLLockContext(cglContext)
 
+        if needsBackingResize {
+            needsBackingResize = false
+            applyBackingResizeLocked(glView, handle, cglContext)
+        }
+
         // Feed audio to projectM (lock-free read)
         feedAudioToProjectM()
 
@@ -815,14 +876,64 @@ class VisualizerController: NSObject {
 
         CGLFlushDrawable(cglContext)
         CGLUnlockContext(cglContext)
+
+        // FPS counter — recompute once per second
+        fpsFrameCount += 1
+        let now = CACurrentMediaTime()
+        let elapsed = now - fpsWindowStart
+        if elapsed >= 1.0 {
+            measuredFPS = Int((Double(fpsFrameCount) / elapsed).rounded())
+            fpsFrameCount = 0
+            fpsWindowStart = now
+            adaptRenderScale()
+        }
+    }
+
+    /// Тримає ≥30 FPS на дуже важких пресетах, знижуючи роздільність рендеру понад вибрану якість.
+    /// Лише вниз і лише поки реально потрібно — без осциляції (інакше backing-resize мерехтить).
+    /// Повна роздільність повертається при зміні пресета (resetAdaptiveScale), а не за FPS.
+    private func adaptRenderScale() {
+        // Уникаємо реакції на перехідний кадр (перемикання пресета дає короткий провал FPS).
+        guard measuredFPS > 0 else { return }
+
+        if measuredFPS < Self.targetMinFPS {
+            // Знижуємо роздільність (для багатьох пресетів це повертає 60 FPS) ...
+            if adaptiveScale > Self.minAdaptiveScale {
+                adaptiveScale = max(Self.minAdaptiveScale, adaptiveScale - 0.25)
+                needsBackingResize = true
+            }
+            // ... і ПАРАЛЕЛЬНО рахуємо секунди низького FPS. Якщо навіть зниження не допомогло —
+            // пресет CPU-bound, пропускаємо швидко (не чекаючи спершу досягнення мінімуму).
+            lowFPSSeconds += 1
+            if lowFPSSeconds >= Self.lowFPSSecondsToSkip, !isPresetLocked {
+                lowFPSSeconds = 0
+                let path = currentPresetPath
+                if !path.isEmpty {
+                    // playlist/файл не чіпаємо з render-треда — на main.
+                    DispatchQueue.main.async { [weak self] in
+                        self?.markPresetBroken(path, reason: "too slow (<\(Self.targetMinFPS) FPS)")
+                    }
+                }
+            }
+        } else {
+            lowFPSSeconds = 0
+        }
+    }
+
+    private func resetAdaptiveScale() {
+        if adaptiveScale != 1.0 {
+            adaptiveScale = 1.0
+            needsBackingResize = true
+        }
     }
 
     // MARK: - Audio (Lock-Free)
 
     func addAudioSamples(_ samples: UnsafePointer<Float>, count: Int) {
-        // Lock-free write to ring buffer
+        // Lock-free write to ring buffer (audioBufferSize is power-of-two → mask instead of modulo)
+        let mask = audioBufferSize - 1
         for i in 0..<count {
-            let writeIdx = Int(pm_atomic_fetch_add(&audioWriteIndex, 1)) % audioBufferSize
+            let writeIdx = Int(pm_atomic_fetch_add(&audioWriteIndex, 1)) & mask
             audioBuffer[writeIdx] = samples[i]
         }
     }
@@ -842,8 +953,9 @@ class VisualizerController: NSObject {
         var samplesToRead = min(available, audioScratchCapacity)
         samplesToRead &= ~1
 
+        let mask = audioBufferSize - 1
         for i in 0..<samplesToRead {
-            let readIdx = Int(pm_atomic_fetch_add(&audioReadIndex, 1)) % audioBufferSize
+            let readIdx = Int(pm_atomic_fetch_add(&audioReadIndex, 1)) & mask
             audioScratch[i] = audioBuffer[readIdx]
         }
 
@@ -886,16 +998,52 @@ class VisualizerController: NSObject {
         selectPreset(at: randomIndex)
     }
 
+    /// index — глобальна позиція в allPresets (список у UI показує всі пресети).
+    /// Якщо обраний пресет поза поточним фільтром — переходимо на «All», перебудовуємо playlist,
+    /// потім граємо саме його за шляхом.
     func selectPreset(at index: Int) {
-        guard let playlist = playlistHandle, index >= 0, index < presetCount else { return }
-        projectm_playlist_set_position(playlist, index, false)
-        updateCurrentPresetName()
+        guard let playlist = playlistHandle, index >= 0, index < allPresets.count else { return }
+        let target = allPresets[index]
+
+        if let pos = filteredPresets.firstIndex(where: { $0.path == target.path }) {
+            _ = projectm_playlist_set_position(playlist, pos, true)
+            updateCurrentPresetName()
+            return
+        }
+
+        // Не у поточному playlist → переключаємось на «All» і граємо після перебудови.
+        currentCategory = "All"
+        currentWeight = .all
+        let snapshot = allPresets
+        let broken = brokenPresets
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let filtered = snapshot.filter { !broken.contains($0.path) }
+            DispatchQueue.main.async {
+                guard let self, let playlist = self.playlistHandle else { return }
+                projectm_playlist_clear(playlist)
+                for preset in filtered {
+                    projectm_playlist_add_preset(playlist, preset.path, false)
+                }
+                self.filteredPresets = filtered
+                self.presetCount = filtered.count
+                projectm_playlist_set_shuffle(playlist, self.isShuffleEnabled)
+                if let pos = filtered.firstIndex(where: { $0.path == target.path }) {
+                    projectm_playlist_set_position(playlist, pos, true)
+                }
+                self.updateCurrentPresetName()
+            }
+        }
     }
 
     func setShuffle(_ enabled: Bool) {
         isShuffleEnabled = enabled
         if let playlist = playlistHandle {
             projectm_playlist_set_shuffle(playlist, enabled)
+        }
+        // «Авто» вимкнено → пресет не змінюється сам (блокуємо авто-зміну за таймером),
+        // доки користувач не переключить вручну. Увімкнено → авто-зміна дозволена.
+        if let handle = projectMHandle, !isPresetLocked {
+            projectm_set_preset_locked(handle, !enabled)
         }
     }
 
@@ -906,27 +1054,48 @@ class VisualizerController: NSObject {
         }
     }
 
-    func resize(width: Int, height: Int) {
-        guard let handle = projectMHandle,
-              let context = openGLView?.openGLContext else { return }
+    /// Mesh розмір з урахуванням auto-профілю та ручного quality-множника.
+    private func scaledMesh() -> (Int, Int) {
+        let scale = currentQuality.meshScale
+        let w = max(8, Int((Double(performanceProfile.meshW) * scale).rounded()))
+        let h = max(6, Int((Double(performanceProfile.meshH) * scale).rounded()))
+        return (w, h)
+    }
 
-        context.makeCurrentContext()
+    func setQuality(_ quality: VisualQuality) {
+        // Викликається з IPC-треда. НЕ чіпаємо projectM/GL тут (не thread-safe з render-тредом) —
+        // лише виставляємо стан і прапор; mesh + backing застосує renderFrame під замком.
+        currentQuality = quality
+        needsBackingResize = true
+    }
 
-        // Clear framebuffer to prevent ghost image artifacts
-        glClearColor(0.0, 0.0, 0.0, 1.0)
-        glClear(GLbitfield(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT))
+    /// Застосовується на render-треді під CGLLockContext: змінює backing-розмір GL-поверхні
+    /// (менше фрагментних пікселів → прискорює шейдер-важкі пресети) без перестворення контексту.
+    private func applyBackingResizeLocked(
+        _ glView: ProjectMOpenGLView,
+        _ handle: OpaquePointer,
+        _ cglContext: CGLContextObj
+    ) {
+        let backing = glView.convertToBacking(glView.bounds)
+        let scale = currentQuality.renderScale * adaptiveScale
+        let w = max(64, Int((Double(backing.width) * scale).rounded()))
+        let h = max(48, Int((Double(backing.height) * scale).rounded()))
 
-        // Viewport + projectM window must match — projectM renders directly into the default
-        // framebuffer. Downscaling is done by capping the backing store resolution
-        // (wantsBestResolutionOpenGLSurface on the view), not by mismatching sizes.
-        glViewport(0, 0, GLsizei(width), GLsizei(height))
-        projectm_set_window_size(handle, width, height)
+        var dims: [GLint] = [GLint(w), GLint(h)]
+        CGLSetParameter(cglContext, kCGLCPSurfaceBackingSize, &dims)
+        CGLEnable(cglContext, kCGLCESurfaceBackingSize)
 
-        // Flush to ensure changes take effect
-        glFlush()
-        context.flushBuffer()
+        glViewport(0, 0, GLsizei(w), GLsizei(h))
+        projectm_set_window_size(handle, w, h)
 
-        print("[ProjectMHelper] Resized to \(width)x\(height)")
+        let (mw, mh) = scaledMesh()
+        projectm_set_mesh_size(handle, mw, mh)
+    }
+
+    func resize(width _: Int, height _: Int) {
+        // Не чіпаємо GL з main-треда (крадіжка контексту → чорний екран). Render-scale + новий
+        // backing-розмір застосує renderFrame під замком на render-треді.
+        needsBackingResize = true
     }
 
     private func updateCurrentPresetName() {
@@ -937,8 +1106,14 @@ class VisualizerController: NSObject {
             let path = String(cString: pathPtr)
             projectm_free_string(pathPtr)
 
-            currentPresetName = (path as NSString).lastPathComponent
+            let newName = (path as NSString).lastPathComponent
                 .replacingOccurrences(of: ".milk", with: "")
+            if newName != currentPresetName {
+                currentPresetName = newName
+                currentPresetPath = path
+                lowFPSSeconds = 0
+                resetAdaptiveScale() // новий пресет стартує з повної якості, далі адаптується під себе
+            }
         }
     }
 
@@ -950,7 +1125,8 @@ class VisualizerController: NSObject {
             "locked": isPresetLocked,
             "category": currentCategory,
             "weight": currentWeight.rawValue,
-            "categories": availableCategories
+            "categories": availableCategories,
+            "fps": measuredFPS
         ]
     }
 }
@@ -979,22 +1155,10 @@ class ProjectMOpenGLView: NSOpenGLView {
         super.reshape()
 
         let backing = convertToBacking(bounds)
-        let width = Int(backing.width)
-        let height = Int(backing.height)
+        guard backing.width > 0, backing.height > 0 else { return }
 
-        guard width > 0, height > 0 else { return }
-
-        openGLContext?.makeCurrentContext()
-
-        // Clear framebuffer to prevent ghost image artifacts during resize
-        glClearColor(0.0, 0.0, 0.0, 1.0)
-        glClear(GLbitfield(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT))
-
-        glViewport(0, 0, GLsizei(width), GLsizei(height))
-        controller?.resize(width: width, height: height)
-
-        // Flush to ensure changes take effect immediately
-        glFlush()
-        openGLContext?.flushBuffer()
+        // НЕ чіпаємо GL з main-треда (reshape тут на main) — лише сигналимо render-треду
+        // перерахувати backing-розмір/viewport під замком.
+        controller?.resize(width: Int(backing.width), height: Int(backing.height))
     }
 }

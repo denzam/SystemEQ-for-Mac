@@ -6,6 +6,9 @@ struct VisualizerView: View {
     @State private var isFullscreen: Bool = false
     @State private var helperWindowFrame: NSRect = .zero
     @State private var isTransitioningFullscreen: Bool = false
+    @State private var showPresetList: Bool = false
+    @State private var presetSearch: String = ""
+    @State private var showOnlyFavorites: Bool = false
 
     var body: some View {
         Group {
@@ -185,6 +188,33 @@ struct VisualizerView: View {
 
     private var controlsBar: some View {
         HStack(spacing: AppSpacing.md) {
+            // Preset list browser
+            Button(action: {
+                helperClient.requestPresetList()
+                showPresetList = true
+            }) {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help(localization.localized(.vizPresetListHelp))
+            .popover(isPresented: $showPresetList, arrowEdge: .bottom) {
+                presetListPopover
+            }
+
+            // Favorite current preset
+            Button(action: {
+                helperClient.toggleFavorite(helperClient.currentPresetName)
+            }) {
+                Image(systemName: helperClient.favoritePresets.contains(helperClient.currentPresetName)
+                    ? "star.fill" : "star")
+                    .font(.system(size: 15))
+                    .foregroundColor(helperClient.favoritePresets.contains(helperClient.currentPresetName)
+                        ? .yellow : .secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(localization.localized(.vizFavoriteHelp))
+
             // Category picker
             Picker("", selection: $helperClient.selectedCategory) {
                 ForEach(helperClient.availableCategories, id: \.self) { category in
@@ -205,6 +235,16 @@ struct VisualizerView: View {
             .pickerStyle(.menu)
             .frame(width: 90)
             .help(localization.localized(.presetWeightHelp))
+
+            // Quality picker — lower = higher FPS on heavy presets
+            Picker("", selection: $helperClient.selectedQuality) {
+                Text(localization.localized(.qualityLow)).tag("Low")
+                Text(localization.localized(.qualityMedium)).tag("Medium")
+                Text(localization.localized(.qualityHigh)).tag("High")
+            }
+            .pickerStyle(.menu)
+            .frame(width: 110)
+            .help(localization.localized(.visualizerQualityHelp))
 
             Divider()
                 .frame(height: 20)
@@ -233,7 +273,9 @@ struct VisualizerView: View {
                 Text(helperClient.currentPresetName)
                     .font(AppTypography.labelSmall)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .frame(maxWidth: 200)
+                    .tooltip(helperClient.currentPresetName)
                 Text("\(helperClient.presetCount) presets")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
@@ -265,6 +307,7 @@ struct VisualizerView: View {
                 Text(localization.localized(.autoLabel))
                     .font(.system(size: 15))
                     .foregroundColor(.secondary)
+                    .fixedSize()
                 Toggle("", isOn: $helperClient.isShuffleEnabled)
                     .toggleStyle(.switch)
                     .scaleEffect(0.7)
@@ -275,12 +318,98 @@ struct VisualizerView: View {
                 Text(localization.localized(.lockLabel))
                     .font(.system(size: 15))
                     .foregroundColor(.secondary)
+                    .fixedSize()
                 Toggle("", isOn: $helperClient.isPresetLocked)
                     .toggleStyle(.switch)
                     .scaleEffect(0.7)
             }
             .help(localization.localized(.lockPresetHelp))
         }
+    }
+
+    // MARK: - Preset List Popover
+
+    private var filteredPresetList: [VizPreset] {
+        let q = presetSearch.trimmingCharacters(in: .whitespaces).lowercased()
+        return helperClient.presetList.filter { p in
+            if showOnlyFavorites, !helperClient.favoritePresets.contains(p.name) { return false }
+            if q.isEmpty { return true }
+            return p.name.lowercased().contains(q) || p.category.lowercased().contains(q)
+        }
+    }
+
+    private var presetListPopover: some View {
+        VStack(spacing: AppSpacing.sm) {
+            HStack {
+                TextField(localization.localized(.vizSearchPresets), text: $presetSearch)
+                    .textFieldStyle(.roundedBorder)
+                Button(action: { showOnlyFavorites.toggle() }) {
+                    Image(systemName: showOnlyFavorites ? "star.fill" : "star")
+                        .foregroundColor(showOnlyFavorites ? .yellow : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(localization.localized(.vizShowFavoritesHelp))
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2, pinnedViews: [.sectionHeaders]) {
+                    ForEach(groupedPresets, id: \.0) { category, presets in
+                        Section {
+                            ForEach(presets) { preset in
+                                presetRow(preset)
+                            }
+                        } header: {
+                            Text(category)
+                                .font(AppTypography.labelSmall)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                                .background(Color(NSColor.windowBackgroundColor))
+                        }
+                    }
+                }
+            }
+            .frame(width: 340, height: 380)
+        }
+        .padding(AppSpacing.sm)
+        .frame(width: 360)
+    }
+
+    private var groupedPresets: [(String, [VizPreset])] {
+        Dictionary(grouping: filteredPresetList, by: { $0.category })
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value) }
+    }
+
+    private func presetRow(_ preset: VizPreset) -> some View {
+        let isCurrent = preset.name == helperClient.currentPresetName
+        return HStack(spacing: 6) {
+            Button(action: {
+                helperClient.selectPreset(at: preset.index)
+                showPresetList = false
+            }) {
+                Text(preset.name)
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(isCurrent ? .accentColor : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .tooltip(preset.name)
+
+            Button(action: { helperClient.toggleFavorite(preset.name) }) {
+                Image(systemName: helperClient.favoritePresets.contains(preset.name) ? "star.fill" : "star")
+                    .font(.system(size: 11))
+                    .foregroundColor(helperClient.favoritePresets.contains(preset.name) ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 1)
+        .padding(.horizontal, 4)
+        .background(isCurrent ? Color.accentColor.opacity(0.12) : Color.clear)
+        .cornerRadius(AppRadius.xs)
     }
 
     // MARK: - Status Bar
@@ -298,6 +427,12 @@ struct VisualizerView: View {
                     .foregroundColor(.secondary)
             }
 
+            if helperClient.isRunning, helperClient.currentFPS > 0 {
+                Text("\(helperClient.currentFPS) FPS")
+                    .font(AppTypography.mono)
+                    .foregroundColor(fpsColor(helperClient.currentFPS))
+            }
+
             Spacer()
 
             // Stable mode indicator
@@ -313,5 +448,11 @@ struct VisualizerView: View {
             .background(Color.green.opacity(0.15))
             .cornerRadius(AppRadius.xs)
         }
+    }
+
+    private func fpsColor(_ fps: Int) -> Color {
+        if fps >= 55 { return .green }
+        if fps >= 30 { return .orange }
+        return .red
     }
 }

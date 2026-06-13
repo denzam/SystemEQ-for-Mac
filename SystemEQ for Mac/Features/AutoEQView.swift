@@ -14,6 +14,8 @@ struct FavoritePreset: Codable, Identifiable, Equatable {
     let target: String?
     let path: String
     let timestamp: Date
+    var rawText: String? // Повний вміст .txt для custom-імпортованих пресетів
+    var preamp: Double?
 }
 
 struct AutoEQView: View {
@@ -144,6 +146,10 @@ struct AutoEQView: View {
     @State private var favorites: [FavoritePreset] = []
     @State private var showFavorites: Bool = false
 
+    // Останній імпортований custom-пресет (відновлюється при старті)
+    @AppStorage("lastCustomPresetText") private var lastCustomPresetText: String = ""
+    @AppStorage("lastCustomPresetName") private var lastCustomPresetName: String = ""
+
     /// URLSession з кешуванням (computed property для struct)
     private var cachedSession: URLSession {
         let config = URLSessionConfiguration.default
@@ -210,6 +216,7 @@ struct AutoEQView: View {
                         Text(presetName)
                             .font(AppTypography.bodySmall)
                             .foregroundStyle(.secondary)
+                            .tooltip(presetName)
                         if let source = activePresetSource {
                             Text("•")
                                 .font(AppTypography.bodySmall)
@@ -262,19 +269,45 @@ struct AutoEQView: View {
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .font(AppTypography.bodySmall)
+                                    .tooltip(s)
                             }
                         }
                     }
                     GridRow {
                         Color.clear.frame(height: 0)
                         Color.clear.frame(height: 0)
-                        Button {
-                            importPresetFromFile()
-                        } label: {
-                            Label(localization.localized(.autoEQImportFile), systemImage: "doc.badge.plus")
+                        HStack(spacing: 8) {
+                            Button {
+                                importPresetFromFile()
+                            } label: {
+                                Label(localization.localized(.autoEQImportFile), systemImage: "doc.badge.plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .help(localization.localized(.autoEQImportFileHelp))
+
+                            if !rawText.isEmpty, activePresetSource == "Custom" {
+                                Button {
+                                    toggleCurrentCustomFavorite()
+                                } label: {
+                                    Image(systemName: isCurrentCustomFavorite ? "star.fill" : "star")
+                                        .foregroundColor(isCurrentCustomFavorite ? .yellow : .secondary)
+                                }
+                                .buttonStyle(.bordered)
+                                .help(isCurrentCustomFavorite
+                                    ? localization.localized(.removeFromFavorites)
+                                    : localization.localized(.autoEQSaveToFavorites))
+                            }
+
+                            if !favorites.isEmpty {
+                                Button {
+                                    showFavorites.toggle()
+                                } label: {
+                                    Label("\(favorites.count)", systemImage: "bookmark.fill")
+                                }
+                                .buttonStyle(.bordered)
+                                .help(localization.localized(.autoEQShowSaved))
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .help(localization.localized(.autoEQImportFileHelp))
                         Color.clear.frame(height: 0)
                     }
                 }
@@ -324,13 +357,6 @@ struct AutoEQView: View {
                         HStack(spacing: 8) {
                             Text(localization.localized(.autoEQFavoritesTitle))
                                 .font(AppTypography.heading2)
-                            Button(showFavorites ? localization.localized(.autoEQHide) : localization
-                                .localized(.autoEQShow)) {
-                                    showFavorites.toggle()
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .font(AppTypography.bodySmall)
                             Spacer()
                         }
 
@@ -344,6 +370,7 @@ struct AutoEQView: View {
                                                     .font(AppTypography.bodySmall)
                                                     .fontWeight(.medium)
                                                     .lineLimit(1)
+                                                    .tooltip(fav.name)
                                                 Spacer()
                                                 Button(action: { removeFavorite(fav) }) {
                                                     Image(systemName: "xmark.circle.fill")
@@ -389,7 +416,7 @@ struct AutoEQView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ForEach(candidates) { c in
                                         HStack {
-                                            Text(c.display).lineLimit(1)
+                                            Text(c.display).lineLimit(1).tooltip(c.display)
                                             Spacer()
                                             Button(action: { toggleFavoriteForCandidate(c) }) {
                                                 Image(systemName: isFavorite(c) ? "star.fill" : "star")
@@ -505,6 +532,17 @@ struct AutoEQView: View {
                 // Restore bassBoost from saved preset
                 if let saved = PresetPersistence.load() {
                     bassBoost = Double(saved.bassBoost)
+                }
+
+                // Відновити останній імпортований custom-пресет (без повторного застосування,
+                // PresetPersistence вже відновив gains у движку — тут лише UI/графік)
+                if !lastCustomPresetText.isEmpty {
+                    applyCustomPreset(
+                        text: lastCustomPresetText,
+                        name: lastCustomPresetName,
+                        persist: false,
+                        autoApply: false
+                    )
                 }
 
                 // Load offline index from user or bundle
@@ -1360,6 +1398,14 @@ struct AutoEQView: View {
             return
         }
 
+        let presetName = url.deletingPathExtension().lastPathComponent
+        applyCustomPreset(text: text, name: presetName, persist: true, autoApply: true)
+    }
+
+    /// Парсить і застосовує custom .txt пресет. Використовується при імпорті,
+    /// відновленні при старті та завантаженні з обраних.
+    @discardableResult
+    private func applyCustomPreset(text: String, name: String, persist: Bool, autoApply: Bool) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var bands: [ParsedBand] = []
         var preamp: Double?
@@ -1371,19 +1417,17 @@ struct AutoEQView: View {
         } else if trimmed.contains("GraphicEQ:") || trimmed.contains("FixedBandEQ:") {
             bands = parseGraphicEQ(text: trimmed)
         } else if trimmed.contains("### Fixed Band EQ") {
-            let parsed = parseFixedBandTable(text: trimmed, bands: bandMode == .ten ? 10 : 31)
-            if !parsed.isEmpty {
-                bands = parsed
+            let parsedBands = parseFixedBandTable(text: trimmed, bands: bandMode == .ten ? 10 : 31)
+            if !parsedBands.isEmpty {
+                bands = parsedBands
                 preamp = parsePreamp(text: trimmed)
             }
         }
 
         guard !bands.isEmpty else {
             searchError = localization.localized(.autoEQImportFileError)
-            return
+            return false
         }
-
-        let presetName = url.deletingPathExtension().lastPathComponent
 
         parsed10 = bands
         parsed31 = bands
@@ -1392,26 +1436,35 @@ struct AutoEQView: View {
         preampDB31 = preamp
         preampDB = preamp
         rawText = text
-        activePresetName = presetName
+        activePresetName = name
         activePresetSource = "Custom"
         activePresetTarget = nil
         searchError = nil
+        mapped = mappedBands()
 
-        applyEQDebounceTask?.cancel()
-        applyEQDebounceTask = Task {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            if !Task.isCancelled {
-                await MainActor.run {
-                    applyToAudioEngine()
+        if persist {
+            lastCustomPresetText = text
+            lastCustomPresetName = name
+        }
+
+        if autoApply {
+            applyEQDebounceTask?.cancel()
+            applyEQDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        applyToAudioEngine()
+                    }
                 }
             }
         }
 
         dlog(
-            "Custom preset imported: \(presetName), \(bands.count) filters, preamp: \(preamp ?? 0)",
+            "Custom preset applied: \(name), \(bands.count) filters, preamp: \(preamp ?? 0)",
             level: .info,
             category: .network
         )
+        return true
     }
 
     private func importFromDatabase(_ searchQuery: String) {
@@ -2223,7 +2276,39 @@ struct AutoEQView: View {
         saveFavoritesToStorage()
     }
 
+    /// Чи збережений поточний custom-пресет в обране (за іменем)
+    private var isCurrentCustomFavorite: Bool {
+        guard let name = activePresetName, !rawText.isEmpty else { return false }
+        return favorites.contains { $0.rawText != nil && $0.name == name }
+    }
+
+    /// Додати/прибрати поточний імпортований custom-пресет в обране
+    private func toggleCurrentCustomFavorite() {
+        guard let name = activePresetName, !rawText.isEmpty else { return }
+        if let index = favorites.firstIndex(where: { $0.rawText != nil && $0.name == name }) {
+            favorites.remove(at: index)
+        } else {
+            favorites.append(FavoritePreset(
+                id: UUID().uuidString,
+                name: name,
+                source: activePresetSource,
+                target: activePresetTarget,
+                path: "custom:\(name)",
+                timestamp: Date(),
+                rawText: rawText,
+                preamp: preampDB
+            ))
+        }
+        saveFavoritesToStorage()
+    }
+
     private func loadFavorite(_ favorite: FavoritePreset) async {
+        // Custom-пресет: маємо повний текст, парсимо напряму
+        if let raw = favorite.rawText, !raw.isEmpty {
+            applyCustomPreset(text: raw, name: favorite.name, persist: true, autoApply: true)
+            return
+        }
+
         // Знаходимо кандидата в offline index
         if offlineIndex.contains(where: { entry in
             entry.pathReadme?.contains(favorite.path) == true ||

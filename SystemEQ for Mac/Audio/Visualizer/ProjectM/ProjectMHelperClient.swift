@@ -10,6 +10,15 @@ import AppKit
 import Combine
 import Foundation
 
+// MARK: - Preset Model
+
+struct VizPreset: Identifiable, Equatable {
+    let name: String
+    let category: String
+    let index: Int
+    var id: Int { index }
+}
+
 // MARK: - ProjectM Helper Client
 
 @MainActor
@@ -26,6 +35,29 @@ final class ProjectMHelperClient: ObservableObject {
     @Published private(set) var availableCategories: [String] = ["All"]
     @Published private(set) var currentCategory: String = "All"
     @Published private(set) var currentWeight: String = "All"
+    @Published private(set) var currentFPS: Int = 0
+    @Published private(set) var presetList: [VizPreset] = []
+
+    /// Обрані пресети візуалізатора (за назвою). Зберігаються між запусками.
+    @Published var favoritePresets: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "visualizerFavoritePresets") ?? []
+    ) {
+        didSet {
+            UserDefaults.standard.set(Array(favoritePresets), forKey: "visualizerFavoritePresets")
+        }
+    }
+
+    func toggleFavorite(_ name: String) {
+        if favoritePresets.contains(name) {
+            favoritePresets.remove(name)
+        } else {
+            favoritePresets.insert(name)
+        }
+    }
+
+    func requestPresetList() {
+        sendCommand("LIST")
+    }
 
     @Published var isShuffleEnabled: Bool = true {
         didSet {
@@ -53,6 +85,15 @@ final class ProjectMHelperClient: ObservableObject {
         }
     }
 
+    @Published var selectedQuality: String = UserDefaults.standard
+        .string(forKey: "visualizerQuality") ?? "High" {
+        didSet {
+            guard selectedQuality != oldValue else { return }
+            UserDefaults.standard.set(selectedQuality, forKey: "visualizerQuality")
+            sendCommand("QUALITY:\(selectedQuality)")
+        }
+    }
+
     // MARK: - Private Properties
 
     private var helperProcess: Process?
@@ -60,6 +101,9 @@ final class ProjectMHelperClient: ObservableObject {
     private var readSource: DispatchSourceRead?
 
     private let ipcQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)
+    // Окрема черга для читання відповідей: інакше безперервний потік аудіо-фреймів на ipcQueue
+    // не дає read-handler'у слот, буфер сокета переповнюється і великий LIST (~1 МБ) губиться.
+    private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
 
     // Thread-safe socket access (nonisolated for background queue access)
     nonisolated(unsafe) private var _clientSocket: Int32 = -1
@@ -330,6 +374,10 @@ final class ProjectMHelperClient: ObservableObject {
                 self.setSocket(sock)
                 self.startReadingResponses()
                 self.startAudioSending()
+                // Відновити збережену якість (helper стартує з High)
+                if self.selectedQuality != "High" {
+                    self.sendCommand("QUALITY:\(self.selectedQuality)")
+                }
                 dlog("✅ Connected to ProjectMHelper IPC", category: .audio)
             }
         }
@@ -339,7 +387,7 @@ final class ProjectMHelperClient: ObservableObject {
         let sock = getSocket()
         guard sock >= 0 else { return }
 
-        readSource = DispatchSource.makeReadSource(fileDescriptor: sock, queue: ipcQueue)
+        readSource = DispatchSource.makeReadSource(fileDescriptor: sock, queue: readQueue)
 
         readSource?.setEventHandler { [weak self] in
             self?.readResponse()
@@ -355,41 +403,62 @@ final class ProjectMHelperClient: ObservableObject {
         readSource?.resume()
     }
 
+    // Байтовий акумулятор: великий LIST: JSON приходить кількома чанками, а чанк може
+    // різати multibyte UTF-8 (кирилиця в назвах) — тому склеюємо на рівні байтів, не String.
+    private var responseAccumulator = Data()
+
     private func readResponse() {
         let sock = getSocket()
         guard sock >= 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        let bytesRead = read(sock, &buffer, buffer.count)
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        // Дренуємо весь доступний буфер сокета за одну подію: великий LIST (~1 МБ) приходить
+        // багатьма чанками, а аудіо на ipcQueue не дає read-події частити.
+        while true {
+            let bytesRead = read(sock, &buffer, buffer.count)
+            guard bytesRead > 0 else { break }
+            responseAccumulator.append(contentsOf: buffer[0..<bytesRead])
+            if bytesRead < buffer.count { break }
+        }
 
-        guard bytesRead > 0 else { return }
+        guard !responseAccumulator.isEmpty else { return }
 
-        if let response = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
-            processResponse(response)
+        // Обробляємо лише завершені рядки (до \n); хвіст лишаємо в буфері.
+        while let nl = responseAccumulator.firstIndex(of: 0x0A) {
+            let lineData = responseAccumulator[responseAccumulator.startIndex..<nl]
+            responseAccumulator = Data(responseAccumulator[(nl + 1)...])
+            if let line = String(data: lineData, encoding: .utf8) {
+                processLine(line)
+            }
         }
     }
 
-    private func processResponse(_ response: String) {
-        for line in response.components(separatedBy: "\n") where line.hasPrefix("STATUS:") {
+    private func processLine(_ line: String) {
+        if line.hasPrefix("STATUS:") {
             let jsonStr = String(line.dropFirst(7))
-            if let data = jsonStr.data(using: .utf8),
-               let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                DispatchQueue.main.async { [weak self] in
-                    if let name = status["presetName"] as? String {
-                        self?.currentPresetName = name
-                    }
-                    if let count = status["presetCount"] as? Int {
-                        self?.presetCount = count
-                    }
-                    if let category = status["category"] as? String {
-                        self?.currentCategory = category
-                    }
-                    if let weight = status["weight"] as? String {
-                        self?.currentWeight = weight
-                    }
-                    if let categories = status["categories"] as? [String] {
-                        self?.availableCategories = categories
-                    }
-                }
+            guard let data = jsonStr.data(using: .utf8),
+                  let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            DispatchQueue.main.async { [weak self] in
+                if let name = status["presetName"] as? String { self?.currentPresetName = name }
+                if let count = status["presetCount"] as? Int { self?.presetCount = count }
+                if let category = status["category"] as? String { self?.currentCategory = category }
+                if let weight = status["weight"] as? String { self?.currentWeight = weight }
+                if let categories = status["categories"] as? [String] { self?.availableCategories = categories }
+                if let fps = status["fps"] as? Int { self?.currentFPS = fps }
+            }
+        } else if line.hasPrefix("LIST:") {
+            let jsonStr = String(line.dropFirst(5))
+            guard let data = jsonStr.data(using: .utf8),
+                  let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                return
+            }
+            let list = arr.compactMap { item -> VizPreset? in
+                guard let name = item["name"] as? String,
+                      let category = item["category"] as? String,
+                      let index = item["index"] as? Int else { return nil }
+                return VizPreset(name: name, category: category, index: index)
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.presetList = list
             }
         }
     }

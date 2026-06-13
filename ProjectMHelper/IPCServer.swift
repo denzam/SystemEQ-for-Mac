@@ -308,11 +308,26 @@ class IPCServer {
                 }
             }
 
+        case "QUALITY":
+            // Без main.async: рендер крутиться на main RunLoop і на важкому пресеті (низький FPS)
+            // команда висіла б у хвості черги хвилинами. setQuality лише виставляє стан+прапор,
+            // GL чіпає тільки render-тред під замком.
+            if let arg = argument, let q = VisualizerController.VisualQuality(rawValue: arg) {
+                controller.setQuality(q)
+            }
+
         case "CATEGORIES":
             let categories = controller.getCategories()
             if let jsonData = try? JSONSerialization.data(withJSONObject: categories),
                let jsonString = String(data: jsonData, encoding: .utf8) {
                 sendResponse("CATEGORIES:\(jsonString)")
+            }
+
+        case "LIST":
+            let list = controller.getPresetList()
+            if let jsonData = try? JSONSerialization.data(withJSONObject: list),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                sendResponse("LIST:\(jsonString)")
             }
 
         case "QUIT":
@@ -329,8 +344,20 @@ class IPCServer {
         guard clientSocket >= 0 else { return }
 
         let data = (message + "\n").data(using: .utf8)!
-        _ = data.withUnsafeBytes { buffer in
-            write(clientSocket, buffer.baseAddress, buffer.count)
+        // Повний запис у циклі: великий LIST (~1 МБ) не влазить у буфер сокета за один write,
+        // а частковий запис обрізав би JSON і клієнт ніколи б не розпарсив відповідь.
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var sent = 0
+            let total = raw.count
+            while sent < total {
+                let n = write(clientSocket, base.advanced(by: sent), total - sent)
+                if n > 0 {
+                    sent += n
+                } else {
+                    break
+                }
+            }
         }
     }
 }
