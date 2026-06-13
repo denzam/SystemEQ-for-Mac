@@ -36,5 +36,7 @@ private struct TooltipView: NSViewRepresentable {
 
 /// Overlay-перехоплює лише hover для toolTip, але пропускає кліки до SwiftUI під ним.
 private final class PassthroughTooltipView: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
 }

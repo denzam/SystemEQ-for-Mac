@@ -16,7 +16,9 @@ struct VizPreset: Identifiable, Equatable {
     let name: String
     let category: String
     let index: Int
-    var id: Int { index }
+    var id: Int {
+        index
+    }
 }
 
 // MARK: - ProjectM Helper Client
@@ -101,8 +103,8 @@ final class ProjectMHelperClient: ObservableObject {
     private var readSource: DispatchSourceRead?
 
     private let ipcQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)
-    // Окрема черга для читання відповідей: інакше безперервний потік аудіо-фреймів на ipcQueue
-    // не дає read-handler'у слот, буфер сокета переповнюється і великий LIST (~1 МБ) губиться.
+    /// Окрема черга для читання відповідей: інакше безперервний потік аудіо-фреймів на ipcQueue
+    /// не дає read-handler'у слот, буфер сокета переповнюється і великий LIST (~1 МБ) губиться.
     private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
 
     // Thread-safe socket access (nonisolated for background queue access)
@@ -403,8 +405,8 @@ final class ProjectMHelperClient: ObservableObject {
         readSource?.resume()
     }
 
-    // Байтовий акумулятор: великий LIST: JSON приходить кількома чанками, а чанк може
-    // різати multibyte UTF-8 (кирилиця в назвах) — тому склеюємо на рівні байтів, не String.
+    /// Байтовий акумулятор: великий LIST: JSON приходить кількома чанками, а чанк може
+    /// різати multibyte UTF-8 (кирилиця в назвах) — тому склеюємо на рівні байтів, не String.
     private var responseAccumulator = Data()
 
     private func readResponse() {
