@@ -4,6 +4,25 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-13
+
+Preset persistence, app-wide tooltips, and a major visualizer overhaul.
+
+### Added
+- Imported `.txt` AutoEQ presets now persist across app and Mac restarts (stored as raw text + preamp) and can be saved to favorites — no need to re-import after a reboot
+- App-wide native tooltips: hovering truncated text shows the full value after a short delay, without shifting any layout
+- Visualizer quality picker (Low / Medium / High) that live-adjusts render resolution, plus a visible FPS counter in the status bar
+- Full preset browser: every visualizer preset grouped by category with search and visualizer-specific favorites; picking a preset outside the current filter switches to "All" automatically
+
+### Changed
+- Visualizer "Auto" toggle now also stops timer-based preset switching when off, so a chosen preset stays put
+- Heavy presets adaptively lower render resolution to hold a high framerate; presets that stay below 30 FPS for a couple of seconds are blacklisted and auto-skipped (only while Auto is on and Lock is off)
+
+### Fixed
+- Removed the redundant Show/Hide favorites button in AutoEQ (the bookmark counter is the single toggle)
+- Visualizer preset list could come back empty: the large list response shared the audio IPC queue and overflowed the socket buffer — reads now run on a dedicated queue and both sides drain/write fully
+- Quality changes are no longer queued behind render frames on the main runloop, so the picker responds immediately even on slow presets
+
 ## [1.0.7] — 2026-05-30
 
 New AutoEQ import feature plus localization fixes.
