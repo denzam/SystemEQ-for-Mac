@@ -8,6 +8,39 @@ Official links:
 
 ---
 
+## Reddit — Personal profile (u/Im-from-ua)
+
+No subreddit rules, no karma gate — post freely on your own profile. Same story
+as the LinkedIn post but in a more honest, less corporate Reddit tone.
+
+### Title
+```
+I assemble medical devices for a living. In my spare time I built a system-wide audio EQ for macOS.
+```
+
+### Body
+```
+Not a pro developer, no CS degree — just curiosity and a lot of evenings after work.
+
+I built **SystemEQ**: a free, open-source system-wide parametric equalizer for macOS. It EQs *everything* your Mac plays — Spotify, YouTube, browsers, any app — not just one player. The audio engine is written from scratch on CoreAudio + Apple's Accelerate framework.
+
+What it does:
+
+- 10/31-band parametric EQ (biquad filters via vDSP)
+- Built-in AutoEQ database — **8,665 headphone models**, apply an expert preset in one click
+- Hearing-calibration module with A/B comparison
+- Real-time visualizer
+- No telemetry, no subscriptions, no ads — everything stays local
+
+It's GPLv3 and completely free. I didn't pay Apple's $99 developer fee, which is exactly what keeps it free and open.
+
+GitHub: https://github.com/denzam/SystemEQ-for-Mac
+
+Happy to answer anything about the audio architecture or how the BlackHole routing works.
+```
+
+---
+
 ## r/macapps — RULES CHECKLIST (from subreddit, read 2026-06-01)
 
 - [ ] **10 LOCAL karma required** — comment in r/macapps FIRST to earn it before posting (Rule 1).
@@ -114,7 +147,78 @@ Would appreciate feedback, especially on the audio architecture.
 
 ---
 
+## LinkedIn — Personal post (your own profile)
+
+### Post
+```
+🇬🇧 By day I assemble medical devices. In my free time I built an audio engine for macOS.
+
+I'm not a professional developer. No computer science degree — just curiosity
+and a lot of late evenings.
+
+SystemEQ is a free and open-source equalizer for macOS. It lets you fine-tune
+the sound of everything your Mac plays — Spotify, YouTube, Apple Music, any
+browser — not just one app. Under the hood it's a low-latency audio engine I
+wrote from scratch on Apple's CoreAudio and Accelerate frameworks.
+
+What it does:
+→ 10/31-band parametric EQ (the kind audio engineers use)
+→ Built-in database of 8,665 headphone models — pick yours and apply a
+  tuned-by-experts preset in one click
+→ Hearing-calibration module with A/B comparison
+→ Real-time audio visualizer
+→ No tracking, no subscriptions, no ads — everything stays on your Mac
+
+It's completely free. I chose not to pay Apple's $99 developer fee, and that's
+exactly what lets me keep it free and open for everyone.
+
+You don't need the right job title to build something real. You just need to start.
+
+GitHub: https://github.com/denzam/SystemEQ-for-Mac
+Site: https://denzam.github.io/SystemEQ-for-Mac/
+
+—
+
+🇮🇹 Di lavoro assemblo dispositivi medicali. Nel tempo libero ho creato un'app audio per Mac.
+
+Non sono uno sviluppatore di professione, non ho una laurea in informatica.
+Solo curiosità e tante serate passate a programmare.
+
+SystemEQ è un equalizzatore gratuito e open source per macOS. Ti permette di
+regolare il suono di tutto ciò che riproduci sul Mac — Spotify, YouTube, Apple
+Music, qualsiasi browser — e non di una singola app. Dietro le quinte c'è un
+motore audio a bassa latenza che ho scritto da zero usando i framework
+CoreAudio e Accelerate di Apple.
+
+Cosa fa:
+→ Equalizzatore parametrico a 10/31 bande (quello che usano i tecnici del suono)
+→ Database integrato con 8.665 modelli di cuffie — scegli il tuo e applichi un
+  preset ottimizzato dagli esperti con un clic
+→ Modulo per la calibrazione dell'udito con confronto A/B
+→ Visualizzatore audio in tempo reale
+→ Nessun tracciamento, nessun abbonamento, nessuna pubblicità — tutto resta sul tuo Mac
+
+È completamente gratuita. Ho scelto di non pagare la quota sviluppatore di Apple
+da 99 $, ed è proprio questo che mi permette di tenerla gratuita e aperta a tutti.
+
+Non serve avere il titolo giusto per costruire qualcosa di reale. Basta iniziare.
+
+GitHub: https://github.com/denzam/SystemEQ-for-Mac
+Sito: https://denzam.github.io/SystemEQ-for-Mac/
+
+#OpenSource #Swift #macOS #SideProject #AudioEngineering
+```
+
+### Notes
+
+- Tag it as a personal project post, not a company post.
+- First comment: add the Homebrew one-liner for quick install.
+- Engage with comments within the first hour — LinkedIn algorithm rewards early engagement.
+
+---
+
 ## Order
 1. r/macapps first (after earning 10 karma). Watch reaction.
 2. Hacker News Show HN.
 3. r/headphones only via allowed thread.
+4. LinkedIn — anytime, independent of the rest.
