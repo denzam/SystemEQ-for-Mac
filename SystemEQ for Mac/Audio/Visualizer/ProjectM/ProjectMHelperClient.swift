@@ -521,12 +521,15 @@ final class ProjectMHelperClient: ObservableObject {
     ) {
         let maxSamples = min(frameCount, 1024)
         let mask = Int32(audioRingCapacity - 1)
+        // Single producer: write samples first, publish the index once after —
+        // one atomic RMW per callback instead of two per sample.
+        let base = seq_atomic_int32_load(&_audioWriteIdx)
         for i in 0..<maxSamples {
-            let wi = seq_atomic_int32_fetch_add(&_audioWriteIdx, 1)
-            _audioRingBuffer[Int(wi & mask)] = left[i]
-            let wi2 = seq_atomic_int32_fetch_add(&_audioWriteIdx, 1)
-            _audioRingBuffer[Int(wi2 & mask)] = right[i]
+            let idx = base &+ Int32(2 * i)
+            _audioRingBuffer[Int(idx & mask)] = left[i]
+            _audioRingBuffer[Int((idx &+ 1) & mask)] = right[i]
         }
+        _ = seq_atomic_int32_fetch_add(&_audioWriteIdx, Int32(2 * maxSamples))
     }
 
     private func startAudioSending() {
