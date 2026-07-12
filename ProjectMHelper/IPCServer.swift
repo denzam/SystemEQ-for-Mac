@@ -31,9 +31,35 @@ enum IPCCommand: String {
 class IPCServer {
     private let socketPath: String
     private var serverSocket: Int32 = -1
-    private var clientSocket: Int32 = -1
     private var isRunning = false
     private let controller: VisualizerController
+
+    // Client socket is touched from listenQueue (accept/replace), readQueue
+    // (readLoop, command handlers) and stop() — guard it with a lock.
+    // The generation counter disambiguates reused fd numbers: readLoop may
+    // wake up long after its fd was closed and that number given to a new
+    // client, so "same fd" alone is not proof it's still our connection.
+    private let clientLock = NSLock()
+    private var _clientSocket: Int32 = -1
+    private var _clientGeneration: UInt64 = 0
+
+    private func currentClientSocket() -> Int32 {
+        clientLock.lock()
+        defer { clientLock.unlock() }
+        return _clientSocket
+    }
+
+    private func closeClient(ifCurrent socket: Int32, generation: UInt64) {
+        clientLock.lock()
+        let isCurrent = _clientGeneration == generation && _clientSocket == socket
+        if isCurrent {
+            _clientSocket = -1
+        }
+        clientLock.unlock()
+        if isCurrent {
+            close(socket)
+        }
+    }
 
     private let listenQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.listen", qos: .userInitiated)
     private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
@@ -106,9 +132,13 @@ class IPCServer {
     func stop() {
         isRunning = false
 
-        if clientSocket >= 0 {
-            close(clientSocket)
-            clientSocket = -1
+        clientLock.lock()
+        let client = _clientSocket
+        _clientSocket = -1
+        _clientGeneration &+= 1
+        clientLock.unlock()
+        if client >= 0 {
+            close(client)
         }
 
         if serverSocket >= 0 {
@@ -137,32 +167,39 @@ class IPCServer {
                 continue
             }
 
-            // Close previous client if any
-            if clientSocket >= 0 {
-                close(clientSocket)
+            // Prevent SIGPIPE if we write while the client is disconnecting
+            var noSigPipe: Int32 = 1
+            setsockopt(newClient, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
+            // Replace previous client if any
+            clientLock.lock()
+            let previous = _clientSocket
+            _clientSocket = newClient
+            _clientGeneration &+= 1
+            let generation = _clientGeneration
+            clientLock.unlock()
+            if previous >= 0 {
+                close(previous)
             }
 
-            clientSocket = newClient
             print("[IPCServer] Client connected")
 
             // Handle client in read queue
             readQueue.async { [weak self] in
-                self?.readLoop()
+                self?.readLoop(socket: newClient, generation: generation)
             }
         }
     }
 
-    private func readLoop() {
+    private func readLoop(socket: Int32, generation: UInt64) {
         var buffer = [UInt8](repeating: 0, count: 65536)
         var messageBuffer = Data()
 
-        while isRunning, clientSocket >= 0 {
-            let bytesRead = read(clientSocket, &buffer, buffer.count)
+        while isRunning {
+            let bytesRead = read(socket, &buffer, buffer.count)
 
             if bytesRead <= 0 {
                 print("[IPCServer] Client disconnected")
-                close(clientSocket)
-                clientSocket = -1
                 break
             }
 
@@ -171,25 +208,26 @@ class IPCServer {
             // Guard against unbounded buffer growth (e.g. malicious client without newlines)
             if messageBuffer.count > 4 * 1024 * 1024 {
                 print("[IPCServer] Message buffer too large, dropping connection")
-                close(clientSocket)
-                clientSocket = -1
                 break
             }
 
             // Frame parser: stream is a mix of text commands (UTF-8 terminated by \n)
             // and binary audio frames ([0x00][UInt32 LE length][length bytes of Float samples]).
             // Byte 0x00 never appears in UTF-8 text, so we can disambiguate at the start of every frame.
-            parseFrames(&messageBuffer)
+            guard parseFrames(&messageBuffer) else { break }
         }
+
+        closeClient(ifCurrent: socket, generation: generation)
     }
 
-    private func parseFrames(_ messageBuffer: inout Data) {
+    /// Returns false when the connection must be dropped (caller closes it).
+    private func parseFrames(_ messageBuffer: inout Data) -> Bool {
         while !messageBuffer.isEmpty {
             let firstByte = messageBuffer[messageBuffer.startIndex]
 
             if firstByte == 0x00 {
                 // Binary audio frame — need 5 byte header at minimum
-                guard messageBuffer.count >= 5 else { return }
+                guard messageBuffer.count >= 5 else { return true }
 
                 let lengthBytes = messageBuffer[messageBuffer.startIndex + 1..<messageBuffer.startIndex + 5]
                 let payloadLength = lengthBytes.withUnsafeBytes { raw -> Int in
@@ -200,13 +238,11 @@ class IPCServer {
                 // Sanity: max 4096 floats * 4 bytes = 16384
                 guard payloadLength <= 16384, payloadLength % MemoryLayout<Float>.size == 0 else {
                     print("[IPCServer] Invalid audio frame length: \(payloadLength) — dropping connection")
-                    close(clientSocket)
-                    clientSocket = -1
-                    return
+                    return false
                 }
 
                 let totalFrameSize = 5 + payloadLength
-                guard messageBuffer.count >= totalFrameSize else { return } // wait for rest
+                guard messageBuffer.count >= totalFrameSize else { return true } // wait for rest
 
                 let payloadStart = messageBuffer.startIndex + 5
                 let payloadEnd = payloadStart + payloadLength
@@ -221,7 +257,7 @@ class IPCServer {
                 messageBuffer = Data(messageBuffer[payloadEnd...])
             } else {
                 // Text command — find \n
-                guard let newlineIndex = messageBuffer.firstIndex(of: 0x0A) else { return }
+                guard let newlineIndex = messageBuffer.firstIndex(of: 0x0A) else { return true }
                 let messageData = messageBuffer[messageBuffer.startIndex..<newlineIndex]
                 messageBuffer = Data(messageBuffer[(newlineIndex + 1)...])
 
@@ -230,6 +266,7 @@ class IPCServer {
                 }
             }
         }
+        return true
     }
 
     private func processMessage(_ message: String) {
@@ -341,7 +378,8 @@ class IPCServer {
     }
 
     private func sendResponse(_ message: String) {
-        guard clientSocket >= 0 else { return }
+        let sock = currentClientSocket()
+        guard sock >= 0 else { return }
 
         let data = (message + "\n").data(using: .utf8)!
         // Повний запис у циклі: великий LIST (~1 МБ) не влазить у буфер сокета за один write,
@@ -351,7 +389,7 @@ class IPCServer {
             var sent = 0
             let total = raw.count
             while sent < total {
-                let n = write(clientSocket, base.advanced(by: sent), total - sent)
+                let n = write(sock, base.advanced(by: sent), total - sent)
                 if n > 0 {
                     sent += n
                 } else {
