@@ -102,10 +102,6 @@ public final class AudioEngine: ObservableObject {
     @Published var bands: [EQBand] = []
     @Published var preampGain: Float = 0.0
 
-    // Levels (Delegated from CoreAudioEngine)
-    @Published var inputPeakLevel: Float = 0.0
-    @Published var outputPeakLevel: Float = 0.0
-
     private var cancellables = Set<AnyCancellable>()
 
     // Debounces rapid slider drags so we rebuild the filter chain at most
@@ -142,21 +138,10 @@ public final class AudioEngine: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // ⚡ CRITICAL OPTIMIZATION: Throttle peak meters to reduce Main Thread UI updates
-        // From 23 updates/sec (~43ms) to 10 updates/sec (100ms) = 50-60% less UI overhead
-        CoreAudioEngine.shared.peakMeter.$inputPeakLevel
-            .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
-            .sink { [weak self] value in
-                DispatchQueue.main.async { self?.inputPeakLevel = value }
-            }
-            .store(in: &cancellables)
-
-        CoreAudioEngine.shared.peakMeter.$outputPeakLevel
-            .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
-            .sink { [weak self] value in
-                DispatchQueue.main.async { self?.outputPeakLevel = value }
-            }
-            .store(in: &cancellables)
+        // ⚡ Peak levels are deliberately NOT republished here. The App root
+        // holds this object as @StateObject, so any @Published change re-evaluates
+        // every window's body 10-20×/s — that was the main-thread CPU storm.
+        // Meter UIs poll CoreAudioEngine.shared.peakMeter directly (RoutingView).
     }
 
     // MARK: - Setup

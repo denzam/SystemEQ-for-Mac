@@ -40,6 +40,10 @@ struct SettingsView: View {
                 linksSection
             }
         }
+        .onAppear {
+            dbStats = EQDatabase.shared.getDatabaseStats()
+            dbVersion = EQDatabase.shared.getVersion()
+        }
     }
 
     // MARK: - Language Section
@@ -261,6 +265,8 @@ struct SettingsView: View {
 
     @State private var updateCheckResult: EQDatabase.UpdateCheckResult?
     @State private var isCheckingUpdates = false
+    @State private var dbStats: (headphones: Int, presets: Int, sizeMB: String) = (0, 0, "0.0")
+    @State private var dbVersion = ""
 
     private var databaseSection: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -268,8 +274,8 @@ struct SettingsView: View {
                 .font(AppTypography.heading2)
                 .padding(.horizontal, 4)
 
-            let stats = EQDatabase.shared.getDatabaseStats()
-            let version = EQDatabase.shared.getVersion()
+            let stats = dbStats
+            let version = dbVersion
 
             VStack(spacing: 12) {
                 // Database Info
