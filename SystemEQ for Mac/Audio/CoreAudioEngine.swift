@@ -67,7 +67,6 @@ public final class CoreAudioEngine: ObservableObject {
     private var useVDSPFilter: Bool = true
 
     private var _vdspFilterStrong: BiquadFilterVDSP?
-    private var _vdspFilterRetiredStrong: BiquadFilterVDSP?
 
     private let _vdspFilterAtomic: UnsafeMutablePointer<SEQAtomicPtr> = {
         let p = UnsafeMutablePointer<SEQAtomicPtr>.allocate(capacity: 1)
@@ -88,9 +87,10 @@ public final class CoreAudioEngine: ObservableObject {
 
     private func setVDSPFilter(_ filter: BiquadFilterVDSP?) {
         if let prev = _vdspFilterStrong {
-            _vdspFilterRetiredStrong = prev
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
-                self?._vdspFilterRetiredStrong = nil
+            // Each retired filter gets its own grace period via strong capture,
+            // so rapid consecutive swaps can't free one the audio thread still uses.
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) {
+                withExtendedLifetime(prev) {}
             }
         }
         _vdspFilterStrong = filter
@@ -124,8 +124,47 @@ public final class CoreAudioEngine: ObservableObject {
 
     fileprivate var renderFramesAccum: UInt64 = 0
 
-    // Visualizer callback (called from audio thread)
-    public var visualizerCallback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?
+    /// Visualizer callback — published to the audio thread with the same
+    /// lock-free pattern as the vDSP filter: acquire-load of an atomic box
+    /// pointer, release-store on swap, 100 ms grace period before release.
+    fileprivate final class VisualizerCallbackBox {
+        let callback: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void
+        init(_ callback: @escaping (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void) {
+            self.callback = callback
+        }
+    }
+
+    private var _visualizerCallbackStrong: VisualizerCallbackBox?
+
+    private let _visualizerCallbackAtomic: UnsafeMutablePointer<SEQAtomicPtr> = {
+        let p = UnsafeMutablePointer<SEQAtomicPtr>.allocate(capacity: 1)
+        seq_atomic_ptr_init(p, nil)
+        return p
+    }()
+
+    @inline(__always)
+    fileprivate func currentVisualizerCallback() -> VisualizerCallbackBox? {
+        guard let p = seq_atomic_ptr_load_acquire(_visualizerCallbackAtomic) else { return nil }
+        return Unmanaged<VisualizerCallbackBox>.fromOpaque(p).takeUnretainedValue()
+    }
+
+    public var visualizerCallback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)? {
+        get { _visualizerCallbackStrong?.callback }
+        set { setVisualizerCallback(newValue) }
+    }
+
+    private func setVisualizerCallback(_ callback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?) {
+        if let prev = _visualizerCallbackStrong {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) {
+                withExtendedLifetime(prev) {}
+            }
+        }
+        let box = callback.map { VisualizerCallbackBox($0) }
+        _visualizerCallbackStrong = box
+        let newPtr: UnsafeMutableRawPointer? = box.map { Unmanaged.passUnretained($0).toOpaque() }
+        seq_atomic_ptr_store_release(_visualizerCallbackAtomic, newPtr)
+    }
+
     fileprivate var visualizerCounter: Int = 0
     fileprivate var visualizerInterval: Int =
         1024 // ⚡ Update visualizer every ~21ms (48kHz) - halved frequency to reduce CPU
@@ -268,6 +307,7 @@ public final class CoreAudioEngine: ObservableObject {
     deinit {
         cleanup()
         _vdspFilterAtomic.deallocate()
+        _visualizerCallbackAtomic.deallocate()
     }
 
     // MARK: - Setup
@@ -279,6 +319,12 @@ public final class CoreAudioEngine: ObservableObject {
 
         self.inputDeviceID = inputDevice
         self.outputDeviceID = outputDevice
+
+        // Stop old units before tearing them down so their callbacks can't
+        // touch buffers that cleanup() is about to free.
+        if isRunning {
+            stop()
+        }
 
         // Cleanup any existing units/buffers
         cleanup()
@@ -999,23 +1045,23 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Meter Publishing (delegated to PeakMeter)
 
-    // 🔧 Thread safety: atomic flag prevents double-free if cleanup is called
-    // concurrently from deinit and stop() on different threads.
+    /// 🔧 Thread safety: lock serializes cleanup between deinit and setup().
+    /// The body is idempotent (every handle is nil-ed after release), so it is
+    /// safe to call again on every device re-setup.
     private let cleanupLock = NSLock()
-    private var isCleanedUp = false
 
     private func cleanup() {
         cleanupLock.lock()
         defer { cleanupLock.unlock() }
-        guard !isCleanedUp else { return }
-        isCleanedUp = true
 
         if let iu = inputUnit {
+            AudioOutputUnitStop(iu)
             AudioUnitUninitialize(iu)
             AudioComponentInstanceDispose(iu)
             inputUnit = nil
         }
         if let ou = outputUnit {
+            AudioOutputUnitStop(ou)
             AudioUnitUninitialize(ou)
             AudioComponentInstanceDispose(ou)
             outputUnit = nil
@@ -1375,12 +1421,12 @@ private func inputCaptureCallbackFunction(
     if engine.visualizerCounter >= engine.visualizerInterval {
         engine.visualizerCounter = 0
 
-        // Visualizer callback — read once to avoid TOCTOU race (callback may be set/cleared from main thread)
-        if let callback = engine.visualizerCallback,
+        // ⚡ Lock-free callback read: single atomic pointer load, no retain/release.
+        if let box = engine.currentVisualizerCallback(),
            let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
             let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : inL
             if let rightPtr = inR {
-                callback(inL, rightPtr, frames)
+                box.callback(inL, rightPtr, frames)
             }
         }
     }
