@@ -477,7 +477,7 @@ class VisualizerController: NSObject {
         // Apple Silicon has GL-on-Metal translation overhead; Intel integrated is fill-rate bound.
         let profile = performanceProfile
         projectm_set_window_size(handle, width, height)
-        projectm_set_preset_duration(handle, 45.0) // longer = fewer shader recompiles
+        projectm_set_preset_duration(handle, 18.0) // longer = fewer shader recompiles
         projectm_set_soft_cut_duration(handle, 1.5) // shorter = less dual-render cost
         projectm_set_hard_cut_enabled(handle, false) // avoid mid-song shader compile stalls
         projectm_set_hard_cut_sensitivity(handle, 2.0)
@@ -582,7 +582,9 @@ class VisualizerController: NSObject {
     private func hasMilkPresets(at basePath: String) -> Bool {
         guard let enumerator = FileManager.default.enumerator(atPath: basePath) else { return false }
         while let path = enumerator.nextObject() as? String {
-            if path.hasSuffix(".milk") { return true }
+            if path.hasSuffix(".milk") {
+                return true
+            }
         }
         return false
     }
@@ -946,7 +948,9 @@ class VisualizerController: NSObject {
         let read = pm_atomic_load(&audioReadIndex)
         let available = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
 
-        if available < 512 { return }
+        if available < 512 {
+            return
+        }
 
         // Stereo: ensure even count so L/R pairs stay aligned.
         // Cap at audioScratchCapacity to avoid overflow of pre-allocated buffer.
