@@ -76,8 +76,10 @@ class EQDatabase {
         }
         self.dbURL = bundleURL
 
-        // Open database
-        guard sqlite3_open(bundleURL.path, &db) == SQLITE_OK else {
+        // Open read-only (the DB is a bundled resource) with a full mutex so
+        // concurrent queries from different threads are serialized inside SQLite.
+        let openFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(bundleURL.path, &db, openFlags, nil) == SQLITE_OK else {
             dlog("⚠️ Cannot open EQDatabase - AutoEQ features disabled", level: .warning, category: .database)
             self.db = nil
             return
@@ -94,6 +96,13 @@ class EQDatabase {
 
     deinit {
         sqlite3_close(db)
+    }
+
+    /// Safe text-column reader: a NULL column returns "" instead of crashing
+    /// (String(cString:) traps on a nil pointer).
+    private func columnText(_ statement: OpaquePointer?, _ index: Int32) -> String {
+        guard let c = sqlite3_column_text(statement, index) else { return "" }
+        return String(cString: c)
     }
 
     // MARK: - Search
@@ -245,7 +254,7 @@ class EQDatabase {
 
         var brands: [String] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let brand = String(cString: sqlite3_column_text(statement, 0))
+            let brand = columnText(statement, 0)
             brands.append(brand)
         }
         return brands
@@ -308,9 +317,9 @@ class EQDatabase {
             let preset = DatabasePreset(
                 id: Int(sqlite3_column_int(statement, 0)),
                 headphoneId: Int(sqlite3_column_int(statement, 1)),
-                source: String(cString: sqlite3_column_text(statement, 2)),
-                author: String(cString: sqlite3_column_text(statement, 3)),
-                targetCurve: String(cString: sqlite3_column_text(statement, 4)),
+                source: columnText(statement, 2),
+                author: columnText(statement, 3),
+                targetCurve: columnText(statement, 4),
                 preampGain: Float(sqlite3_column_double(statement, 5)),
                 isHandCrafted: sqlite3_column_int(statement, 6) == 1,
                 isRecommended: sqlite3_column_int(statement, 7) == 1
@@ -400,7 +409,7 @@ class EQDatabase {
 
         var bands: [(String, Double, Float, Float)] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let filterType = String(cString: sqlite3_column_text(statement, 0))
+            let filterType = columnText(statement, 0)
             let frequency = sqlite3_column_double(statement, 1)
             let gain = Float(sqlite3_column_double(statement, 2))
             let qFactor = Float(sqlite3_column_double(statement, 3))
@@ -423,7 +432,7 @@ class EQDatabase {
         defer { sqlite3_finalize(statement) }
 
         if sqlite3_step(statement) == SQLITE_ROW {
-            return String(cString: sqlite3_column_text(statement, 0))
+            return columnText(statement, 0)
         }
         return "Unknown"
     }
