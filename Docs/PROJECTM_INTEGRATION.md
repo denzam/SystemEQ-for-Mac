@@ -2,7 +2,7 @@
 
 ## Що встановлено
 
-### libprojectM 4.1.5
+### libprojectM 4.1.6
 - **Бібліотека**: `/usr/local/lib/libprojectM-4.dylib`
 - **Playlist**: `/usr/local/lib/libprojectM-4-playlist.dylib`
 - **Headers**: `/usr/local/include/projectM-4/`
