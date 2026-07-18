@@ -216,10 +216,15 @@ import Foundation
 
 #else
 
+    import os
+
     // MARK: - Release Build Stubs
 
     // В Release stub'и приймають ті ж типи що й DEBUG — інакше Swift не резолвить `.audio` / `.error`
-    // на call-site (бо `Any?` не має member'ів enum). Тіло порожнє — optimizer видалить виклики.
+    // на call-site (бо `Any?` не має member'ів enum). Debug/info — no-op (optimizer видаляє виклики),
+    // але warning/error йдуть у os.Logger, щоб bug-репорти користувачів мали діагностику.
+
+    private let releaseLogger = Logger(subsystem: "com.denzam.SystemEQ", category: "SystemEQ")
 
     enum LogCategory: String {
         case audio
@@ -250,7 +255,17 @@ import Foundation
         file: String = #file,
         function: String = #function,
         line: Int = #line
-    ) {}
+    ) {
+        // Only surface warnings and errors in Release; debug/info stay no-ops.
+        guard level.rawValue >= LogLevel.warning.rawValue else { return }
+        let text = message() // evaluate here: os.Logger interpolation is escaping
+        if level == .error {
+            releaseLogger.error("\(text, privacy: .public)")
+        } else {
+            releaseLogger.warning("\(text, privacy: .public)")
+        }
+    }
+
     @inline(__always)
     func audioLog(
         _ message: @autoclosure () -> String,
@@ -282,6 +297,9 @@ import Foundation
         file: String = #file,
         function: String = #function,
         line: Int = #line
-    ) {}
+    ) {
+        let text = message() // evaluate here: os.Logger interpolation is escaping
+        releaseLogger.error("\(text, privacy: .public)")
+    }
 
 #endif
