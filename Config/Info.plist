@@ -25,7 +25,9 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>This app needs access to audio to capture system sound via BlackHole and apply EQ processing. No physical microphone is recorded.</string>
+    <string>SystemEQ captures your system audio through BlackHole to apply EQ. Your microphone is used only during optional room calibration, to measure your speakers — the recording is analyzed on your Mac and never leaves your device.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>SystemEQ uses AppleScript to open Terminal and pre-fill the Homebrew command for installing BlackHole. You run the command yourself.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Used to communicate with local AutoEQ processing server on your Mac. No data leaves your device.</string>
 </dict>
