@@ -44,7 +44,7 @@ public enum AppConstants {
     public enum BlackHole {
         /// Закріплена версія BlackHole, з якою протестовано застосунок.
         /// Оновлення: запусти `Scripts/check_blackhole_updates.sh` і зміни цей рядок.
-        public static let bundledVersion = "0.6.1"
+        public static let bundledVersion = "0.7.1"
 
         /// Мінімальна версія, яка точно працює з CoreAudioEngine.
         public static let minimumSupportedVersion = "0.5.0"

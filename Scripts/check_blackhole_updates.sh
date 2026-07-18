@@ -22,7 +22,7 @@ if [[ -z "$LATEST" ]]; then
     exit 1
 fi
 
-CURRENT=$(grep -E 'bundledVersion\s*=\s*"' "$CONSTANTS_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
+CURRENT=$(grep -E 'bundledVersion[[:space:]]*=[[:space:]]*"' "$CONSTANTS_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
 
 echo "   Current (AppConstants): $CURRENT"
 echo "   Latest  (Homebrew):     $LATEST"
@@ -47,7 +47,7 @@ echo "    Direct PKG:  $PKG_URL (HTTP 200)"
 
 if [[ "${1:-}" == "--update" ]]; then
     echo "✍️  Updating AppConstants.swift..."
-    sed -i '' -E "s/(bundledVersion\s*=\s*)\"[^\"]+\"/\1\"$LATEST\"/" "$CONSTANTS_FILE"
+    sed -i '' -E "s/(bundledVersion[[:space:]]*=[[:space:]]*)\"[^\"]+\"/\1\"$LATEST\"/" "$CONSTANTS_FILE"
     echo "✅ Updated to $LATEST. Review the diff and commit."
     git -C "$REPO_ROOT" diff -- "$CONSTANTS_FILE"
 else
