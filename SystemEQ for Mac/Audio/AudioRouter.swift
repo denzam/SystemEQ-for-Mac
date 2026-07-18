@@ -601,6 +601,9 @@ public final class AudioRouter: ObservableObject {
         // Stop CoreAudioEngine
         CoreAudioEngine.shared.stop()
 
+        // Put devices back to the sample rate the user had before we forced 48k.
+        CoreAudioEngine.shared.restoreDeviceSampleRates()
+
         // Restore original output
         restoreOriginalSystemOutputDevice()
     }

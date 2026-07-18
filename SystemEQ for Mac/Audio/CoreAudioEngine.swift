@@ -44,6 +44,11 @@ public final class CoreAudioEngine: ObservableObject {
     private var inputDeviceID: AudioDeviceID = 0
     private var outputDeviceID: AudioDeviceID = 0
 
+    /// Each device's nominal sample rate as it was BEFORE we forced 48k, keyed by
+    /// device ID. Captured once per device; used to restore rates when routing stops
+    /// so we don't permanently change a device the user had at 44.1/96k.
+    private var originalDeviceSampleRates: [AudioDeviceID: Double] = [:]
+
     /// Public read-only accessors for device IDs (used by AudioRouter to skip redundant restarts)
     public var currentInputDeviceID: AudioDeviceID {
         inputDeviceID
@@ -304,6 +309,30 @@ public final class CoreAudioEngine: ObservableObject {
         return true
     }
 
+    /// Records a device's current nominal sample rate once, before we override it,
+    /// so restoreDeviceSampleRates() can put it back when routing stops.
+    private func captureOriginalSampleRate(_ deviceID: AudioDeviceID) {
+        guard originalDeviceSampleRates[deviceID] == nil else { return }
+        if let rate = getDeviceSampleRate(deviceID) {
+            originalDeviceSampleRates[deviceID] = rate
+        }
+    }
+
+    /// Restores every device we changed back to its captured nominal rate. Call
+    /// when EQ routing is disabled so devices aren't left permanently forced to 48k.
+    /// Safe to call when the engine is stopped (no active stream to glitch).
+    ///
+    /// Main-thread only: `originalDeviceSampleRates` is an unsynchronized dictionary
+    /// shared with `setup()`/`captureOriginalSampleRate`, which also run on main.
+    /// Limitation: a crash/force-quit skips this, leaving devices at 48k; the next
+    /// launch would then capture 48k as the "original". Acceptable — no persisted state.
+    public func restoreDeviceSampleRates() {
+        for (deviceID, rate) in originalDeviceSampleRates {
+            _ = setDeviceSampleRate(deviceID, rate: rate)
+        }
+        originalDeviceSampleRates.removeAll()
+    }
+
     deinit {
         cleanup()
         _vdspFilterAtomic.deallocate()
@@ -328,6 +357,11 @@ public final class CoreAudioEngine: ObservableObject {
 
         // Cleanup any existing units/buffers
         cleanup()
+
+        // Remember each device's nominal rate the first time we touch it, so we can
+        // put it back when EQ is turned off (we force 48k below).
+        captureOriginalSampleRate(outputDevice)
+        captureOriginalSampleRate(inputDevice)
 
         // Align hardware sample rates (prefer 48k, fallback to 44.1k)
         let preferred = 48000.0
