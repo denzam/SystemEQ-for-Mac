@@ -52,6 +52,10 @@ public final class AudioRouter: ObservableObject {
     private var originalSystemOutputDevice: AudioDevice?
     private var deviceChangeDebounceTask: Task<Void, Never>?
 
+    /// UID of the real (non-BlackHole) system output, persisted so a crash that
+    /// left the system on BlackHole can still be recovered on next launch.
+    private let originalOutputUIDKey = "originalSystemOutputUID"
+
     public static let shared = AudioRouter()
 
     // MARK: - Initialization
@@ -195,8 +199,12 @@ public final class AudioRouter: ObservableObject {
             let hasOutput = AudioRouter.hasOutputStreams(deviceID)
 
             // Filter based on request
-            if isInput, !hasInput { return nil }
-            if isOutput, !hasOutput { return nil }
+            if isInput, !hasInput {
+                return nil
+            }
+            if isOutput, !hasOutput {
+                return nil
+            }
 
             return RawDeviceInfo(
                 id: deviceID,
@@ -676,23 +684,59 @@ public final class AudioRouter: ObservableObject {
             &deviceID
         )
 
-        if status == noErr {
-            // Знайти device в списку output devices
-            if let device = outputDevices.first(where: { $0.id == deviceID }) {
-                originalSystemOutputDevice = device
-                dlog("Saved original system output: \(device.name)", category: .routing)
-            }
-        }
-    }
+        guard status == noErr,
+              let device = outputDevices.first(where: { $0.id == deviceID }) else { return }
 
-    func restoreOriginalSystemOutputDevice() {
-        guard let originalDevice = originalSystemOutputDevice else {
-            dlog("No original system output device saved", level: .warning, category: .routing)
+        // Never save BlackHole as the "original" output. If a previous session
+        // crashed while routing, the system default is already BlackHole, and
+        // saving it would make restore a no-op — leaving the user with no sound.
+        if device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) {
+            dlog("System default is BlackHole; recovering original from persisted UID", category: .routing)
+            if let savedUID = UserDefaults.standard.string(forKey: originalOutputUIDKey),
+               let recovered = outputDevices.first(where: { $0.uid == savedUID }) {
+                originalSystemOutputDevice = recovered
+            }
             return
         }
 
-        dlog("Restoring original system output: \(originalDevice.name)", category: .routing)
-        setAsDefaultOutputDevice(originalDevice)
+        originalSystemOutputDevice = device
+        UserDefaults.standard.set(device.uid, forKey: originalOutputUIDKey)
+        dlog("Saved original system output: \(device.name)", category: .routing)
+    }
+
+    func restoreOriginalSystemOutputDevice() {
+        if let originalDevice = originalSystemOutputDevice {
+            dlog("Restoring original system output: \(originalDevice.name)", category: .routing)
+            setAsDefaultOutputDevice(originalDevice)
+            return
+        }
+
+        // Fallback: recover by persisted UID (e.g. after a crash left no in-memory value).
+        if let savedUID = UserDefaults.standard.string(forKey: originalOutputUIDKey),
+           let recovered = outputDevices.first(where: {
+               $0.uid == savedUID &&
+                   !$0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
+           }) {
+            dlog("Restoring original system output by UID: \(recovered.name)", category: .routing)
+            setAsDefaultOutputDevice(recovered)
+            return
+        }
+
+        // Last resort: any non-BlackHole physical output so the user keeps hearing sound.
+        if let physical = findBestPhysicalOutputDevice() {
+            dlog(
+                "No saved original; falling back to physical output: \(physical.name)",
+                level: .warning,
+                category: .routing
+            )
+            setAsDefaultOutputDevice(physical)
+        } else {
+            dlog(
+                "No original system output device saved and no physical fallback found",
+                level: .warning,
+                category: .routing
+            )
+        }
     }
 
     // MARK: - BlackHole Detection

@@ -18,6 +18,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WelcomeWindowController.shared.showWelcome()
         }
     }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // While EQ routing is active the system default output is BlackHole.
+        // Restore the real output device before quitting, otherwise the user is
+        // left with no sound until they fix it manually in System Settings.
+        // AudioObjectSetPropertyData is synchronous, so .terminateNow is safe.
+        if CoreAudioEngine.shared.isRunning {
+            AudioRouter.shared.disableEQRouting()
+        }
+        return .terminateNow
+    }
 }
 
 @main
