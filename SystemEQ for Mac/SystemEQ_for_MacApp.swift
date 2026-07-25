@@ -156,10 +156,6 @@ struct SystemEQ_for_MacApp: App {
                     if audioRouter.blackHoleDetected {
                         dlog("\(AppConstants.DeviceNames.blackHole) detected", category: .routing)
                         dlog("Routing will enable when you toggle 'Enable EQ'", category: .routing)
-                        // Media keys + master volume
-                        MediaKeyMonitor.shared.start()
-                        let savedGain = UserDefaults.standard.double(forKey: "outputGain")
-                        CoreAudioEngine.shared.setMainGainDb(Float(savedGain))
                     } else {
                         dlog(
                             "\(AppConstants.DeviceNames.blackHole) not detected - please install for system-wide EQ",

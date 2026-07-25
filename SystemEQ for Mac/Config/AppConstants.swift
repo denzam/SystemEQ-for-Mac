@@ -90,18 +90,6 @@ public enum AppConstants {
         ]
     }
 
-    // MARK: - Server Configuration
-
-    public struct Server {
-        public static let port = 5555
-        public static let host = "127.0.0.1"
-        public static let endpoint = "/equalize"
-
-        public var url: String {
-            "http://\(Server.host):\(Server.port)"
-        }
-    }
-
     // MARK: - EQ Configuration
 
     public enum EQ {

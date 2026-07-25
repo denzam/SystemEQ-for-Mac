@@ -105,7 +105,6 @@ public final class CoreAudioEngine: ObservableObject {
         seq_atomic_ptr_store_release(_vdspFilterAtomic, newPtr)
     }
 
-    private var currentPreset: EQPreset?
     fileprivate var currentSampleRate: Double = 48000.0
     fileprivate var channelCount: UInt32 = 2
 
@@ -114,11 +113,6 @@ public final class CoreAudioEngine: ObservableObject {
     private let eqFrequencies: [Float] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
     fileprivate var preampGain: Float = 0.0
-
-    // Main volume (post-EQ)
-    @Published public var mainGainDb: Float = 0.0
-    @Published public var muted: Bool = false
-    fileprivate var mainVolumeLinear: Float = 1.0
 
     // Reusable buffer to avoid allocation in render callback
     fileprivate var inputBufferList: UnsafeMutablePointer<AudioBufferList>?
@@ -763,36 +757,6 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - EQ Application
 
-    /// Apply EQ preset (supports both optimized and standard filter chains)
-    public func applyEQPreset(_ preset: EQPreset) {
-        // Detect sample rate from audio format
-        self.preampGain = preset.preampGain
-        self.currentPreset = preset
-
-        // Automatically use standard filters for now (optimized version not implemented yet)
-        self.filterChain = BiquadFilterChain(filterCount: preset.parametricBands.count)
-        self.filterChain?.preamp = preset.preampGain // Set preamp in filter chain
-        let frequencies = preset.parametricBands.map(\.frequency)
-        let gains = preset.parametricBands.map(\.gain)
-        let qs = preset.parametricBands.map(\.q)
-        let types = preset.parametricBands.map(\.filterType)
-        self.filterChain?.configureBands(
-            frequencies,
-            gains: gains.map { Float($0) },
-            qs: qs.map { Float($0) },
-            types: types,
-            sampleRate: Float(currentSampleRate)
-        )
-
-        dlog(
-            "🎛️ Applied preset '\(preset.displayName)' with \(preset.parametricBands.count) biquad filters",
-            category: .engine
-        )
-        dlog("   Sample rate: \(currentSampleRate) Hz", category: .engine)
-        dlog("   Using standard filters (optimized version not implemented yet)", category: .engine)
-        dlog("   Preamp: \(preampGain) dB", category: .engine)
-    }
-
     /// Apply fixed-band EQ (10 bands)
     public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0) {
         self.preampGain = preamp
@@ -918,7 +882,6 @@ public final class CoreAudioEngine: ObservableObject {
     public func clearEQ() {
         self.filterChain = nil
         self.vdspFilter = nil
-        self.currentPreset = nil
         self.preampGain = 0.0
         self.eqGains = Array(repeating: 0.0, count: 10)
         dlog("🎛️ EQ cleared", category: .engine)
@@ -1207,27 +1170,6 @@ public final class CoreAudioEngine: ObservableObject {
     public func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         dlog("🎛️ CoreAudioEngine EQ \(enabled ? "enabled" : "bypassed")", category: .engine)
-    }
-
-    // MARK: - Main Volume Control (post-EQ)
-
-    public func setMainGainDb(_ gainDb: Float) {
-        let clamped = max(-40.0, min(12.0, gainDb))
-        mainGainDb = clamped
-        mainVolumeLinear = powf(10.0, clamped / 20.0)
-        NotificationCenter.default.post(name: NSNotification.Name("MainVolumeChanged"), object: nil, userInfo: [
-            "gainDb": mainGainDb,
-            "muted": muted
-        ])
-    }
-
-    public func setMuted(_ value: Bool) {
-        muted = value
-        dlog(value ? "Muted" : "Unmuted", category: .audio)
-        NotificationCenter.default.post(name: NSNotification.Name("MainVolumeChanged"), object: nil, userInfo: [
-            "gainDb": mainGainDb,
-            "muted": muted
-        ])
     }
 
     public func startTestTone(_ freq: Float = 440.0) {
