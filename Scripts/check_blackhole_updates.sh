@@ -47,7 +47,17 @@ echo "    Direct PKG:  $PKG_URL (HTTP 200)"
 
 if [[ "${1:-}" == "--update" ]]; then
     echo "✍️  Updating AppConstants.swift..."
+    MATCH_COUNT=$(grep -Ec 'bundledVersion[[:space:]]*=[[:space:]]*"' "$CONSTANTS_FILE")
+    if [[ "$MATCH_COUNT" -ne 1 ]]; then
+        echo "❌ Expected exactly one bundledVersion declaration, found $MATCH_COUNT."
+        exit 1
+    fi
     sed -i '' -E "s/(bundledVersion[[:space:]]*=[[:space:]]*)\"[^\"]+\"/\1\"$LATEST\"/" "$CONSTANTS_FILE"
+    UPDATED=$(grep -E 'bundledVersion[[:space:]]*=[[:space:]]*"' "$CONSTANTS_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
+    if [[ "$UPDATED" != "$LATEST" ]]; then
+        echo "❌ Update failed: expected $LATEST, found $UPDATED."
+        exit 1
+    fi
     echo "✅ Updated to $LATEST. Review the diff and commit."
     git -C "$REPO_ROOT" diff -- "$CONSTANTS_FILE"
 else

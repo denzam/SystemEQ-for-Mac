@@ -278,7 +278,9 @@ import Foundation
         file: String = #file,
         function: String = #function,
         line: Int = #line
-    ) {}
+    ) {
+        dlog(message(), level: level, category: .audio, file: file, function: function, line: line)
+    }
     @inline(__always)
     func engineLog(
         _ message: @autoclosure () -> String,
@@ -286,7 +288,9 @@ import Foundation
         file: String = #file,
         function: String = #function,
         line: Int = #line
-    ) {}
+    ) {
+        dlog(message(), level: level, category: .engine, file: file, function: function, line: line)
+    }
     @inline(__always)
     func eqLog(
         _ message: @autoclosure () -> String,
@@ -294,7 +298,9 @@ import Foundation
         file: String = #file,
         function: String = #function,
         line: Int = #line
-    ) {}
+    ) {
+        dlog(message(), level: level, category: .eq, file: file, function: function, line: line)
+    }
     @inline(__always)
     nonisolated func errorLog(
         _ message: @autoclosure () -> String,

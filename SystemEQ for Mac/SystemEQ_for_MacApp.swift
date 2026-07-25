@@ -9,8 +9,12 @@ import AVFoundation
 import Foundation
 import SwiftUI
 
+private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !isRunningUnitTests else { return }
+
         StatusItemController.shared.install()
 
         guard !UserDefaults.standard.bool(forKey: "hasCompletedSetup") else { return }
@@ -25,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // left with no sound until they fix it manually in System Settings.
         // AudioObjectSetPropertyData is synchronous, so .terminateNow is safe.
         if AudioRouter.shared.isRoutingOwned {
-            AudioRouter.shared.disableEQRouting()
+            AudioRouter.shared.disableEQRouting(persistEnabledState: false)
         }
         return .terminateNow
     }
@@ -41,9 +45,13 @@ struct SystemEQ_for_MacApp: App {
 
     init() {
         #if DEBUG
-            EQDatabaseTest.runTests()
+            if !isRunningUnitTests {
+                EQDatabaseTest.runTests()
+            }
         #endif
-        WindowTitleManager.shared.setupObserver()
+        if !isRunningUnitTests {
+            WindowTitleManager.shared.setupObserver()
+        }
     }
 
     var body: some Scene {
@@ -56,6 +64,8 @@ struct SystemEQ_for_MacApp: App {
                 .background(WindowAccessor(id: "main", localizationKey: .mainWindowTitle))
                 .dynamicWindowTitle(id: "main", key: .mainWindowTitle)
                 .task {
+                    guard !isRunningUnitTests else { return }
+
                     // First, perform the async device scan to ensure the list is ready.
                     dlog("Scanning for audio devices...", category: .routing)
                     await audioRouter.refreshDevices()

@@ -54,3 +54,6 @@
 --disable redundantSelf
 --disable trailingCommas
 --disable wrapMultilineStatementBraces
+--disable wrapIfStatementBodies
+--disable docComments
+--disable blankLinesBetweenScopes

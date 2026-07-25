@@ -79,8 +79,17 @@ class EQDatabase {
         // Open read-only (the DB is a bundled resource) with a full mutex so
         // concurrent queries from different threads are serialized inside SQLite.
         let openFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(bundleURL.path, &db, openFlags, nil) == SQLITE_OK else {
-            dlog("⚠️ Cannot open EQDatabase - AutoEQ features disabled", level: .warning, category: .database)
+        let openStatus = sqlite3_open_v2(bundleURL.path, &db, openFlags, nil)
+        guard openStatus == SQLITE_OK else {
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
+            dlog(
+                "⚠️ Cannot open EQDatabase (\(openStatus)): \(message)",
+                level: .warning,
+                category: .database
+            )
+            if let db {
+                sqlite3_close(db)
+            }
             self.db = nil
             return
         }
@@ -155,18 +164,30 @@ class EQDatabase {
         """
 
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        let prepareStatus = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard prepareStatus == SQLITE_OK else {
+            logSQLiteError("FTS prepare", status: prepareStatus)
             return []
         }
         defer { sqlite3_finalize(statement) }
 
-        sqlite3_bind_text(statement, 1, ftsQuery, -1, SQLITE_TRANSIENT)
+        let bindStatus = sqlite3_bind_text(statement, 1, ftsQuery, -1, SQLITE_TRANSIENT)
+        guard bindStatus == SQLITE_OK else {
+            logSQLiteError("FTS bind", status: bindStatus)
+            return []
+        }
 
         var results: [DatabaseHeadphone] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var stepStatus = sqlite3_step(statement)
+        while stepStatus == SQLITE_ROW {
             if let headphone = parseHeadphoneRow(statement) {
                 results.append(headphone)
             }
+            stepStatus = sqlite3_step(statement)
+        }
+        if stepStatus != SQLITE_DONE {
+            logSQLiteError("FTS step", status: stepStatus)
+            return []
         }
 
         return results
@@ -187,26 +208,45 @@ class EQDatabase {
         """
 
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        let prepareStatus = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard prepareStatus == SQLITE_OK else {
+            logSQLiteError("LIKE prepare", status: prepareStatus)
             return []
         }
         defer { sqlite3_finalize(statement) }
 
         let likePattern = "%\(query)%"
-        likePattern.withCString { cString in
-            sqlite3_bind_text(statement, 1, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(statement, 2, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(statement, 3, cString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        }
-
-        var results: [DatabaseHeadphone] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            if let headphone = parseHeadphoneRow(statement) {
-                results.append(headphone)
+        for index in 1...3 {
+            let bindStatus = sqlite3_bind_text(statement, Int32(index), likePattern, -1, SQLITE_TRANSIENT)
+            guard bindStatus == SQLITE_OK else {
+                logSQLiteError("LIKE bind", status: bindStatus)
+                return []
             }
         }
 
+        var results: [DatabaseHeadphone] = []
+        var stepStatus = sqlite3_step(statement)
+        while stepStatus == SQLITE_ROW {
+            if let headphone = parseHeadphoneRow(statement) {
+                results.append(headphone)
+            }
+            stepStatus = sqlite3_step(statement)
+        }
+        if stepStatus != SQLITE_DONE {
+            logSQLiteError("LIKE step", status: stepStatus)
+            return []
+        }
+
         return results
+    }
+
+    private func logSQLiteError(_ operation: String, status: Int32) {
+        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "database unavailable"
+        dlog(
+            "SQLite \(operation) failed (\(status)): \(message)",
+            level: .error,
+            category: .database
+        )
     }
 
     private func parseHeadphoneRow(_ statement: OpaquePointer?) -> DatabaseHeadphone? {

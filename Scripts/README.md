@@ -55,7 +55,7 @@ swift generate_autoeq_index.swift
 Один рядок у [SystemEQ for Mac/Config/AppConstants.swift](../SystemEQ%20for%20Mac/Config/AppConstants.swift):
 
 ```swift
-public static let bundledVersion = "0.6.1"
+public static let bundledVersion = "0.7.1"
 ```
 
 Всі URL (прямий .pkg, Homebrew, UI-тексти) будуються з цієї однієї константи.

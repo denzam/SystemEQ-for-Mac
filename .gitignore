@@ -187,8 +187,6 @@ dist/
 # Internal docs (not for public)
 Docs/internal/
 
-.claude/
-
 # Coverage artifacts
 default.profraw
 *.profraw

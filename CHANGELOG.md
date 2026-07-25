@@ -4,6 +4,23 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-07-25
+
+Reliability, security, and release-readiness update.
+
+### Fixed
+- Prevented high idle CPU usage caused by app-wide UI updates from the peak meter
+- Restored EQ routing safely after sleep/wake, output-device disconnects, and device replugging
+- Preserved the real system output and original device sample rates when routing stops or the app quits
+- Hardened ProjectM IPC against stale connections, descriptor reuse, partial writes, and cross-session responses
+- Fixed FTS5 searches for headphone names containing punctuation
+- Restored warnings and errors to Release-build logging
+
+### Changed
+- Updated BlackHole integration to 0.7.1 and made its update checker fail safely
+- Added release tests and version verification to the GitHub Actions release workflow
+- Standardized contributor instructions for any AI-assisted or manual workflow
+
 ## [1.1.0] — 2026-06-13
 
 Preset persistence, app-wide tooltips, and a major visualizer overhaul.

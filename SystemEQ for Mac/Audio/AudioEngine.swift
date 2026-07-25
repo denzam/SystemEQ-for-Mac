@@ -217,7 +217,11 @@ public final class AudioEngine: ObservableObject {
             // so filters exist before routing starts pulling audio).
             syncToCoreAudioEngineImmediate()
             // Then enable routing
-            AudioRouter.shared.enableEQRouting()
+            guard AudioRouter.shared.enableEQRouting() else {
+                CoreAudioEngine.shared.setEnabled(false)
+                UserDefaults.standard.set(false, forKey: "eqWasEnabled")
+                return
+            }
         } else {
             AudioRouter.shared.disableEQRouting()
         }

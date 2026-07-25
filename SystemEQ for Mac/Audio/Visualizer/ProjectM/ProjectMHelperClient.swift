@@ -99,8 +99,18 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Private Properties
 
     private var helperProcess: Process?
+    private var helperGeneration: UInt64 = 0
     private var socketPath: String?
     private var readSource: DispatchSourceRead?
+
+    private final class ResponseBuffer {
+        var data = Data()
+    }
+
+    private final class SocketPathBuffer {
+        nonisolated(unsafe) var data = Data()
+        nonisolated(unsafe) var foundPath = false
+    }
 
     private let ipcQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)
     /// Окрема черга для читання відповідей: інакше безперервний потік аудіо-фреймів на ipcQueue
@@ -109,18 +119,78 @@ final class ProjectMHelperClient: ObservableObject {
 
     // Thread-safe socket access (nonisolated for background queue access)
     nonisolated(unsafe) private var _clientSocket: Int32 = -1
+    nonisolated(unsafe) private var _socketGeneration: UInt64 = 0
     nonisolated private let socketLock = NSLock()
 
-    nonisolated private func getSocket() -> Int32 {
+    nonisolated private func socketSnapshot() -> (socket: Int32, generation: UInt64) {
         socketLock.lock()
         defer { socketLock.unlock() }
-        return _clientSocket
+        return (_clientSocket, _socketGeneration)
     }
 
-    nonisolated private func setSocket(_ value: Int32) {
+    nonisolated private func socketLease() -> (socket: Int32, original: Int32, generation: UInt64)? {
         socketLock.lock()
+        defer { socketLock.unlock() }
+        guard _clientSocket >= 0 else { return nil }
+        let leasedSocket = dup(_clientSocket)
+        guard leasedSocket >= 0 else { return nil }
+        return (leasedSocket, _clientSocket, _socketGeneration)
+    }
+
+    nonisolated private func installSocket(_ value: Int32) -> UInt64 {
+        socketLock.lock()
+        _socketGeneration &+= 1
         _clientSocket = value
+        let generation = _socketGeneration
         socketLock.unlock()
+        return generation
+    }
+
+    nonisolated private func socketIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
+        socketLock.lock()
+        defer { socketLock.unlock() }
+        return _clientSocket == socket && _socketGeneration == generation
+    }
+
+    nonisolated private func invalidateSocket() -> Int32 {
+        socketLock.lock()
+        let socket = _clientSocket
+        _clientSocket = -1
+        _socketGeneration &+= 1
+        socketLock.unlock()
+        return socket
+    }
+
+    nonisolated private static func writeAll(
+        socket: Int32,
+        baseAddress: UnsafeRawPointer,
+        count: Int
+    ) -> Bool {
+        var sent = 0
+        while sent < count {
+            let written = Darwin.write(socket, baseAddress.advanced(by: sent), count - sent)
+            if written > 0 {
+                sent += written
+            } else if written < 0, errno == EINTR {
+                continue
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+    nonisolated private func handleSocketWriteFailure(
+        leasedSocket: Int32,
+        originalSocket: Int32,
+        generation: UInt64
+    ) {
+        shutdown(leasedSocket, SHUT_RDWR)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.socketIsCurrent(originalSocket, generation: generation) else { return }
+            self.disconnectSocket()
+        }
     }
 
     private var statusUpdateTimer: Timer?
@@ -129,7 +199,7 @@ final class ProjectMHelperClient: ObservableObject {
     private let audioRingCapacity = 8192 // must be power of 2
     nonisolated(unsafe) private var _audioRingBuffer: UnsafeMutablePointer<Float>
     nonisolated(unsafe) private var _audioWriteIdx: SEQAtomicInt32 = seq_atomic_int32_make(0)
-    private var _audioReadIdx: Int32 = 0 // only accessed from ipcQueue
+    nonisolated(unsafe) private var _audioReadIdx: SEQAtomicInt32 = seq_atomic_int32_make(0)
     private var audioSendTimer: DispatchSourceTimer?
 
     // Pre-allocated send buffer (only touched from ipcQueue inside audioSendTimer handler)
@@ -145,6 +215,8 @@ final class ProjectMHelperClient: ObservableObject {
 
     func start(frame: NSRect) {
         guard !isRunning else { return }
+        helperGeneration &+= 1
+        let generation = helperGeneration
 
         // Find helper app in bundle
         guard let helperURL = findHelperApp() else {
@@ -175,26 +247,18 @@ final class ProjectMHelperClient: ObservableObject {
             dlog("✅ ProjectMHelper launched (PID: \(process.processIdentifier))", category: .audio)
 
             // Monitor process termination (user closes window).
-            // Close socket synchronously so pending writes fail fast instead of blocking/retrying.
-            // SO_NOSIGPIPE already prevents the fatal signal; this just avoids wasted work until MainActor cleanup
-            // runs.
-            process.terminationHandler = { [weak self] _ in
-                if let self {
-                    let sock = self.getSocket()
-                    if sock >= 0 {
-                        close(sock)
-                        self.setSocket(-1)
-                    }
-                }
+            process.terminationHandler = { [weak self] terminatedProcess in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self,
+                          self.helperGeneration == generation,
+                          self.helperProcess === terminatedProcess else { return }
                     dlog("🛑 ProjectMHelper terminated by user", category: .audio)
                     self.cleanupAfterTermination()
                 }
             }
 
             // Read socket path from helper's stdout
-            readSocketPath(from: pipe)
+            readSocketPath(from: pipe, generation: generation)
 
             // Connect to audio engine
             connectToAudioEngine()
@@ -208,6 +272,7 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     private func cleanupAfterTermination() {
+        helperGeneration &+= 1
         // Stop audio sending
         audioSendTimer?.cancel()
         audioSendTimer = nil
@@ -219,12 +284,7 @@ final class ProjectMHelperClient: ObservableObject {
         // Disconnect from audio
         disconnectFromAudioEngine()
 
-        // Close socket
-        let sock = getSocket()
-        if sock >= 0 {
-            close(sock)
-            setSocket(-1)
-        }
+        disconnectSocket()
 
         helperProcess = nil
         isRunning = false
@@ -233,6 +293,7 @@ final class ProjectMHelperClient: ObservableObject {
 
     func stop() {
         guard isRunning else { return }
+        helperGeneration &+= 1
 
         // Stop audio sending
         audioSendTimer?.cancel()
@@ -248,12 +309,7 @@ final class ProjectMHelperClient: ObservableObject {
         // Send quit command
         sendCommand("QUIT")
 
-        // Close socket
-        let sock = getSocket()
-        if sock >= 0 {
-            close(sock)
-            setSocket(-1)
-        }
+        disconnectSocket()
 
         // Terminate helper if still running
         if let process = helperProcess, process.isRunning {
@@ -302,8 +358,23 @@ final class ProjectMHelperClient: ObservableObject {
 
     // MARK: - Socket Connection
 
-    private func readSocketPath(from pipe: Pipe) {
+    private func disconnectSocket() {
+        let source = readSource
+        readSource = nil
+        let socket = invalidateSocket()
+        if socket >= 0 {
+            shutdown(socket, SHUT_RDWR)
+        }
+        if let source {
+            source.cancel()
+        } else if socket >= 0 {
+            close(socket)
+        }
+    }
+
+    private func readSocketPath(from pipe: Pipe, generation: UInt64) {
         let fileHandle = pipe.fileHandleForReading
+        let accumulator = SocketPathBuffer()
 
         // Use async reading with notification - don't block with readDataToEndOfFile
         fileHandle.readabilityHandler = { [weak self] handle in
@@ -314,22 +385,29 @@ final class ProjectMHelperClient: ObservableObject {
                 return
             }
 
-            guard let output = String(data: data, encoding: .utf8) else { return }
-
-            // Parse SOCKET: line
-            for line in output.components(separatedBy: "\n") where line.hasPrefix("SOCKET:") {
+            accumulator.data.append(data)
+            while let newline = accumulator.data.firstIndex(of: 0x0A) {
+                let lineData = accumulator.data[..<newline]
+                accumulator.data.removeSubrange(...newline)
+                guard let line = String(data: lineData, encoding: .utf8),
+                      !accumulator.foundPath,
+                      line.hasPrefix("SOCKET:") else { continue }
+                accumulator.foundPath = true
                 let path = String(line.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
-                handle.readabilityHandler = nil // Stop reading after we get socket path
 
                 DispatchQueue.main.async {
-                    self?.connectToSocket(path: path)
+                    guard let self,
+                          self.helperGeneration == generation,
+                          self.helperProcess?.isRunning == true else { return }
+                    self.connectToSocket(path: path, generation: generation)
                 }
                 break
             }
         }
     }
 
-    private func connectToSocket(path: String) {
+    private func connectToSocket(path: String, generation: UInt64) {
+        guard helperGeneration == generation else { return }
         socketPath = path
 
         ipcQueue.async { [weak self] in
@@ -373,8 +451,14 @@ final class ProjectMHelperClient: ObservableObject {
             setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
             DispatchQueue.main.async {
-                self.setSocket(sock)
-                self.startReadingResponses()
+                guard self.helperGeneration == generation,
+                      self.helperProcess?.isRunning == true else {
+                    close(sock)
+                    return
+                }
+                self.disconnectSocket()
+                let generation = self.installSocket(sock)
+                self.startReadingResponses(socket: sock, generation: generation)
                 self.startAudioSending()
                 // Відновити збережену якість (helper стартує з High)
                 if self.selectedQuality != "High" {
@@ -385,67 +469,79 @@ final class ProjectMHelperClient: ObservableObject {
         }
     }
 
-    private func startReadingResponses() {
-        let sock = getSocket()
-        guard sock >= 0 else { return }
+    private func startReadingResponses(socket: Int32, generation: UInt64) {
+        let accumulator = ResponseBuffer()
+        let source = DispatchSource.makeReadSource(fileDescriptor: socket, queue: readQueue)
+        readSource = source
 
-        readSource = DispatchSource.makeReadSource(fileDescriptor: sock, queue: readQueue)
-
-        readSource?.setEventHandler { [weak self] in
-            self?.readResponse()
+        source.setEventHandler { [weak self] in
+            self?.readResponse(socket: socket, generation: generation, accumulator: accumulator)
         }
 
-        readSource?.setCancelHandler { [weak self] in
-            if let self, self.getSocket() >= 0 {
-                close(self.getSocket())
-            }
-            self?.setSocket(-1)
+        source.setCancelHandler {
+            close(socket)
         }
 
-        readSource?.resume()
+        source.resume()
     }
 
-    /// Байтовий акумулятор: великий LIST: JSON приходить кількома чанками, а чанк може
-    /// різати multibyte UTF-8 (кирилиця в назвах) — тому склеюємо на рівні байтів, не String.
-    private var responseAccumulator = Data()
-
-    private func readResponse() {
-        let sock = getSocket()
-        guard sock >= 0 else { return }
+    private func readResponse(socket: Int32, generation: UInt64, accumulator: ResponseBuffer) {
+        guard socketIsCurrent(socket, generation: generation) else { return }
+        var connectionClosed = false
+        defer {
+            if connectionClosed {
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.socketIsCurrent(socket, generation: generation) else { return }
+                    self.disconnectSocket()
+                }
+            }
+        }
         var buffer = [UInt8](repeating: 0, count: 65536)
         // Дренуємо весь доступний буфер сокета за одну подію: великий LIST (~1 МБ) приходить
         // багатьма чанками, а аудіо на ipcQueue не дає read-події частити.
         while true {
-            let bytesRead = read(sock, &buffer, buffer.count)
-            guard bytesRead > 0 else { break }
-            responseAccumulator.append(contentsOf: buffer[0..<bytesRead])
+            guard socketIsCurrent(socket, generation: generation) else { return }
+            let bytesRead = recv(socket, &buffer, buffer.count, MSG_DONTWAIT)
+            if bytesRead < 0, errno == EINTR {
+                continue
+            }
+            if bytesRead < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                break
+            }
+            guard bytesRead > 0 else {
+                connectionClosed = true
+                break
+            }
+            accumulator.data.append(contentsOf: buffer[0..<bytesRead])
             if bytesRead < buffer.count { break }
         }
 
-        guard !responseAccumulator.isEmpty else { return }
+        guard !accumulator.data.isEmpty else { return }
 
         // Обробляємо лише завершені рядки (до \n); хвіст лишаємо в буфері.
-        while let nl = responseAccumulator.firstIndex(of: 0x0A) {
-            let lineData = responseAccumulator[responseAccumulator.startIndex..<nl]
-            responseAccumulator = Data(responseAccumulator[(nl + 1)...])
+        while let nl = accumulator.data.firstIndex(of: 0x0A) {
+            let lineData = accumulator.data[accumulator.data.startIndex..<nl]
+            accumulator.data = Data(accumulator.data[(nl + 1)...])
             if let line = String(data: lineData, encoding: .utf8) {
-                processLine(line)
+                processLine(line, socket: socket, generation: generation)
             }
         }
     }
 
-    private func processLine(_ line: String) {
+    private func processLine(_ line: String, socket: Int32, generation: UInt64) {
         if line.hasPrefix("STATUS:") {
             let jsonStr = String(line.dropFirst(7))
             guard let data = jsonStr.data(using: .utf8),
                   let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             DispatchQueue.main.async { [weak self] in
-                if let name = status["presetName"] as? String { self?.currentPresetName = name }
-                if let count = status["presetCount"] as? Int { self?.presetCount = count }
-                if let category = status["category"] as? String { self?.currentCategory = category }
-                if let weight = status["weight"] as? String { self?.currentWeight = weight }
-                if let categories = status["categories"] as? [String] { self?.availableCategories = categories }
-                if let fps = status["fps"] as? Int { self?.currentFPS = fps }
+                guard let self, self.socketIsCurrent(socket, generation: generation) else { return }
+                if let name = status["presetName"] as? String { self.currentPresetName = name }
+                if let count = status["presetCount"] as? Int { self.presetCount = count }
+                if let category = status["category"] as? String { self.currentCategory = category }
+                if let weight = status["weight"] as? String { self.currentWeight = weight }
+                if let categories = status["categories"] as? [String] { self.availableCategories = categories }
+                if let fps = status["fps"] as? Int { self.currentFPS = fps }
             }
         } else if line.hasPrefix("LIST:") {
             let jsonStr = String(line.dropFirst(5))
@@ -460,7 +556,8 @@ final class ProjectMHelperClient: ObservableObject {
                 return VizPreset(name: name, category: category, index: index)
             }
             DispatchQueue.main.async { [weak self] in
-                self?.presetList = list
+                guard let self, self.socketIsCurrent(socket, generation: generation) else { return }
+                self.presetList = list
             }
         }
     }
@@ -468,14 +565,24 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Commands
 
     nonisolated func sendCommand(_ command: String) {
-        let sock = getSocket()
-        guard sock >= 0 else { return }
-
-        ipcQueue.async {
-            guard let data = (command + "\n").data(using: .utf8) else { return }
+        ipcQueue.async { [weak self] in
+            guard let self,
+                  let connection = self.socketLease(),
+                  let data = (command + "\n").data(using: .utf8) else { return }
+            defer { close(connection.socket) }
             data.withUnsafeBytes { buffer in
-                if let baseAddress = buffer.baseAddress {
-                    write(sock, baseAddress, buffer.count)
+                guard let baseAddress = buffer.baseAddress else { return }
+                guard Self.writeAll(
+                    socket: connection.socket,
+                    baseAddress: baseAddress,
+                    count: buffer.count
+                ) else {
+                    self.handleSocketWriteFailure(
+                        leasedSocket: connection.socket,
+                        originalSocket: connection.original,
+                        generation: connection.generation
+                    )
+                    return
                 }
             }
         }
@@ -521,21 +628,30 @@ final class ProjectMHelperClient: ObservableObject {
     ) {
         let maxSamples = min(frameCount, 1024)
         let mask = Int32(audioRingCapacity - 1)
+        let sampleCount = Int32(2 * maxSamples)
+        let write = seq_atomic_int32_load(&_audioWriteIdx)
+        let read = seq_atomic_int32_load(&_audioReadIdx)
+        let used = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
+        guard used + Int(sampleCount) <= audioRingCapacity else { return }
         // Single producer: write samples first, publish the index once after —
         // one atomic RMW per callback instead of two per sample.
-        let base = seq_atomic_int32_load(&_audioWriteIdx)
+        let base = write
         for i in 0..<maxSamples {
             let idx = base &+ Int32(2 * i)
             _audioRingBuffer[Int(idx & mask)] = left[i]
             _audioRingBuffer[Int((idx &+ 1) & mask)] = right[i]
         }
-        _ = seq_atomic_int32_fetch_add(&_audioWriteIdx, Int32(2 * maxSamples))
+        _ = seq_atomic_int32_fetch_add(&_audioWriteIdx, sampleCount)
     }
 
     private func startAudioSending() {
+        audioSendTimer?.cancel()
+        audioSendTimer = nil
+
         // Pre-allocate reusable send buffer: 1 byte marker + 4 bytes length + up to 4096 floats
         let maxFrameBytes = 1 + 4 + 4096 * MemoryLayout<Float>.size
-        _sendBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: maxFrameBytes)
+        let sendBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: maxFrameBytes)
+        _sendBuffer = sendBuffer
         _sendBufferCapacity = maxFrameBytes
 
         audioSendTimer = DispatchSource.makeTimerSource(queue: ipcQueue)
@@ -547,9 +663,9 @@ final class ProjectMHelperClient: ObservableObject {
 
         // Deallocate send buffer on ipcQueue after the timer fully stops — guarantees the handler isn't mid-flight.
         audioSendTimer?.setCancelHandler { [weak self] in
+            sendBuffer.deallocate()
             guard let self else { return }
-            if let buf = self._sendBuffer {
-                buf.deallocate()
+            if self._sendBuffer == sendBuffer {
                 self._sendBuffer = nil
                 self._sendBufferCapacity = 0
             }
@@ -562,12 +678,12 @@ final class ProjectMHelperClient: ObservableObject {
     ///   [0x00 marker][UInt32 LE length in bytes][raw Float samples]
     /// Marker 0x00 cannot appear in UTF-8 text commands so it is unambiguous at the stream level.
     private func sendAudioBuffer() {
-        let sock = getSocket()
-        guard sock >= 0 else { return }
+        guard let connection = socketLease() else { return }
+        defer { close(connection.socket) }
         guard let sendBuf = _sendBuffer else { return }
 
         let write = seq_atomic_int32_load(&_audioWriteIdx)
-        let read = _audioReadIdx
+        let read = seq_atomic_int32_load(&_audioReadIdx)
         let available = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
 
         guard available >= 512 else { return }
@@ -590,18 +706,23 @@ final class ProjectMHelperClient: ObservableObject {
         let payloadBase = UnsafeMutableRawPointer(sendBuf.advanced(by: 5))
         let floatSize = MemoryLayout<Float>.size
         for i in 0..<toRead {
-            var sample = _audioRingBuffer[Int(_audioReadIdx & mask)]
-            _audioReadIdx &+= 1
+            var sample = _audioRingBuffer[Int((read &+ Int32(i)) & mask)]
             payloadBase.advanced(by: i * floatSize).copyMemory(from: &sample, byteCount: floatSize)
         }
+        _ = seq_atomic_int32_fetch_add(&_audioReadIdx, Int32(toRead))
 
-        // Single write() — kernel handles partial writes by buffering in socket sndbuf.
-        // For SOCK_STREAM on AF_UNIX with this size (~16KB max) this is effectively atomic.
-        var bytesSent = 0
-        while bytesSent < totalBytes {
-            let n = Darwin.write(sock, sendBuf.advanced(by: bytesSent), totalBytes - bytesSent)
-            if n <= 0 { break } // EPIPE/EAGAIN — helper gone or socket full; drop frame
-            bytesSent += n
+        guard socketIsCurrent(connection.original, generation: connection.generation),
+              Self.writeAll(
+                  socket: connection.socket,
+                  baseAddress: UnsafeRawPointer(sendBuf),
+                  count: totalBytes
+              ) else {
+            handleSocketWriteFailure(
+                leasedSocket: connection.socket,
+                originalSocket: connection.original,
+                generation: connection.generation
+            )
+            return
         }
     }
 

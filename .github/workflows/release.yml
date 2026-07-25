@@ -40,6 +40,14 @@ jobs:
 
       - name: Build & Archive
         run: |
+          xcodebuild test \
+            -project "SystemEQ for Mac.xcodeproj" \
+            -scheme "SystemEQ for Mac" \
+            -configuration Debug \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+
           xcodebuild archive \
             -project "SystemEQ for Mac.xcodeproj" \
             -scheme "SystemEQ for Mac" \
@@ -52,6 +60,13 @@ jobs:
         run: |
           mkdir -p build/export
           cp -R "build/SystemEQ.xcarchive/Products/Applications/SystemEQ for Mac.app" build/export/
+
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+            "build/export/SystemEQ for Mac.app/Contents/Info.plist")
+          if [ "$APP_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::Tag/workflow version ${{ steps.version.outputs.version }} does not match app version $APP_VERSION"
+            exit 1
+          fi
 
       - name: Ad-hoc sign (no Apple Developer ID required)
         run: |
@@ -133,7 +148,7 @@ jobs:
             - Apple Silicon or Intel Mac
 
             ---
-            *Also available via Homebrew: `brew install --cask systemeq`*
+            *Also available via Homebrew: `brew install --cask denzam/systemeq/systemeq`*
           files: |
             build/SystemEQ-v${{ steps.version.outputs.version }}.dmg
             build/SystemEQ-v${{ steps.version.outputs.version }}.zip
@@ -151,6 +166,7 @@ jobs:
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/denzam/homebrew-systemeq.git" tap
           cd tap
 
+          cp ../Casks/systemeq.rb Casks/systemeq.rb
           sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/systemeq.rb
           sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/systemeq.rb
 

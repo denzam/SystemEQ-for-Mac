@@ -32,6 +32,8 @@ class IPCServer {
     private let socketPath: String
     private var serverSocket: Int32 = -1
     private var isRunning = false
+    private var serverGeneration: UInt64 = 0
+    private let stateLock = NSLock()
     private let controller: VisualizerController
 
     // Client socket is touched from listenQueue (accept/replace), readQueue
@@ -43,22 +45,40 @@ class IPCServer {
     private var _clientSocket: Int32 = -1
     private var _clientGeneration: UInt64 = 0
 
-    private func currentClientSocket() -> Int32 {
+    private func clientIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
         clientLock.lock()
         defer { clientLock.unlock() }
-        return _clientSocket
+        return _clientSocket == socket && _clientGeneration == generation
     }
 
-    private func closeClient(ifCurrent socket: Int32, generation: UInt64) {
+    private func withCurrentClient(
+        _ socket: Int32,
+        generation: UInt64,
+        perform action: () -> Void
+    ) {
+        clientLock.lock()
+        defer { clientLock.unlock() }
+        guard _clientSocket == socket, _clientGeneration == generation else { return }
+        action()
+    }
+
+    private func claimCurrentClient(_ socket: Int32, generation: UInt64) -> Bool {
+        clientLock.lock()
+        defer { clientLock.unlock() }
+        guard _clientSocket == socket, _clientGeneration == generation else { return false }
+        _clientSocket = -1
+        _clientGeneration &+= 1
+        return true
+    }
+
+    private func finishClient(socket: Int32, generation: UInt64) {
         clientLock.lock()
         let isCurrent = _clientGeneration == generation && _clientSocket == socket
         if isCurrent {
             _clientSocket = -1
         }
         clientLock.unlock()
-        if isCurrent {
-            close(socket)
-        }
+        close(socket)
     }
 
     /// Aligned landing area for incoming audio payloads (max 16384 bytes, enforced
@@ -91,13 +111,25 @@ class IPCServer {
         stop()
     }
 
+    private func serverState() -> (socket: Int32, running: Bool) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (serverSocket, isRunning)
+    }
+
+    private func serverIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return isRunning && serverSocket == socket && serverGeneration == generation
+    }
+
     func start() {
         // Remove existing socket file
         unlink(socketPath)
 
         // Create socket
-        serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard serverSocket >= 0 else {
+        let socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
             print("[IPCServer] Failed to create socket: \(errno)")
             return
         }
@@ -117,13 +149,13 @@ class IPCServer {
 
         let bindResult = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                bind(serverSocket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+                bind(socketFD, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
 
         guard bindResult == 0 else {
             print("[IPCServer] Failed to bind: \(errno)")
-            close(serverSocket)
+            close(socketFD)
             return
         }
 
@@ -131,19 +163,25 @@ class IPCServer {
         // normally leaves the socket world-connectable.
         if chmod(socketPath, 0o600) != 0 {
             print("[IPCServer] Failed to restrict socket permissions: \(errno)")
-            close(serverSocket)
+            close(socketFD)
             unlink(socketPath)
             return
         }
 
         // Listen
-        guard listen(serverSocket, 1) == 0 else {
+        guard listen(socketFD, 1) == 0 else {
             print("[IPCServer] Failed to listen: \(errno)")
-            close(serverSocket)
+            close(socketFD)
+            unlink(socketPath)
             return
         }
 
+        stateLock.lock()
+        serverGeneration &+= 1
+        let generation = serverGeneration
+        serverSocket = socketFD
         isRunning = true
+        stateLock.unlock()
         print("[IPCServer] Listening on \(socketPath)")
 
         // Print socket path to stdout for parent process
@@ -152,12 +190,17 @@ class IPCServer {
 
         // Accept connections in background
         listenQueue.async { [weak self] in
-            self?.acceptLoop()
+            self?.acceptLoop(socket: socketFD, generation: generation)
         }
     }
 
     func stop() {
+        stateLock.lock()
         isRunning = false
+        let server = serverSocket
+        serverSocket = -1
+        serverGeneration &+= 1
+        stateLock.unlock()
 
         clientLock.lock()
         let client = _clientSocket
@@ -165,12 +208,11 @@ class IPCServer {
         _clientGeneration &+= 1
         clientLock.unlock()
         if client >= 0 {
-            close(client)
+            shutdown(client, SHUT_RDWR)
         }
 
-        if serverSocket >= 0 {
-            close(serverSocket)
-            serverSocket = -1
+        if server >= 0 {
+            shutdown(server, SHUT_RDWR)
         }
 
         unlink(socketPath)
@@ -190,22 +232,31 @@ class IPCServer {
         return cred.cr_uid == getuid()
     }
 
-    private func acceptLoop() {
-        while isRunning {
+    private func acceptLoop(socket: Int32, generation: UInt64) {
+        defer { close(socket) }
+        while serverIsCurrent(socket, generation: generation) {
             var clientAddr = sockaddr_un()
             var clientAddrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
 
             let newClient = withUnsafeMutablePointer(to: &clientAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    accept(serverSocket, sockaddrPtr, &clientAddrLen)
+                    accept(socket, sockaddrPtr, &clientAddrLen)
                 }
             }
 
             guard newClient >= 0 else {
-                if isRunning {
+                if errno == EINTR {
+                    continue
+                }
+                if serverIsCurrent(socket, generation: generation) {
                     print("[IPCServer] Accept failed: \(errno)")
                 }
                 continue
+            }
+
+            guard serverIsCurrent(socket, generation: generation) else {
+                close(newClient)
+                break
             }
 
             // Only our own user may drive the visualizer. Closes the window between
@@ -229,7 +280,7 @@ class IPCServer {
             let generation = _clientGeneration
             clientLock.unlock()
             if previous >= 0 {
-                close(previous)
+                shutdown(previous, SHUT_RDWR)
             }
 
             print("[IPCServer] Client connected")
@@ -245,7 +296,7 @@ class IPCServer {
         var buffer = [UInt8](repeating: 0, count: 65536)
         var messageBuffer = Data()
 
-        while isRunning {
+        while serverState().running {
             let bytesRead = read(socket, &buffer, buffer.count)
 
             if bytesRead <= 0 {
@@ -264,15 +315,16 @@ class IPCServer {
             // Frame parser: stream is a mix of text commands (UTF-8 terminated by \n)
             // and binary audio frames ([0x00][UInt32 LE length][length bytes of Float samples]).
             // Byte 0x00 never appears in UTF-8 text, so we can disambiguate at the start of every frame.
-            guard parseFrames(&messageBuffer) else { break }
+            guard parseFrames(&messageBuffer, socket: socket, generation: generation) else { break }
         }
 
-        closeClient(ifCurrent: socket, generation: generation)
+        finishClient(socket: socket, generation: generation)
     }
 
     /// Returns false when the connection must be dropped (caller closes it).
-    private func parseFrames(_ messageBuffer: inout Data) -> Bool {
+    private func parseFrames(_ messageBuffer: inout Data, socket: Int32, generation: UInt64) -> Bool {
         while !messageBuffer.isEmpty {
+            guard clientIsCurrent(socket, generation: generation) else { return false }
             let firstByte = messageBuffer[messageBuffer.startIndex]
 
             if firstByte == 0x00 {
@@ -308,7 +360,9 @@ class IPCServer {
                         guard let src = raw.baseAddress else { return }
                         memcpy(dst, src, payloadLength)
                     }
-                    controller.addAudioSamples(dst, count: floatCount)
+                    withCurrentClient(socket, generation: generation) {
+                        controller.addAudioSamples(dst, count: floatCount)
+                    }
                 }
 
                 messageBuffer = Data(messageBuffer[payloadEnd...])
@@ -319,14 +373,14 @@ class IPCServer {
                 messageBuffer = Data(messageBuffer[(newlineIndex + 1)...])
 
                 if let message = String(data: messageData, encoding: .utf8) {
-                    processMessage(message)
+                    processMessage(message, socket: socket, generation: generation)
                 }
             }
         }
         return true
     }
 
-    private func processMessage(_ message: String) {
+    private func processMessage(_ message: String, socket: Int32, generation: UInt64) {
         let parts = message.split(separator: ":", maxSplits: 1)
         guard let commandStr = parts.first else { return }
 
@@ -335,23 +389,31 @@ class IPCServer {
         switch commandStr {
         case "NEXT":
             DispatchQueue.main.async { [weak self] in
-                self?.controller.nextPreset()
+                self?.withCurrentClient(socket, generation: generation) {
+                    self?.controller.nextPreset()
+                }
             }
 
         case "PREV":
             DispatchQueue.main.async { [weak self] in
-                self?.controller.previousPreset()
+                self?.withCurrentClient(socket, generation: generation) {
+                    self?.controller.previousPreset()
+                }
             }
 
         case "RAND":
             DispatchQueue.main.async { [weak self] in
-                self?.controller.randomPreset()
+                self?.withCurrentClient(socket, generation: generation) {
+                    self?.controller.randomPreset()
+                }
             }
 
         case "SELECT":
             if let arg = argument, let index = Int(arg) {
                 DispatchQueue.main.async { [weak self] in
-                    self?.controller.selectPreset(at: index)
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.selectPreset(at: index)
+                    }
                 }
             }
 
@@ -359,7 +421,9 @@ class IPCServer {
             if let arg = argument {
                 let enabled = arg == "1"
                 DispatchQueue.main.async { [weak self] in
-                    self?.controller.setShuffle(enabled)
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.setShuffle(enabled)
+                    }
                 }
             }
 
@@ -367,7 +431,9 @@ class IPCServer {
             if let arg = argument {
                 let locked = arg == "1"
                 DispatchQueue.main.async { [weak self] in
-                    self?.controller.setPresetLocked(locked)
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.setPresetLocked(locked)
+                    }
                 }
             }
 
@@ -376,7 +442,9 @@ class IPCServer {
                 let dims = arg.split(separator: ":")
                 if dims.count == 2, let w = Int(dims[0]), let h = Int(dims[1]) {
                     DispatchQueue.main.async { [weak self] in
-                        self?.controller.resize(width: w, height: h)
+                        self?.withCurrentClient(socket, generation: generation) {
+                            self?.controller.resize(width: w, height: h)
+                        }
                     }
                 }
             }
@@ -385,20 +453,24 @@ class IPCServer {
             let status = controller.getStatus()
             if let jsonData = try? JSONSerialization.data(withJSONObject: status),
                let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("STATUS:\(jsonString)")
+                sendResponse("STATUS:\(jsonString)", socket: socket, generation: generation)
             }
 
         case "CATEGORY":
             if let arg = argument {
                 DispatchQueue.main.async { [weak self] in
-                    self?.controller.setCategory(arg)
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.setCategory(arg)
+                    }
                 }
             }
 
         case "WEIGHT":
             if let arg = argument {
                 DispatchQueue.main.async { [weak self] in
-                    self?.controller.setWeight(arg)
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.setWeight(arg)
+                    }
                 }
             }
 
@@ -406,26 +478,30 @@ class IPCServer {
             // Без main.async: рендер крутиться на main RunLoop і на важкому пресеті (низький FPS)
             // команда висіла б у хвості черги хвилинами. setQuality лише виставляє стан+прапор,
             // GL чіпає тільки render-тред під замком.
-            if let arg = argument, let q = VisualizerController.VisualQuality(rawValue: arg) {
-                controller.setQuality(q)
+            if let arg = argument,
+               let quality = VisualizerController.VisualQuality(rawValue: arg) {
+                withCurrentClient(socket, generation: generation) {
+                    controller.setQuality(quality)
+                }
             }
 
         case "CATEGORIES":
             let categories = controller.getCategories()
             if let jsonData = try? JSONSerialization.data(withJSONObject: categories),
                let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("CATEGORIES:\(jsonString)")
+                sendResponse("CATEGORIES:\(jsonString)", socket: socket, generation: generation)
             }
 
         case "LIST":
             let list = controller.getPresetList()
             if let jsonData = try? JSONSerialization.data(withJSONObject: list),
                let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("LIST:\(jsonString)")
+                sendResponse("LIST:\(jsonString)", socket: socket, generation: generation)
             }
 
         case "QUIT":
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard self?.claimCurrentClient(socket, generation: generation) == true else { return }
                 NSApplication.shared.terminate(nil)
             }
 
@@ -434,9 +510,8 @@ class IPCServer {
         }
     }
 
-    private func sendResponse(_ message: String) {
-        let sock = currentClientSocket()
-        guard sock >= 0 else { return }
+    private func sendResponse(_ message: String, socket: Int32, generation: UInt64) {
+        guard clientIsCurrent(socket, generation: generation) else { return }
 
         let data = (message + "\n").data(using: .utf8)!
         // Повний запис у циклі: великий LIST (~1 МБ) не влазить у буфер сокета за один write,
@@ -446,10 +521,14 @@ class IPCServer {
             var sent = 0
             let total = raw.count
             while sent < total {
-                let n = write(sock, base.advanced(by: sent), total - sent)
+                guard clientIsCurrent(socket, generation: generation) else { return }
+                let n = write(socket, base.advanced(by: sent), total - sent)
                 if n > 0 {
                     sent += n
+                } else if n < 0, errno == EINTR {
+                    continue
                 } else {
+                    shutdown(socket, SHUT_RDWR)
                     break
                 }
             }

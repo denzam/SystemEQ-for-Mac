@@ -33,6 +33,12 @@ static inline int32_t seq_atomic_int32_load(const SEQAtomicInt32 *a) {
 static inline int32_t seq_atomic_int32_fetch_add(SEQAtomicInt32 *a, int32_t delta) {
     return atomic_fetch_add_explicit(&a->value, delta, memory_order_acq_rel);
 }
+static inline int32_t seq_atomic_int32_load_seq_cst(const SEQAtomicInt32 *a) {
+    return atomic_load_explicit(&a->value, memory_order_seq_cst);
+}
+static inline int32_t seq_atomic_int32_fetch_add_seq_cst(SEQAtomicInt32 *a, int32_t delta) {
+    return atomic_fetch_add_explicit(&a->value, delta, memory_order_seq_cst);
+}
 
 static inline void seq_atomic_int64_init(SEQAtomicInt64 *a, int_fast64_t v) {
     atomic_store_explicit(&a->value, v, memory_order_relaxed);
@@ -64,6 +70,12 @@ static inline void *seq_atomic_ptr_load_acquire(const SEQAtomicPtr *a) {
 
 static inline void seq_atomic_ptr_store_release(SEQAtomicPtr *a, void *p) {
     atomic_store_explicit(&a->value, p, memory_order_release);
+}
+static inline void *seq_atomic_ptr_load_seq_cst(const SEQAtomicPtr *a) {
+    return atomic_load_explicit(&a->value, memory_order_seq_cst);
+}
+static inline void seq_atomic_ptr_store_seq_cst(SEQAtomicPtr *a, void *p) {
+    atomic_store_explicit(&a->value, p, memory_order_seq_cst);
 }
 
 static inline void seq_atomic_flag_clear(SEQAtomicFlag *a) {

@@ -4,10 +4,10 @@ cask "systemeq" do
 
   url "https://github.com/denzam/SystemEQ-for-Mac/releases/download/v#{version}/SystemEQ-v#{version}.dmg"
   name "SystemEQ for Mac"
-  desc "System-wide equalizer for macOS with AutoEQ support"
+  desc "System-wide equalizer with AutoEQ support"
   homepage "https://github.com/denzam/SystemEQ-for-Mac"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "SystemEQ for Mac.app"
 
@@ -18,7 +18,7 @@ cask "systemeq" do
 
   zap trash: [
     "~/Library/Application Support/SystemEQ",
-    "~/Library/Preferences/com.denzam.SystemEQ.plist",
     "~/Library/Caches/com.denzam.SystemEQ",
+    "~/Library/Preferences/com.denzam.SystemEQ.plist",
   ]
 end

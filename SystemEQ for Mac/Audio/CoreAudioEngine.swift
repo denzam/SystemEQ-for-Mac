@@ -41,13 +41,12 @@ public final class CoreAudioEngine: ObservableObject {
     // Two-device I/O
     fileprivate var inputUnit: AudioUnit?
     fileprivate var outputUnit: AudioUnit?
+    private var isSetupComplete = false
     private var inputDeviceID: AudioDeviceID = 0
     private var outputDeviceID: AudioDeviceID = 0
 
-    /// Each device's nominal sample rate as it was BEFORE we forced 48k, keyed by
-    /// device ID. Captured once per device; used to restore rates when routing stops
-    /// so we don't permanently change a device the user had at 44.1/96k.
-    private var originalDeviceSampleRates: [AudioDeviceID: Double] = [:]
+    private var originalDeviceSampleRates: [String: Double] = [:]
+    private let originalDeviceSampleRatesKey = "originalDeviceSampleRates"
 
     /// Public read-only accessors for device IDs (used by AudioRouter to skip redundant restarts)
     public var currentInputDeviceID: AudioDeviceID {
@@ -72,17 +71,33 @@ public final class CoreAudioEngine: ObservableObject {
     private var useVDSPFilter: Bool = true
 
     private var _vdspFilterStrong: BiquadFilterVDSP?
+    private var retiredVDSPFilters: [BiquadFilterVDSP] = []
 
     private let _vdspFilterAtomic: UnsafeMutablePointer<SEQAtomicPtr> = {
         let p = UnsafeMutablePointer<SEQAtomicPtr>.allocate(capacity: 1)
         seq_atomic_ptr_init(p, nil)
         return p
     }()
+    private let _vdspFilterReaders: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
 
     @inline(__always)
     fileprivate func currentVDSPFilter() -> BiquadFilterVDSP? {
-        guard let p = seq_atomic_ptr_load_acquire(_vdspFilterAtomic) else { return nil }
+        guard let p = seq_atomic_ptr_load_seq_cst(_vdspFilterAtomic) else { return nil }
         return Unmanaged<BiquadFilterVDSP>.fromOpaque(p).takeUnretainedValue()
+    }
+
+    @inline(__always)
+    fileprivate func beginVDSPFilterRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_vdspFilterReaders, 1)
+    }
+
+    @inline(__always)
+    fileprivate func endVDSPFilterRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_vdspFilterReaders, -1)
     }
 
     var vdspFilter: BiquadFilterVDSP? {
@@ -91,18 +106,16 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private func setVDSPFilter(_ filter: BiquadFilterVDSP?) {
-        if let prev = _vdspFilterStrong {
-            // Each retired filter gets its own grace period via strong capture,
-            // so rapid consecutive swaps can't free one the audio thread still uses.
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) {
-                withExtendedLifetime(prev) {}
-            }
-        }
+        let previous = _vdspFilterStrong
         _vdspFilterStrong = filter
         let newPtr: UnsafeMutableRawPointer? = filter.map {
             Unmanaged.passUnretained($0).toOpaque()
         }
-        seq_atomic_ptr_store_release(_vdspFilterAtomic, newPtr)
+        seq_atomic_ptr_store_seq_cst(_vdspFilterAtomic, newPtr)
+        if let previous {
+            retiredVDSPFilters.append(previous)
+            scheduleRetiredObjectReclamation()
+        }
     }
 
     fileprivate var currentSampleRate: Double = 48000.0
@@ -134,17 +147,34 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private var _visualizerCallbackStrong: VisualizerCallbackBox?
+    private var retiredVisualizerCallbacks: [VisualizerCallbackBox] = []
 
     private let _visualizerCallbackAtomic: UnsafeMutablePointer<SEQAtomicPtr> = {
         let p = UnsafeMutablePointer<SEQAtomicPtr>.allocate(capacity: 1)
         seq_atomic_ptr_init(p, nil)
         return p
     }()
+    private let _visualizerCallbackReaders: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
+    private var reclamationScheduled = false
 
     @inline(__always)
     fileprivate func currentVisualizerCallback() -> VisualizerCallbackBox? {
-        guard let p = seq_atomic_ptr_load_acquire(_visualizerCallbackAtomic) else { return nil }
+        guard let p = seq_atomic_ptr_load_seq_cst(_visualizerCallbackAtomic) else { return nil }
         return Unmanaged<VisualizerCallbackBox>.fromOpaque(p).takeUnretainedValue()
+    }
+
+    @inline(__always)
+    fileprivate func beginVisualizerCallbackRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_visualizerCallbackReaders, 1)
+    }
+
+    @inline(__always)
+    fileprivate func endVisualizerCallbackRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_visualizerCallbackReaders, -1)
     }
 
     public var visualizerCallback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)? {
@@ -153,15 +183,39 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private func setVisualizerCallback(_ callback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?) {
-        if let prev = _visualizerCallbackStrong {
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) {
-                withExtendedLifetime(prev) {}
-            }
-        }
+        let previous = _visualizerCallbackStrong
         let box = callback.map { VisualizerCallbackBox($0) }
         _visualizerCallbackStrong = box
         let newPtr: UnsafeMutableRawPointer? = box.map { Unmanaged.passUnretained($0).toOpaque() }
-        seq_atomic_ptr_store_release(_visualizerCallbackAtomic, newPtr)
+        seq_atomic_ptr_store_seq_cst(_visualizerCallbackAtomic, newPtr)
+        if let previous {
+            retiredVisualizerCallbacks.append(previous)
+            scheduleRetiredObjectReclamation()
+        }
+    }
+
+    private func scheduleRetiredObjectReclamation() {
+        guard !reclamationScheduled else { return }
+        reclamationScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in
+            self?.reclaimRetiredObjects()
+        }
+    }
+
+    private func reclaimRetiredObjects() {
+        if seq_atomic_int32_load_seq_cst(_vdspFilterReaders) == 0 {
+            retiredVDSPFilters.removeAll()
+        }
+        if seq_atomic_int32_load_seq_cst(_visualizerCallbackReaders) == 0 {
+            retiredVisualizerCallbacks.removeAll()
+        }
+        if retiredVDSPFilters.isEmpty, retiredVisualizerCallbacks.isEmpty {
+            reclamationScheduled = false
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in
+                self?.reclaimRetiredObjects()
+            }
+        }
     }
 
     fileprivate var visualizerCounter: Int = 0
@@ -209,6 +263,11 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - Initialization
 
     private init() {
+        if let saved = UserDefaults.standard.dictionary(forKey: originalDeviceSampleRatesKey) {
+            originalDeviceSampleRates = saved.compactMapValues {
+                ($0 as? NSNumber)?.doubleValue
+            }
+        }
         dlog("🎛️ CoreAudioEngine initialized", category: .engine)
     }
 
@@ -232,6 +291,51 @@ public final class CoreAudioEngine: ObservableObject {
             return nil
         }
         return rate
+    }
+
+    private func getDeviceUID(_ deviceID: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uid: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>>.size)
+        let status = withUnsafeMutablePointer(to: &uid) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
+        }
+        guard status == noErr, let uid else { return nil }
+        return uid.takeUnretainedValue() as String
+    }
+
+    private func findDeviceID(uid: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size
+        ) == noErr else { return nil }
+
+        var deviceIDs = [AudioDeviceID](
+            repeating: 0,
+            count: Int(size) / MemoryLayout<AudioDeviceID>.size
+        )
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceIDs
+        ) == noErr else { return nil }
+        return deviceIDs.first { getDeviceUID($0) == uid }
     }
 
     /// One-shot log of buffer frame size + allowed range at setup.
@@ -306,10 +410,11 @@ public final class CoreAudioEngine: ObservableObject {
     /// Records a device's current nominal sample rate once, before we override it,
     /// so restoreDeviceSampleRates() can put it back when routing stops.
     private func captureOriginalSampleRate(_ deviceID: AudioDeviceID) {
-        guard originalDeviceSampleRates[deviceID] == nil else { return }
-        if let rate = getDeviceSampleRate(deviceID) {
-            originalDeviceSampleRates[deviceID] = rate
-        }
+        guard let uid = getDeviceUID(deviceID),
+              originalDeviceSampleRates[uid] == nil,
+              let rate = getDeviceSampleRate(deviceID) else { return }
+        originalDeviceSampleRates[uid] = rate
+        persistOriginalDeviceSampleRates()
     }
 
     /// Restores every device we changed back to its captured nominal rate. Call
@@ -321,16 +426,32 @@ public final class CoreAudioEngine: ObservableObject {
     /// Limitation: a crash/force-quit skips this, leaving devices at 48k; the next
     /// launch would then capture 48k as the "original". Acceptable — no persisted state.
     public func restoreDeviceSampleRates() {
-        for (deviceID, rate) in originalDeviceSampleRates {
-            _ = setDeviceSampleRate(deviceID, rate: rate)
+        var restoredUIDs: [String] = []
+        for (uid, rate) in originalDeviceSampleRates {
+            guard let deviceID = findDeviceID(uid: uid),
+                  setDeviceSampleRate(deviceID, rate: rate) else { continue }
+            restoredUIDs.append(uid)
         }
-        originalDeviceSampleRates.removeAll()
+        for uid in restoredUIDs {
+            originalDeviceSampleRates.removeValue(forKey: uid)
+        }
+        persistOriginalDeviceSampleRates()
+    }
+
+    private func persistOriginalDeviceSampleRates() {
+        if originalDeviceSampleRates.isEmpty {
+            UserDefaults.standard.removeObject(forKey: originalDeviceSampleRatesKey)
+        } else {
+            UserDefaults.standard.set(originalDeviceSampleRates, forKey: originalDeviceSampleRatesKey)
+        }
     }
 
     deinit {
         cleanup()
         _vdspFilterAtomic.deallocate()
+        _vdspFilterReaders.deallocate()
         _visualizerCallbackAtomic.deallocate()
+        _visualizerCallbackReaders.deallocate()
     }
 
     // MARK: - Setup
@@ -351,6 +472,12 @@ public final class CoreAudioEngine: ObservableObject {
 
         // Cleanup any existing units/buffers
         cleanup()
+        var setupSucceeded = false
+        defer {
+            if !setupSucceeded {
+                cleanup()
+            }
+        }
 
         // Remember each device's nominal rate the first time we touch it, so we can
         // put it back when EQ is turned off (we force 48k below).
@@ -749,6 +876,14 @@ public final class CoreAudioEngine: ObservableObject {
         allocateInputBuffer(maxFrames: maxFramesPerSlice, channels: self.channelCount)
         allocateOutputBuffer(maxFrames: maxFramesPerSlice, channels: self.channelCount)
         allocateRingBuffer(capacityFrames: Int(maxFramesPerSlice) * 16, channels: self.channelCount)
+        guard inputBufferList != nil,
+              outputBufferList != nil,
+              ringBuffer.isAllocated else {
+            dlog("❌ Failed to allocate audio buffers", level: .error, category: .engine)
+            return
+        }
+        isSetupComplete = true
+        setupSucceeded = true
 
         dlog("✅ Core Audio Units initialized successfully", category: .engine)
         dlog("🎤 Ready for real-time audio processing", category: .engine)
@@ -889,26 +1024,34 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Control
 
-    public func start() {
-        guard let iu = inputUnit, let ou = outputUnit, !isRunning else {
+    @discardableResult
+    public func start() -> Bool {
+        guard let iu = inputUnit, let ou = outputUnit, isSetupComplete, !isRunning else {
             dlog("⚠️ Core Audio Engine already running or not set up", category: .engine)
-            return
+            return false
         }
         // Seed ring with ~2 IO cycles of silence so the first output callbacks
         // have data to read while the input side is still spinning up.
         ringBuffer.primeSilence(frames: 1024)
         let s1 = AudioOutputUnitStart(iu)
-        let s2 = AudioOutputUnitStart(ou)
-        if s1 == noErr, s2 == noErr {
-            isRunning = true
-            dlog("✅ Core Audio Engine started", category: .engine)
-            dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
-            #if DEBUG
-                startDiagStatsTimer()
-            #endif
-        } else {
-            dlog("❌ Failed to start Core Audio Engine: in=\(s1), out=\(s2)", category: .engine)
+        guard s1 == noErr else {
+            dlog("❌ Failed to start Core Audio Engine input: \(s1)", level: .error, category: .engine)
+            return false
         }
+        let s2 = AudioOutputUnitStart(ou)
+        guard s2 == noErr else {
+            AudioOutputUnitStop(iu)
+            dlog("❌ Failed to start Core Audio Engine output: \(s2)", level: .error, category: .engine)
+            return false
+        }
+
+        isRunning = true
+        dlog("✅ Core Audio Engine started", category: .engine)
+        dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
+        #if DEBUG
+            startDiagStatsTimer()
+        #endif
+        return true
     }
 
     /// Audio-thread health timer. Flushes every 30s on main queue; only logs
@@ -1050,6 +1193,7 @@ public final class CoreAudioEngine: ObservableObject {
     private func cleanup() {
         cleanupLock.lock()
         defer { cleanupLock.unlock() }
+        isSetupComplete = false
 
         if let iu = inputUnit {
             AudioOutputUnitStop(iu)
@@ -1378,6 +1522,7 @@ private func inputCaptureCallbackFunction(
 
     // ⚡ Lock-free filter read: single atomic pointer load, no retain/release.
     if engine.isEnabled, engine.channelCount >= 1, let lPtr = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+        engine.beginVDSPFilterRead()
         if let vdsp = engine.currentVDSPFilter() {
             if engine.channelCount > 1, let rPtr = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
                 vdsp.processStereo(lPtr, rPtr, frameCount: frames)
@@ -1391,6 +1536,7 @@ private func inputCaptureCallbackFunction(
                 fc.processBuffer(lPtr, frameCount: frames)
             }
         }
+        engine.endVDSPFilterRead()
         // Nil filter = bypass.
     }
 
@@ -1416,6 +1562,7 @@ private func inputCaptureCallbackFunction(
         engine.visualizerCounter = 0
 
         // ⚡ Lock-free callback read: single atomic pointer load, no retain/release.
+        engine.beginVisualizerCallbackRead()
         if let box = engine.currentVisualizerCallback(),
            let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
             let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : inL
@@ -1423,6 +1570,7 @@ private func inputCaptureCallbackFunction(
                 box.callback(inL, rightPtr, frames)
             }
         }
+        engine.endVisualizerCallbackRead()
     }
     #if DEBUG
         let nanos = machNanosSince(diagStart)

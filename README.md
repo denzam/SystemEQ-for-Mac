@@ -223,6 +223,10 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 - ⏭️ Phase 4: HAL plugin (requires paid Apple Developer account)
 - ⏭️ Phase 5: Liquid Glass visual polish
 
+### Development Note
+
+SystemEQ began as a learning project with Claude Code and is now maintained through a tool-agnostic workflow focused on review and testing.
+
 ## ⚠️ Security Notice
 
 - This app is **not sandboxed** (incompatible with CoreAudio/AUHAL virtual audio devices)
