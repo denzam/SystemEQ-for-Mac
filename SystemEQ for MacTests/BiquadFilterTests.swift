@@ -15,9 +15,17 @@ final class BiquadFilterTests: XCTestCase {
         let filter = BiquadFilter()
         filter.configurePeak(frequency: 1000, gain: 0.0, q: 1.0, sampleRate: 48000)
 
-        // Zero gain peak filter should be near-unity (passthrough)
+        // At 0 dB the RBJ peaking numerator equals its denominator, so the filter is
+        // a passthrough — but b2 is (1-alpha)/(1+alpha), not 1.0. The coefficients
+        // cancel against a1/a2 rather than each being unity on its own.
         XCTAssertEqual(filter.b0, 1.0, accuracy: 0.001, "b0 should be ~1.0 for 0 dB gain")
-        XCTAssertEqual(filter.b2, 1.0, accuracy: 0.1, "b2 should be near 1.0")
+        XCTAssertEqual(filter.b1, filter.a1, accuracy: 0.000_01, "b1 must cancel a1 at 0 dB")
+        XCTAssertEqual(filter.b2, filter.a2, accuracy: 0.000_01, "b2 must cancel a2 at 0 dB")
+
+        // The audible property the coefficients are supposed to guarantee.
+        for sample in [Float(0.0), 0.5, -0.5, 0.25, 1.0, -1.0] {
+            XCTAssertEqual(filter.process(sample), sample, accuracy: 0.000_1, "0 dB peak must pass through")
+        }
     }
 
     func testPeakFilterCoefficients_positiveGain() {
