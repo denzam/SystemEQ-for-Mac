@@ -623,7 +623,7 @@ class EQDatabaseBuilder {
 
 // MARK: - Main
 
-let outputPath = "SystemEQ for Mac/EQDatabase.db"
+let outputPath = "SystemEQ for Mac/Resources/EQDatabase.db"
 let builder = EQDatabaseBuilder(dbPath: outputPath)
 
 do {

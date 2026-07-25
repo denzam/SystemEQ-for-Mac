@@ -35,13 +35,10 @@ jobs:
       - name: Build EQ Database
         run: |
           swift Scripts/build_eq_database.swift
+          test -f "SystemEQ for Mac/Resources/EQDatabase.db"
+          test ! -e "SystemEQ for Mac/EQDatabase.db"
           echo "Database built"
 
-      - name: Copy database to Resources
-        run: |
-          cp "SystemEQ for Mac/EQDatabase.db" "SystemEQ for Mac/Resources/EQDatabase.db"
-          echo "Database copied to Resources"
-      
       - name: Get database stats
         id: stats
         run: |
