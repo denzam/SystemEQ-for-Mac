@@ -169,14 +169,10 @@ final class StatusItemController: NSObject {
 
     @objc
     private func toggleEQ() {
-        let newValue = !AudioEngine.shared.isEnabled
-        AudioEngine.shared.setEnabled(newValue)
-        CoreAudioEngine.shared.setEnabled(newValue)
-        UserDefaults.standard.set(newValue, forKey: "eqEnabled")
-        NotificationCenter.default.post(
-            name: NSNotification.Name(newValue ? "EnableEQRouting" : "DisableEQRouting"),
-            object: nil
-        )
+        // setEnabled already forwards to CoreAudioEngine, drives routing and
+        // persists the state under "eqWasEnabled" — the extra call, the unread
+        // "eqEnabled" key and the unobserved notifications were all no-ops.
+        AudioEngine.shared.setEnabled(!AudioEngine.shared.isEnabled)
     }
 
     @objc

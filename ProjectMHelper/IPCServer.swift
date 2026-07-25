@@ -61,6 +61,10 @@ class IPCServer {
         }
     }
 
+    /// Aligned landing area for incoming audio payloads (max 16384 bytes, enforced
+    /// by the frame-length check). Only touched from readQueue.
+    private var audioScratch = [Float](repeating: 0, count: 4096)
+
     private let listenQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.listen", qos: .userInitiated)
     private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
 
@@ -294,10 +298,17 @@ class IPCServer {
                 let payloadEnd = payloadStart + payloadLength
                 let floatCount = payloadLength / MemoryLayout<Float>.size
 
-                messageBuffer[payloadStart..<payloadEnd].withUnsafeBytes { raw in
-                    if let floatPtr = raw.baseAddress?.assumingMemoryBound(to: Float.self) {
-                        controller.addAudioSamples(floatPtr, count: floatCount)
+                // The payload starts 5 bytes into the frame, so it is never 4-byte
+                // aligned — binding it to Float directly asserts an alignment that
+                // does not hold. Copy into an aligned scratch buffer instead; this
+                // runs on readQueue, not the audio thread.
+                audioScratch.withUnsafeMutableBufferPointer { scratch in
+                    guard let dst = scratch.baseAddress else { return }
+                    messageBuffer[payloadStart..<payloadEnd].withUnsafeBytes { raw in
+                        guard let src = raw.baseAddress else { return }
+                        memcpy(dst, src, payloadLength)
                     }
+                    controller.addAudioSamples(dst, count: floatCount)
                 }
 
                 messageBuffer = Data(messageBuffer[payloadEnd...])
