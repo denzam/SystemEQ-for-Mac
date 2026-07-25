@@ -127,7 +127,22 @@ class EQDatabase {
         return results
     }
 
+    /// Build an FTS5 MATCH expression from free-form user text.
+    ///
+    /// Punctuation in a model name is FTS5 syntax: "AirPods Pro (2nd gen)" has an
+    /// unbalanced paren, a stray `"` opens an unterminated string, `-` and `^` are
+    /// operators. Any of those makes sqlite3_step fail, which silently looked like
+    /// "no matches". Split on non-alphanumerics and quote every token instead.
+    /// Returns nil when nothing searchable is left.
+    private func ftsMatchExpression(for query: String) -> String? {
+        let tokens = query.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        guard !tokens.isEmpty else { return nil }
+        return tokens.map { "\"\($0)\"*" }.joined(separator: " OR ")
+    }
+
     private func searchWithFTS(_ query: String) -> [DatabaseHeadphone] {
+        guard let ftsQuery = ftsMatchExpression(for: query) else { return [] }
+
         let sql = """
         SELECT DISTINCT h.id, h.brand, h.model, h.type, h.source
         FROM headphones h
@@ -145,8 +160,6 @@ class EQDatabase {
         }
         defer { sqlite3_finalize(statement) }
 
-        // FTS5 query syntax: "sennheiser* OR hd600*"
-        let ftsQuery = query.split(separator: " ").map { "\($0)*" }.joined(separator: " OR ")
         sqlite3_bind_text(statement, 1, ftsQuery, -1, SQLITE_TRANSIENT)
 
         var results: [DatabaseHeadphone] = []
