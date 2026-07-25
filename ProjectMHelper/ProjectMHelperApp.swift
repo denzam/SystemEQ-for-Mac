@@ -1010,7 +1010,7 @@ class VisualizerController: NSObject {
         let target = allPresets[index]
 
         if let pos = filteredPresets.firstIndex(where: { $0.path == target.path }) {
-            _ = projectm_playlist_set_position(playlist, pos, true)
+            projectm_playlist_set_position(playlist, pos, true)
             updateCurrentPresetName()
             return
         }

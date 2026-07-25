@@ -224,7 +224,12 @@ import Foundation
     // на call-site (бо `Any?` не має member'ів enum). Debug/info — no-op (optimizer видаляє виклики),
     // але warning/error йдуть у os.Logger, щоб bug-репорти користувачів мали діагностику.
 
-    private let releaseLogger = Logger(subsystem: "com.denzam.SystemEQ", category: "SystemEQ")
+    // 🔧 os.Logger is thread-safe; the global would otherwise be inferred
+    // MainActor-isolated and unreachable from the nonisolated log functions.
+    nonisolated private let releaseLogger = Logger(
+        subsystem: "com.denzam.SystemEQ",
+        category: "SystemEQ"
+    )
 
     enum LogCategory: String {
         case audio
