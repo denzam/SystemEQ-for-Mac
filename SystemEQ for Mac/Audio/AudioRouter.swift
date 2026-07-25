@@ -56,6 +56,16 @@ public final class AudioRouter: ObservableObject {
     /// left the system on BlackHole can still be recovered on next launch.
     private let originalOutputUIDKey = "originalSystemOutputUID"
 
+    /// UIDs of the devices the engine is currently routing through. A UID survives
+    /// unplug/replug, an AudioDeviceID does not — so this is what we validate
+    /// against whenever the device list changes.
+    private var activeInputUID: String?
+    private var activeOutputUID: String?
+
+    /// Set when sleep interrupted an active routing session, so wake restores it.
+    private var wasRoutingBeforeSleep = false
+    private var wakeRestartTask: Task<Void, Never>?
+
     public static let shared = AudioRouter()
 
     // MARK: - Initialization
@@ -65,6 +75,7 @@ public final class AudioRouter: ObservableObject {
         // The initial device refresh is now handled asynchronously from the UI layer.
         setupDeviceChangeListener()
         setupNotificationObservers()
+        setupSleepWakeObservers()
     }
 
     private func setupNotificationObservers() {
@@ -398,9 +409,23 @@ public final class AudioRouter: ObservableObject {
         return nil
     }
 
-    func enableEQRouting() {
+    /// Output device the engine should feed. Prefers the one we were already
+    /// routing through (matched by UID, because a replug hands it a new
+    /// AudioDeviceID) and only auto-picks when that device is really gone.
+    private func preferredOutputDevice() -> AudioDevice? {
+        if let uid = activeOutputUID,
+           let previous = outputDevices.first(where: { $0.uid == uid }) {
+            return previous
+        }
+        return findBestPhysicalOutputDevice()
+    }
+
+    /// - Parameter forceRestart: rebuild the AudioUnits even when the engine looks
+    ///   like it is already running on these device IDs. Needed after sleep and
+    ///   after a replug, where the IDs can match while the units are already dead.
+    func enableEQRouting(forceRestart: Bool = false) {
         // Get physical output device
-        guard let physicalOutput = findBestPhysicalOutputDevice() else {
+        guard let physicalOutput = preferredOutputDevice() else {
             errorLog("No physical output device found!", category: .routing)
             return
         }
@@ -412,9 +437,13 @@ public final class AudioRouter: ObservableObject {
             return
         }
 
+        activeInputUID = blackHoleDevice.uid
+        activeOutputUID = physicalOutput.uid
+
         // ⚡ OPTIMIZATION: Skip full restart if engine is already running with same devices
         let engine = CoreAudioEngine.shared
-        if engine.isRunning,
+        if !forceRestart,
+           engine.isRunning,
            engine.currentInputDeviceID == blackHoleDevice.id,
            engine.currentOutputDeviceID == physicalOutput.id {
             dlog("EQ routing already active, skipping restart", category: .routing)
@@ -597,6 +626,13 @@ public final class AudioRouter: ObservableObject {
             level: .info,
             category: .routing
         )
+
+        // Drop any pending wake restart — routing is off on purpose now.
+        wakeRestartTask?.cancel()
+        wakeRestartTask = nil
+        wasRoutingBeforeSleep = false
+        activeInputUID = nil
+        activeOutputUID = nil
 
         // Stop CoreAudioEngine
         CoreAudioEngine.shared.stop()
@@ -792,11 +828,14 @@ public final class AudioRouter: ObservableObject {
 
         let listenerBlock: AudioObjectPropertyListenerBlock = { _, _ in
             Task { @MainActor in
-                AudioRouter.shared.deviceChangeDebounceTask?.cancel()
-                AudioRouter.shared.deviceChangeDebounceTask = Task {
+                let router = AudioRouter.shared
+                router.deviceChangeDebounceTask?.cancel()
+                router.deviceChangeDebounceTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000) // 500ms debounce
                     guard !Task.isCancelled else { return }
-                    await AudioRouter.shared.refreshDevices()
+                    await router.refreshDevices()
+                    guard !Task.isCancelled else { return }
+                    router.handleDeviceTopologyChange()
                 }
             }
         }
@@ -807,6 +846,104 @@ public final class AudioRouter: ObservableObject {
             DispatchQueue.main,
             listenerBlock
         )
+    }
+
+    /// Runs after every debounced device-list change. Catches the states that kill
+    /// audio silently while routing is active: a device that vanished, and a device
+    /// that came back under a new AudioDeviceID (the units still point at the old
+    /// one, which renders as permanent silence rather than an error).
+    @MainActor
+    private func handleDeviceTopologyChange() {
+        let engine = CoreAudioEngine.shared
+        guard engine.isRunning,
+              let inputUID = activeInputUID,
+              let outputUID = activeOutputUID else { return }
+
+        // BlackHole gone (driver uninstalled or reset) — nothing left to capture.
+        guard let input = inputDevices.first(where: { $0.uid == inputUID }) else {
+            dlog("BlackHole disappeared while routing — disabling EQ", level: .warning, category: .routing)
+            disableEQRouting()
+            return
+        }
+
+        guard let output = outputDevices.first(where: { $0.uid == outputUID }) else {
+            // Output unplugged: forget it so preferredOutputDevice() auto-picks
+            // whatever is left, then rebuild onto that device.
+            activeOutputUID = nil
+            guard let fallback = findBestPhysicalOutputDevice() else {
+                dlog(
+                    "Active output disappeared and no fallback exists — disabling EQ",
+                    level: .warning,
+                    category: .routing
+                )
+                disableEQRouting()
+                return
+            }
+            dlog(
+                "Active output disappeared — rebuilding onto \(fallback.name)",
+                level: .warning,
+                category: .routing
+            )
+            enableEQRouting(forceRestart: true)
+            return
+        }
+
+        if input.id != engine.currentInputDeviceID || output.id != engine.currentOutputDeviceID {
+            dlog(
+                "Device IDs changed (in \(engine.currentInputDeviceID)→\(input.id), " +
+                    "out \(engine.currentOutputDeviceID)→\(output.id)) — rebuilding engine",
+                level: .warning,
+                category: .routing
+            )
+            enableEQRouting(forceRestart: true)
+        }
+    }
+
+    // MARK: - Sleep / Wake
+
+    private func setupSleepWakeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(
+            self,
+            selector: #selector(handleWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(handleDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc
+    private func handleWillSleep(_ notification: Notification) {
+        guard CoreAudioEngine.shared.isRunning else { return }
+        wasRoutingBeforeSleep = true
+
+        // Only the AudioUnits go down. The system default stays on BlackHole, so
+        // nothing leaks out unprocessed and restoring is a plain restart.
+        CoreAudioEngine.shared.stop()
+        dlog("Sleep — engine stopped, routing will be restored on wake", level: .info, category: .routing)
+    }
+
+    @objc
+    private func handleDidWake(_ notification: Notification) {
+        guard wasRoutingBeforeSleep else { return }
+        wasRoutingBeforeSleep = false
+
+        wakeRestartTask?.cancel()
+        wakeRestartTask = Task { @MainActor in
+            // USB and Bluetooth outputs reappear a couple of seconds after wake,
+            // often with a different AudioDeviceID, so refresh before rebuilding.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await self.refreshDevices()
+            guard !Task.isCancelled else { return }
+            dlog("Wake — restoring EQ routing", level: .info, category: .routing)
+            self.enableEQRouting(forceRestart: true)
+        }
     }
 
     // MARK: - Manual Setup Alert
