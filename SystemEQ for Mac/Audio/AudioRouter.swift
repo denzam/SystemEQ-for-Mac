@@ -62,6 +62,11 @@ public final class AudioRouter: ObservableObject {
     private var activeInputUID: String?
     private var activeOutputUID: String?
 
+    /// The output we actually want, as opposed to `activeOutputUID` which can be
+    /// a temporary fallback. Set once when routing starts and left alone by
+    /// fallback rebuilds, so a later topology change can switch back to it.
+    private var preferredOutputUID: String?
+
     /// Set when sleep interrupted an active routing session, so wake restores it.
     private var wasRoutingBeforeSleep = false
     private var wakeRestartTask: Task<Void, Never>?
@@ -417,10 +422,14 @@ public final class AudioRouter: ObservableObject {
         return nil
     }
 
-    /// Output device the engine should feed. Prefers the one we were already
-    /// routing through (matched by UID, because a replug hands it a new
-    /// AudioDeviceID) and only auto-picks when that device is really gone.
+    /// Output device the engine should feed. Prefers the device we actually want
+    /// (survives a temporary fallback), then the one we were last routing
+    /// through, and only auto-picks when both are really gone.
     private func preferredOutputDevice() -> AudioDevice? {
+        if let uid = preferredOutputUID,
+           let wanted = outputDevices.first(where: { $0.uid == uid }) {
+            return wanted
+        }
         if let uid = activeOutputUID,
            let previous = outputDevices.first(where: { $0.uid == uid }) {
             return previous
@@ -447,6 +456,9 @@ public final class AudioRouter: ObservableObject {
 
         activeInputUID = blackHoleDevice.uid
         activeOutputUID = physicalOutput.uid
+        if preferredOutputUID == nil {
+            preferredOutputUID = physicalOutput.uid
+        }
 
         // ⚡ OPTIMIZATION: Skip full restart if engine is already running with same devices
         let engine = CoreAudioEngine.shared
@@ -641,6 +653,13 @@ public final class AudioRouter: ObservableObject {
         wasRoutingBeforeSleep = false
         activeInputUID = nil
         activeOutputUID = nil
+        preferredOutputUID = nil
+
+        // Keep the enabled flag in sync even when this runs from an automatic
+        // recovery path (device vanished) rather than the user's toggle —
+        // otherwise the menu bar keeps claiming EQ is on after routing died.
+        CoreAudioEngine.shared.setEnabled(false)
+        UserDefaults.standard.set(false, forKey: "eqWasEnabled")
 
         // Stop CoreAudioEngine
         CoreAudioEngine.shared.stop()
@@ -752,7 +771,12 @@ public final class AudioRouter: ObservableObject {
     }
 
     func restoreOriginalSystemOutputDevice() {
-        if let originalDevice = originalSystemOutputDevice {
+        // Only attempt a device that is actually enumerated right now — trying
+        // one that just vanished (e.g. the USB DAC we're disabling EQ because
+        // of) always fails and pops the "manual setup required" alert for a
+        // routine unplug instead of a real problem.
+        if let originalDevice = originalSystemOutputDevice,
+           outputDevices.contains(where: { $0.uid == originalDevice.uid }) {
             dlog("Restoring original system output: \(originalDevice.name)", category: .routing)
             setAsDefaultOutputDevice(originalDevice)
             return
@@ -857,20 +881,31 @@ public final class AudioRouter: ObservableObject {
     }
 
     /// Runs after every debounced device-list change. Catches the states that kill
-    /// audio silently while routing is active: a device that vanished, and a device
+    /// audio silently while routing is active: a device that vanished, a device
     /// that came back under a new AudioDeviceID (the units still point at the old
-    /// one, which renders as permanent silence rather than an error).
+    /// one, which renders as permanent silence rather than an error), and — not
+    /// gated on the engine currently running — a wake restart that failed to find
+    /// its devices in time, so a later arrival still gets picked up.
     @MainActor
     private func handleDeviceTopologyChange() {
-        let engine = CoreAudioEngine.shared
-        guard engine.isRunning,
-              let inputUID = activeInputUID,
+        guard let inputUID = activeInputUID,
               let outputUID = activeOutputUID else { return }
+        let engine = CoreAudioEngine.shared
 
         // BlackHole gone (driver uninstalled or reset) — nothing left to capture.
         guard let input = inputDevices.first(where: { $0.uid == inputUID }) else {
             dlog("BlackHole disappeared while routing — disabling EQ", level: .warning, category: .routing)
             disableEQRouting()
+            return
+        }
+
+        // The device we actually want reappeared while we were on a fallback —
+        // switch back to it rather than staying on the fallback forever.
+        if let wantedUID = preferredOutputUID,
+           wantedUID != outputUID,
+           outputDevices.contains(where: { $0.uid == wantedUID }) {
+            dlog("Preferred output reappeared — switching back", level: .info, category: .routing)
+            enableEQRouting(forceRestart: true)
             return
         }
 
@@ -896,10 +931,11 @@ public final class AudioRouter: ObservableObject {
             return
         }
 
-        if input.id != engine.currentInputDeviceID || output.id != engine.currentOutputDeviceID {
+        if !engine.isRunning || input.id != engine.currentInputDeviceID || output.id != engine.currentOutputDeviceID {
             dlog(
-                "Device IDs changed (in \(engine.currentInputDeviceID)→\(input.id), " +
-                    "out \(engine.currentOutputDeviceID)→\(output.id)) — rebuilding engine",
+                "Rebuilding engine (running=\(engine.isRunning), " +
+                    "in \(engine.currentInputDeviceID)→\(input.id), " +
+                    "out \(engine.currentOutputDeviceID)→\(output.id))",
                 level: .warning,
                 category: .routing
             )
@@ -927,7 +963,15 @@ public final class AudioRouter: ObservableObject {
 
     @objc
     private func handleWillSleep(_ notification: Notification) {
-        guard CoreAudioEngine.shared.isRunning else { return }
+        // A pending wake restart means a previous sleep is still being recovered
+        // from (e.g. the lid closed again inside the 2.5s post-wake wait). Cancel
+        // it and treat this as "was routing" too, or the intent to resume gets
+        // silently dropped and wake never restores audio.
+        let hadPendingWakeRestart = wakeRestartTask != nil
+        guard CoreAudioEngine.shared.isRunning || hadPendingWakeRestart else { return }
+
+        wakeRestartTask?.cancel()
+        wakeRestartTask = nil
         wasRoutingBeforeSleep = true
 
         // Only the AudioUnits go down. The system default stays on BlackHole, so
