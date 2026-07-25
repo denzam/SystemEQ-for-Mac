@@ -1421,6 +1421,19 @@ private func inputCaptureCallbackFunction(
             return status
         }
     }
+    // ⚡ Metering tick is decided once per callback so the input level is taken
+    // before EQ and the output level after it, from the same buffer.
+    let meterTick = engine.peakMeter.shouldSample(frameCount: frames)
+    if meterTick, let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+        let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
+        engine.peakMeter.sampleInput(
+            bufferL: inL,
+            bufferR: inR,
+            frameCount: frames,
+            channelCount: engine.channelCount
+        )
+    }
+
     // ⚡ Lock-free filter read: single atomic pointer load, no retain/release.
     if engine.isEnabled, engine.channelCount >= 1, let lPtr = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
         if let vdsp = engine.currentVDSPFilter() {
@@ -1445,9 +1458,14 @@ private func inputCaptureCallbackFunction(
         engine.ringBuffer.write(inL: inL, inR: inR, frameCount: frames)
     }
     // ⚡ OPTIMIZED: Update peak meters — delegated to PeakMeter
-    if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+    if meterTick, let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
         let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
-        engine.peakMeter.update(bufferL: inL, bufferR: inR, frameCount: frames, channelCount: engine.channelCount)
+        engine.peakMeter.sampleOutput(
+            bufferL: inL,
+            bufferR: inR,
+            frameCount: frames,
+            channelCount: engine.channelCount
+        )
     }
 
     // ⚡ OPTIMIZED: Send audio data to visualizer less frequently to reduce CPU overhead

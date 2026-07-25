@@ -47,24 +47,58 @@ public final class PeakMeter: ObservableObject {
 
     // MARK: - Audio Thread API
 
-    /// Measure peak level from audio buffers
-    /// Call from audio render callback
-    /// - Parameters:
-    ///   - bufferL: Left channel buffer
-    ///   - bufferR: Right channel buffer (optional, uses left if nil)
-    ///   - frameCount: Number of frames in buffers
-    ///   - channelCount: Number of channels (1 or 2)
+    /// Whether this callback lands on a metering tick (~85 ms). Call once per
+    /// callback, before EQ processing, so the input can be sampled pre-EQ and the
+    /// output post-EQ from the same buffer.
     @inline(__always)
-    func update(
+    func shouldSample(frameCount: Int) -> Bool {
+        updateCounter += frameCount
+        guard updateCounter >= updateInterval else { return false }
+        updateCounter = 0
+        return true
+    }
+
+    /// Pre-EQ level. Only call when `shouldSample` returned true.
+    @inline(__always)
+    func sampleInput(
         bufferL: UnsafePointer<Float>,
         bufferR: UnsafePointer<Float>?,
         frameCount: Int,
         channelCount: UInt32
     ) {
-        updateCounter += frameCount
-        guard updateCounter >= updateInterval else { return }
-        updateCounter = 0
+        rtInputPeak = PeakMeter.peak(
+            bufferL: bufferL,
+            bufferR: bufferR,
+            frameCount: frameCount,
+            channelCount: channelCount
+        )
+    }
 
+    /// Post-EQ level, and the trigger that pushes both values to the UI.
+    /// Only call when `shouldSample` returned true.
+    @inline(__always)
+    func sampleOutput(
+        bufferL: UnsafePointer<Float>,
+        bufferR: UnsafePointer<Float>?,
+        frameCount: Int,
+        channelCount: UInt32
+    ) {
+        rtOutputPeak = PeakMeter.peak(
+            bufferL: bufferL,
+            bufferR: bufferR,
+            frameCount: frameCount,
+            channelCount: channelCount
+        )
+        schedulePublish()
+    }
+
+    @inline(__always)
+    private static func peak(
+        bufferL: UnsafePointer<Float>,
+        bufferR: UnsafePointer<Float>?,
+        frameCount: Int,
+        channelCount: UInt32
+    ) -> Float {
         var maxL: Float = 0
         vDSP_maxmgv(bufferL, 1, &maxL, vDSP_Length(frameCount))
 
@@ -73,10 +107,7 @@ public final class PeakMeter: ObservableObject {
             vDSP_maxmgv(rPtr, 1, &maxR, vDSP_Length(frameCount))
         }
 
-        let peak = max(maxL, maxR)
-        rtInputPeak = peak
-        rtOutputPeak = peak
-        schedulePublish()
+        return max(maxL, maxR)
     }
 
     /// Reset meters to zero (call when stopping audio)
