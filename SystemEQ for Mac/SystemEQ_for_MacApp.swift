@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Restore the real output device before quitting, otherwise the user is
         // left with no sound until they fix it manually in System Settings.
         // AudioObjectSetPropertyData is synchronous, so .terminateNow is safe.
-        if CoreAudioEngine.shared.isRunning {
+        if AudioRouter.shared.isRoutingOwned {
             AudioRouter.shared.disableEQRouting()
         }
         return .terminateNow

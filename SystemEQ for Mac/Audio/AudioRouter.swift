@@ -66,6 +66,14 @@ public final class AudioRouter: ObservableObject {
     private var wasRoutingBeforeSleep = false
     private var wakeRestartTask: Task<Void, Never>?
 
+    /// Whether we are the reason the system default output is BlackHole — true even
+    /// while the engine is stopped (between sleep and the wake restart, or after a
+    /// restart that failed). Quitting in that window must still restore the real
+    /// output, which `CoreAudioEngine.isRunning` alone would not catch.
+    public var isRoutingOwned: Bool {
+        activeInputUID != nil || CoreAudioEngine.shared.isRunning
+    }
+
     public static let shared = AudioRouter()
 
     // MARK: - Initialization
