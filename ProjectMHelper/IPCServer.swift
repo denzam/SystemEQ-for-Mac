@@ -66,7 +66,21 @@ class IPCServer {
 
     init(controller: VisualizerController) {
         self.controller = controller
-        self.socketPath = "/tmp/systemeq_projectm_\(getpid()).sock"
+        self.socketPath = IPCServer.makeSocketPath()
+    }
+
+    /// Prefer the per-user temp dir (mode 0700, unguessable by other users) over
+    /// world-writable /tmp. sun_path is only 104 bytes on macOS, so fall back to
+    /// /tmp if the per-user path would not fit. The client discovers whichever we
+    /// pick from the SOCKET: line on stdout, so this stays transparent to it.
+    private static func makeSocketPath() -> String {
+        let name = "systemeq_projectm_\(getpid()).sock"
+        let preferred = (NSTemporaryDirectory() as NSString).appendingPathComponent(name)
+        let sunPathCapacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+        if preferred.utf8.count < sunPathCapacity {
+            return preferred
+        }
+        return "/tmp/\(name)"
     }
 
     deinit {
@@ -106,6 +120,15 @@ class IPCServer {
         guard bindResult == 0 else {
             print("[IPCServer] Failed to bind: \(errno)")
             close(serverSocket)
+            return
+        }
+
+        // Owner-only before anyone can connect: bind() honours the umask, which
+        // normally leaves the socket world-connectable.
+        if chmod(socketPath, 0o600) != 0 {
+            print("[IPCServer] Failed to restrict socket permissions: \(errno)")
+            close(serverSocket)
+            unlink(socketPath)
             return
         }
 
@@ -149,6 +172,20 @@ class IPCServer {
         unlink(socketPath)
     }
 
+    /// LOCAL_PEERCRED reports the uid the peer had when it called connect().
+    private static func peerIsSameUser(_ socket: Int32) -> Bool {
+        var cred = xucred()
+        var length = socklen_t(MemoryLayout<xucred>.size)
+        let result = withUnsafeMutablePointer(to: &cred) { ptr in
+            getsockopt(socket, SOL_LOCAL, LOCAL_PEERCRED, ptr, &length)
+        }
+        guard result == 0, cred.cr_version == XUCRED_VERSION else {
+            print("[IPCServer] Could not read peer credentials: \(errno)")
+            return false
+        }
+        return cred.cr_uid == getuid()
+    }
+
     private func acceptLoop() {
         while isRunning {
             var clientAddr = sockaddr_un()
@@ -164,6 +201,15 @@ class IPCServer {
                 if isRunning {
                     print("[IPCServer] Accept failed: \(errno)")
                 }
+                continue
+            }
+
+            // Only our own user may drive the visualizer. Closes the window between
+            // bind() and chmod() above, and any case where the socket file's mode
+            // was not enough on its own.
+            guard IPCServer.peerIsSameUser(newClient) else {
+                print("[IPCServer] Rejected connection from another user")
+                close(newClient)
                 continue
             }
 
