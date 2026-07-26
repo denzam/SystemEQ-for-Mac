@@ -4,7 +4,7 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.2] — 2026-07-26
 
 Security audit follow-up. See [SECURITY.md](SECURITY.md) for the full audit
 report, including findings accepted as known risk.
@@ -152,6 +152,9 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.1.2]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.2
+[1.1.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.1
+[1.1.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.0
 [1.0.7]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.7
 [1.0.6]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.6
 [1.0.5]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.0.5
