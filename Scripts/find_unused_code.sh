@@ -6,7 +6,7 @@
 echo "🔍 Scanning for unused code..."
 echo ""
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 # Run Periphery scan
 periphery scan \
