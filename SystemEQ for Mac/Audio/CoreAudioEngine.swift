@@ -894,7 +894,7 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - EQ Application
 
     // 🔧 Пресети приходять і з зовнішніх файлів — NaN/Inf/екстремальні dB не мають дійти до фільтрів
-    private nonisolated static func sanitizedDB(_ value: Float) -> Float {
+    nonisolated private static func sanitizedDB(_ value: Float) -> Float {
         value.isFinite ? max(-20.0, min(20.0, value)) : 0.0
     }
 
