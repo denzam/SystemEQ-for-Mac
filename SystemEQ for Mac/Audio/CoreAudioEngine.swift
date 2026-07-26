@@ -131,6 +131,7 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate var inputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var inputABL: UnsafeMutableAudioBufferListPointer?
     fileprivate var bufferCapacity: UInt32 = 0 // bytes per buffer
+    fileprivate var allocatedFrameCapacity: UInt32 = 0 // frames; input/output ABL завжди алокуються з одним maxFrames
     fileprivate var outputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var outputABL: UnsafeMutableAudioBufferListPointer?
 
@@ -892,8 +893,15 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - EQ Application
 
+    // 🔧 Пресети приходять і з зовнішніх файлів — NaN/Inf/екстремальні dB не мають дійти до фільтрів
+    private nonisolated static func sanitizedDB(_ value: Float) -> Float {
+        value.isFinite ? max(-20.0, min(20.0, value)) : 0.0
+    }
+
     /// Apply fixed-band EQ (10 bands)
     public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0) {
+        let preamp = Self.sanitizedDB(preamp)
+        let gains = gains.map(Self.sanitizedDB)
         self.preampGain = preamp
         self.eqGains = gains
 
@@ -954,6 +962,8 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Apply 31-band graphic EQ using parametric peaks
     public func applyGraphicEQ31(_ gains: [Float], preamp: Float = 0.0) {
+        let preamp = Self.sanitizedDB(preamp)
+        let gains = gains.map(Self.sanitizedDB)
         self.preampGain = preamp
 
         var bands: [ParametricBand] = []
@@ -1246,6 +1256,7 @@ public final class CoreAudioEngine: ObservableObject {
         }
         let bytesPerFrame: UInt32 = 4
         bufferCapacity = maxFrames * bytesPerFrame
+        allocatedFrameCapacity = maxFrames
         let totalSize = MemoryLayout<AudioBufferList>.size + (Int(channels) - 1) * MemoryLayout<AudioBuffer>.stride
         guard let rawPtr = malloc(totalSize) else { return }
         let ablPtr = rawPtr.bindMemory(to: AudioBufferList.self, capacity: 1)
@@ -1307,7 +1318,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Set preamp gain
     public func setPreampGain(_ gain: Float) {
-        preampGain = max(-20.0, min(20.0, gain))
+        preampGain = Self.sanitizedDB(gain)
     }
 
     /// Enable/disable EQ processing (bypass)
@@ -1420,6 +1431,10 @@ private func renderCallbackFunction(
     let outBufferCount = outputBuffers.count
     let framesRequested = Int(inNumberFrames)
     let rb = engine.ringBuffer
+    // 🔧 Fallback-буфери з outputABL мають ємність allocatedFrameCapacity — не писати більше
+    guard inNumberFrames <= engine.allocatedFrameCapacity else {
+        return kAudioUnitErr_TooManyFramesToProcess
+    }
 
     if outBufferCount == 1, outputBuffers[0].mNumberChannels >= 2 {
         guard let outPtr = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
@@ -1478,6 +1493,10 @@ private func inputCaptureCallbackFunction(
     let bytesPerFrame: UInt32 = 4
     let frames = Int(inNumberFrames)
     let bufferSize = inNumberFrames * bytesPerFrame
+    // 🔧 Пристрій, що порушує MaximumFramesPerSlice, не має писати за межі преалокованих буферів
+    guard inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity else {
+        return kAudioUnitErr_TooManyFramesToProcess
+    }
     let inABL = UnsafeMutableAudioBufferListPointer(inputBufferList)
     for i in 0..<Int(engine.channelCount) {
         inABL[i].mDataByteSize = bufferSize
