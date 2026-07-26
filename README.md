@@ -234,6 +234,38 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 
 SystemEQ began as a learning project with Claude Code and is now maintained through a tool-agnostic workflow focused on review and testing.
 
+## 🩺 Troubleshooting
+
+### `Error: Refusing to load cask ... from untrusted tap`
+
+Homebrew 6.0 will not load a third-party tap until you mark it as trusted, and a
+tap owner cannot grant that for you. Run this once per Mac, then install or
+upgrade as usual:
+
+```bash
+brew trust denzam/systemeq
+brew upgrade --cask systemeq   # or: brew install --cask denzam/systemeq/systemeq
+```
+
+On Homebrew 5 and older the `trust` command does not exist — skip it.
+
+### The app asks for microphone access again after an update
+
+Expected. SystemEQ is ad-hoc signed, so its signature changes with every build
+and macOS treats each update as a new app. Grant the permission again in
+**System Settings → Privacy & Security → Microphone**.
+
+### macOS says the app "cannot be opened"
+
+The app is not notarized — see the Security Notice section below.
+Right-click the app → **Open** → confirm, or run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
+```
+
+Installing through Homebrew avoids this — the Cask clears the flag for you.
+
 ## ⚠️ Security Notice
 
 - This app is **not sandboxed** (incompatible with CoreAudio/AUHAL virtual audio devices)
