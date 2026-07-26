@@ -48,11 +48,18 @@
 #### Варіант 1: Homebrew (найпростіше — обходить Gatekeeper автоматично)
 
 ```bash
+brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
 Cask автоматично знімає quarantine-атрибут при встановленні, тому
 застосунок запуститься без попередження Gatekeeper.
+
+> **Навіщо `brew trust`?** Починаючи з Homebrew 6.0, сторонні тапи треба
+> явно позначити довіреними, інакше Homebrew відмовиться їх завантажувати
+> (`Refusing to load cask ... from untrusted tap`). Власник тапу зробити це
+> за вас не може. Команда виконується один раз на кожному Mac. На Homebrew 5
+> і старіших її пропустіть — там такої команди немає.
 
 #### Варіант 2: Завантажити DMG
 

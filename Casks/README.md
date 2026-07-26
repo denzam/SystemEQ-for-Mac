@@ -5,8 +5,14 @@
 ### Встановлення
 ```bash
 brew tap denzam/systemeq
+brew trust denzam/systemeq
 brew install --cask systemeq
 ```
+
+Починаючи з Homebrew 6.0, сторонні тапи треба явно позначити довіреними —
+без `brew trust` встановлення падає з `Refusing to load cask ... from
+untrusted tap`. Робиться один раз на кожному Mac; на Homebrew 5 і старіших
+цієї команди немає, тому її пропускають.
 
 ### Оновлення
 ```bash

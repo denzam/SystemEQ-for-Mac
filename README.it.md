@@ -48,11 +48,18 @@ Equalizzatore professionale a livello di sistema per macOS 13+
 #### Opzione 1: Homebrew (più semplice — aggira Gatekeeper automaticamente)
 
 ```bash
+brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
 Il Cask rimuove l'attributo di quarantena durante l'installazione, quindi
 l'app si avvia senza avvisi di Gatekeeper.
+
+> **Perché `brew trust`?** Da Homebrew 6.0 i tap di terze parti devono essere
+> considerati attendibili in modo esplicito, altrimenti Homebrew si rifiuta di
+> caricarli (`Refusing to load cask ... from untrusted tap`). Il proprietario
+> del tap non può farlo al posto tuo. Il comando va eseguito una sola volta per
+> Mac. Su Homebrew 5 e precedenti saltalo: quel comando non esiste.
 
 #### Opzione 2: Scarica il DMG
 

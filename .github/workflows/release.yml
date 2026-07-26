@@ -141,14 +141,20 @@ jobs:
                (the app is ad-hoc signed but not notarized — Apple Developer ID is not used by this project)
             4. Alternative: open Terminal and run
                `xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"`
-            5. Or via Homebrew: `brew install --cask denzam/systemeq/systemeq` (quarantine flag handled automatically)
+            5. Or via Homebrew (quarantine flag handled automatically):
+               ```
+               brew trust denzam/systemeq
+               brew install --cask denzam/systemeq/systemeq
+               ```
+               Homebrew 6.0+ refuses to load third-party taps until you trust them
+               once per machine; on Homebrew 5 and older, skip the first line.
 
             ### Requirements
             - macOS 13 (Ventura) or later
             - Apple Silicon or Intel Mac
 
             ---
-            *Also available via Homebrew: `brew install --cask denzam/systemeq/systemeq`*
+            *Also available via Homebrew — see step 5 above.*
           files: |
             build/SystemEQ-v${{ steps.version.outputs.version }}.dmg
             build/SystemEQ-v${{ steps.version.outputs.version }}.zip

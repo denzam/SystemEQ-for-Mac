@@ -62,11 +62,18 @@ calibration, and a real-time visualizer. No subscriptions, no telemetry.
 #### Option 1: Homebrew (easiest — bypasses Gatekeeper automatically)
 
 ```bash
+brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
 The Cask removes the quarantine attribute on install, so the app opens
 without a Gatekeeper prompt.
+
+> **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
+> explicitly before Homebrew will load them, and there is no way for a tap
+> owner to grant that on your behalf. Without it you get
+> `Refusing to load cask ... from untrusted tap`. It is a one-time command per
+> machine. On Homebrew 5 and older, skip it — the command does not exist there.
 
 #### Option 2: Download DMG
 

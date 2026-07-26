@@ -4,7 +4,9 @@ Official links:
 - Source/Releases: https://github.com/denzam/SystemEQ-for-Mac
 - Releases (download): https://github.com/denzam/SystemEQ-for-Mac/releases/latest
 - Site: https://denzam.github.io/SystemEQ-for-Mac/
-- Homebrew: `brew install --cask denzam/systemeq/systemeq`
+- Homebrew: `brew trust denzam/systemeq && brew install --cask denzam/systemeq/systemeq`
+  (Homebrew 6.0+ requires trusting a third-party tap once before it will load;
+  older Homebrew has no `trust` command, so drop the first half there)
 
 ---
 
@@ -88,7 +90,7 @@ Honest caveats:
 Download (official GitHub Releases):
 https://github.com/denzam/SystemEQ-for-Mac/releases/latest
 Source: https://github.com/denzam/SystemEQ-for-Mac
-Install: brew install --cask denzam/systemeq/systemeq
+Install: brew trust denzam/systemeq && brew install --cask denzam/systemeq/systemeq
 
 It's my project and I'd genuinely love feedback — what's missing, what's
 confusing, what would make you actually use it. Happy to answer anything.
