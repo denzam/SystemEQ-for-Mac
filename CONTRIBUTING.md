@@ -40,7 +40,7 @@ There is no `Package.swift` — the project is a plain Xcode project.
 
 ## Coding conventions
 
-Defined in [`AI_GUIDELINES.md`](AI_GUIDELINES.md). Highlights:
+Defined in [`AGENTS.md`](AGENTS.md). Highlights:
 
 - Logging: `dlog(_:category:)` only — never `print`. **Never** log inside
   the audio render callback.
