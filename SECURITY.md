@@ -64,8 +64,9 @@ audio utility, the mitigations cost more complexity than the risk warrants:
 - The ProjectM preset archive is fetched from a mutable branch rather than a
   pinned commit with a verified checksum.
 - `Scripts/setup_projectm.sh` (developer-only, requires explicit execution and a
-  sudo confirmation) builds from a mutable upstream tag and uses predictable
-  temporary paths.
+  sudo confirmation) builds from a mutable upstream tag. The predictable `/tmp`
+  paths reported in the same finding were fixed after the audit: the script now
+  does all of its work in a private `mktemp -d` directory removed on exit.
 
 These are re-evaluated at each audit. If you believe one is more exploitable in
 practice than assessed here, please report it.
