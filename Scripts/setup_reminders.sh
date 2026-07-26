@@ -9,7 +9,7 @@ echo ""
 # Create reminders using osascript (AppleScript)
 
 # 1. Weekly reminder - Find unused code
-osascript <<EOF
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🧹 SystemEQ: Перевірити невикористаний код", body:"Запустити: ./Scripts/find_unused_code.sh
@@ -18,15 +18,14 @@ tell application "Reminders"
     end tell
 end tell
 EOF
-
-if [ $? -eq 0 ]; then
+then
     echo "✅ Створено нагадування: Перевірка невикористаного коду (щотижня)"
 else
     echo "⚠️  Не вдалося створити нагадування. Спробуйте вручну."
 fi
 
 # 2. Monthly reminder - Full code audit
-osascript <<EOF
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🔍 SystemEQ: Повний аудит коду", body:"Запустити: ./Scripts/code_quality_check.sh
@@ -38,15 +37,14 @@ tell application "Reminders"
     end tell
 end tell
 EOF
-
-if [ $? -eq 0 ]; then
+then
     echo "✅ Створено нагадування: Повний аудит коду (щомісяця)"
 else
     echo "⚠️  Не вдалося створити нагадування."
 fi
 
 # 3. Monthly reminder - Update dependencies
-osascript <<EOF
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"📦 SystemEQ: Оновити залежності", body:"Перевірити оновлення:
@@ -56,8 +54,7 @@ tell application "Reminders"
     end tell
 end tell
 EOF
-
-if [ $? -eq 0 ]; then
+then
     echo "✅ Створено нагадування: Оновлення залежностей (щомісяця)"
 else
     echo "⚠️  Не вдалося створити нагадування."

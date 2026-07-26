@@ -18,14 +18,13 @@ if command -v swiftformat &> /dev/null; then
     # Gate on --lint's exit code, the same check CI runs. The old --dryrun grep
     # matched the summary line ("0/60 files would have been formatted"), so it
     # counted 1 even on a clean tree and this check could never pass.
-    FORMAT_OUT=$(swiftformat "SystemEQ for Mac" --config .swiftformat --lint 2>&1)
-    if [ $? -ne 0 ]; then
+    if FORMAT_OUT=$(swiftformat "SystemEQ for Mac" --config .swiftformat --lint 2>&1); then
+        echo "   ✅ All files formatted correctly"
+    else
         UNFORMATTED=$(printf '%s\n' "$FORMAT_OUT" | grep -oE "^[0-9]+/[0-9]+ files require" | cut -d/ -f1)
         echo "   ⚠️  ${UNFORMATTED:-some} file(s) need formatting"
         echo "   Run: swiftformat 'SystemEQ for Mac' --config .swiftformat"
         ERRORS=$((ERRORS + 1))
-    else
-        echo "   ✅ All files formatted correctly"
     fi
 else
     echo "   ⚠️  SwiftFormat not installed"
@@ -53,8 +52,8 @@ echo ""
 
 # 3. Build check
 echo "🔨 [3/3] Build check..."
-xcodebuild -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" -configuration Debug build -quiet 2>/dev/null
-if [ $? -eq 0 ]; then
+if xcodebuild -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" \
+    -configuration Debug build -quiet 2>/dev/null; then
     echo "   ✅ Build successful"
 else
     echo "   ❌ Build failed"

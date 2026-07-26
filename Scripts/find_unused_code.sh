@@ -9,16 +9,14 @@ echo ""
 cd "$(dirname "$0")/.." || exit 1
 
 # Run Periphery scan
-periphery scan \
+if periphery scan \
     --project "SystemEQ for Mac.xcodeproj" \
     --schemes "SystemEQ for Mac" \
     --targets "SystemEQ for Mac" \
     --skip-build \
     --format xcode \
     --disable-update-check \
-    2>/dev/null
-
-if [ $? -eq 0 ]; then
+    2>/dev/null; then
     echo ""
     echo "✅ Scan complete!"
     echo "   Review the results above and remove unused code."

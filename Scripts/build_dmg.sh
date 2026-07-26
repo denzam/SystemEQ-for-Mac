@@ -12,7 +12,6 @@ set -e
 APP_NAME="SystemEQ for Mac"
 SCHEME="SystemEQ for Mac"
 PROJECT="SystemEQ for Mac.xcodeproj"
-BUNDLE_ID="com.denzam.SystemEQ"
 VERSION="${1:-1.0.0}"
 BUILD_DIR="build"
 ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
@@ -116,7 +115,7 @@ rm -rf "$ARCHIVE_PATH"
 rm -f "$BUILD_DIR/ExportOptions.plist"
 
 # Get file size
-DMG_SIZE=$(ls -lh "$DMG_PATH" | awk '{print $5}')
+DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

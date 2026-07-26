@@ -6,7 +6,7 @@
 echo "🌍 Generating localization files..."
 
 # Find all Swift files and extract NSLocalizedString keys
-find "SystemEQ for Mac" -name "*.swift" -type f | while read file; do
+find "SystemEQ for Mac" -name "*.swift" -type f | while IFS= read -r file; do
     echo "Processing: $file"
     
     # Extract keys from NSLocalizedString calls
@@ -35,7 +35,7 @@ cat > "SystemEQ for Mac/Resources/Localizations/en.lproj/Localizable.strings" <<
 EOF
 
 # Add all keys with empty values (to be filled by translators)
-while read key; do
+while IFS= read -r key; do
     echo "\"$key\" = \"\";" >> "SystemEQ for Mac/Resources/Localizations/en.lproj/Localizable.strings"
 done < all_keys.txt
 

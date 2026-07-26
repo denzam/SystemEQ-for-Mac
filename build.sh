@@ -41,7 +41,7 @@ xcodebuild \
 EXIT_CODE=${PIPESTATUS[0]}
 
 echo "---"
-if [ $EXIT_CODE -eq 0 ]; then
+if [ "$EXIT_CODE" -eq 0 ]; then
     echo "BUILD SUCCEEDED"
 else
     echo "BUILD FAILED (exit code $EXIT_CODE)"
@@ -50,4 +50,4 @@ else
     grep -E "error:" "$LOG" | grep -v "appintentsmetadataprocessor" || true
 fi
 
-exit $EXIT_CODE
+exit "$EXIT_CODE"
