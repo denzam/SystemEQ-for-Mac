@@ -733,6 +733,7 @@ public enum LocalizedString: String, CaseIterable {
     case dbUpToDate
     case dbUpdateAvailable
     case dbCheckFailed
+    case dbVersionUnavailable
 }
 
 // MARK: - Localization Data Structure
@@ -3892,6 +3893,11 @@ private enum LocalizationData {
                     .english: "⚠️ Could not check: %@",
                     .italian: "⚠️ Impossibile verificare: %@",
                     .ukrainian: "⚠️ Не вдалося перевірити: %@"
+                ],
+                .dbVersionUnavailable: [
+                    .english: "could not read the local database version",
+                    .italian: "impossibile leggere la versione del database locale",
+                    .ukrainian: "не вдалося прочитати версію локальної бази"
                 ]
             ]
 

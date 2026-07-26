@@ -873,10 +873,29 @@ public final class CoreAudioEngine: ObservableObject {
             }
         }
 
+        // 🔧 The MaximumFramesPerSlice writes above are best-effort: a unit may
+        // reject or clamp them. Allocating for the requested value while a unit
+        // kept a larger one is what lets a callback ask for more frames than the
+        // buffers hold, so the buffers follow whatever the units actually report.
+        let effectiveMaxFrames = max(
+            maxFramesPerSlice,
+            max(
+                readMaximumFramesPerSlice(inputUnit) ?? maxFramesPerSlice,
+                readMaximumFramesPerSlice(outputUnit) ?? maxFramesPerSlice
+            )
+        )
+        if effectiveMaxFrames != maxFramesPerSlice {
+            dlog(
+                "⚠️ Requested MaximumFramesPerSlice \(maxFramesPerSlice), units report \(effectiveMaxFrames) — allocating for the larger value",
+                level: .error,
+                category: .engine
+            )
+        }
+
         // Pre-allocate buffers for render callback (after channelCount is known)
-        allocateInputBuffer(maxFrames: maxFramesPerSlice, channels: self.channelCount)
-        allocateOutputBuffer(maxFrames: maxFramesPerSlice, channels: self.channelCount)
-        allocateRingBuffer(capacityFrames: Int(maxFramesPerSlice) * 16, channels: self.channelCount)
+        allocateInputBuffer(maxFrames: effectiveMaxFrames, channels: self.channelCount)
+        allocateOutputBuffer(maxFrames: effectiveMaxFrames, channels: self.channelCount)
+        allocateRingBuffer(capacityFrames: Int(effectiveMaxFrames) * 16, channels: self.channelCount)
         guard inputBufferList != nil,
               outputBufferList != nil,
               ringBuffer.isAllocated else {
@@ -1243,6 +1262,23 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     // MARK: - Buffer Management
+
+    /// Reads back the frame limit a unit actually accepted, or nil if it cannot be queried.
+    private func readMaximumFramesPerSlice(_ unit: AudioUnit?) -> UInt32? {
+        guard let unit else { return nil }
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioUnitGetProperty(
+            unit,
+            kAudioUnitProperty_MaximumFramesPerSlice,
+            kAudioUnitScope_Global,
+            0,
+            &value,
+            &size
+        )
+        guard status == noErr, value > 0 else { return nil }
+        return value
+    }
 
     private func allocateInputBuffer(maxFrames: UInt32, channels: UInt32) {
         if let abl = inputABL, let ablPtr = inputBufferList {

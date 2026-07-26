@@ -475,32 +475,43 @@ class EQDatabase {
 
     // MARK: - Version & Updates
 
-    /// Get database version (format: YYYY-MM-DD)
-    func getVersion() -> String {
+    /// Get database version (format: YYYY-MM-DD), or nil if it cannot be read.
+    /// Callers that compare versions must use this and not the display string:
+    /// a placeholder like "Unknown" compares as *newer* than any date and would
+    /// silently turn a failed check into "up to date".
+    func readVersion() -> String? {
         let sql = "SELECT value FROM metadata WHERE key = 'version'"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            return "Unknown"
+            return nil
         }
         defer { sqlite3_finalize(statement) }
 
-        if sqlite3_step(statement) == SQLITE_ROW {
-            return columnText(statement, 0)
-        }
-        return "Unknown"
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let value = columnText(statement, 0)
+        return value.isEmpty ? nil : value
+    }
+
+    /// Get database version for display (format: YYYY-MM-DD)
+    func getVersion() -> String {
+        readVersion() ?? "Unknown"
     }
 
     /// Get build date
     func getBuildDate() -> Date? {
-        let version = getVersion()
+        guard let version = readVersion() else { return nil }
         let formatter = DateFormatter()
+        // Fixed-format dates must not follow the user's calendar/locale.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: version)
     }
 
     /// Check for updates from GitHub releases
     func checkForUpdates() async -> UpdateCheckResult {
-        let currentVersion = getVersion()
+        guard let currentVersion = readVersion() else {
+            return .checkFailed(LocalizationManager.shared.localized(.dbVersionUnavailable))
+        }
 
         // GitHub API: get latest release
         guard let url = URL(string: "https://api.github.com/repos/jaakkopasanen/AutoEq/commits?per_page=1") else {
@@ -536,6 +547,8 @@ class EQDatabase {
 
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
+        // Fixed-format dates must not follow the user's calendar/locale.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }
