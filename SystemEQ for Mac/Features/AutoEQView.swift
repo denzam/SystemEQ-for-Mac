@@ -1393,6 +1393,11 @@ struct AutoEQView: View {
         panel.message = localization.localized(.autoEQImportFileHelp)
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        // Реальні AutoEQ-пресети — кілобайти; більший файл або не текст, або DoS
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 1_000_000 {
+            searchError = localization.localized(.autoEQImportFileError)
+            return
+        }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             searchError = localization.localized(.autoEQImportFileError)
             return
@@ -1422,6 +1427,16 @@ struct AutoEQView: View {
                 bands = parsedBands
                 preamp = parsePreamp(text: trimmed)
             }
+        }
+
+        // Нечислові й екстремальні значення з файлу не мають дійти до DSP
+        bands = Array(bands.filter {
+            $0.freq.isFinite && $0.freq > 0 && $0.freq <= 30000
+                && $0.gain.isFinite && abs($0.gain) <= 40
+                && $0.q.isFinite && $0.q > 0 && $0.q <= 100
+        }.prefix(256))
+        if let p = preamp, !p.isFinite || abs(p) > 40 {
+            preamp = nil
         }
 
         guard !bands.isEmpty else {
