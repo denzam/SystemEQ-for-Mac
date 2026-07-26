@@ -4,6 +4,19 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Security audit follow-up. See [SECURITY.md](SECURITY.md) for the full audit
+report, including findings accepted as known risk.
+
+### Security
+- Pinned all GitHub Actions to full commit SHAs so a retargeted version tag cannot alter the workflow that builds and publishes releases
+- Audio render callbacks now validate the frame count supplied by CoreAudio against the preallocated buffer capacity instead of trusting it
+- Imported `.txt` presets are bounded in size and filter count, and every gain and preamp value is checked for range before it reaches the audio engine
+
+### Added
+- `SECURITY.md` with the vulnerability reporting process, security model, and audit history
+
 ## [1.1.1] — 2026-07-25
 
 Reliability, security, and release-readiness update.

@@ -234,6 +234,14 @@ SystemEQ began as a learning project with Claude Code and is now maintained thro
 - Only install from official [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
 - Ad-hoc signed — right-click → Open on first launch to bypass Gatekeeper
 
+### Security audits
+
+The codebase is audited periodically with automated security scanning. Findings
+and their resolution are tracked in [SECURITY.md](SECURITY.md); fixes ship in the
+next release and are listed in [CHANGELOG.md](CHANGELOG.md).
+
+Found something? See [SECURITY.md](SECURITY.md) for how to report it.
+
 ## 🤝 Contributing
 
 1. Fork the project
