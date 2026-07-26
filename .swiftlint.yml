@@ -62,14 +62,16 @@ opt_in_rules:
   - yoda_condition
 
 # Rule configurations
+# A force unwrap or force try on the audio path is a crash in the render
+# callback, so these block CI instead of scrolling past as warnings.
 force_cast:
-  severity: warning
+  severity: error
 
 force_try:
-  severity: warning
+  severity: error
 
 force_unwrapping:
-  severity: warning
+  severity: error
 
 implicitly_unwrapped_optional:
   severity: warning

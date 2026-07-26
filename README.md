@@ -252,10 +252,16 @@ Found something? See [SECURITY.md](SECURITY.md) for how to report it.
 ## 🤝 Contributing
 
 1. Fork the project
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+2. Enable the pre-commit hook once per clone:
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+   It formats staged Swift files and runs the same SwiftFormat and SwiftLint
+   gates as CI, so a push does not fail on something catchable locally.
+3. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+4. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+5. Push to the branch (`git push origin feature/AmazingFeature`)
+6. Open a Pull Request
 
 ## 📄 License
 

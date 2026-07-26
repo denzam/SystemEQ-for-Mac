@@ -1,0 +1,86 @@
+#!/bin/bash
+#
+# Pre-commit hook for SystemEQ for Mac
+# Formats staged Swift files, then verifies them with the same gates CI runs.
+#
+# Every path in this project contains spaces ("SystemEQ for Mac/Audio/..."), so
+# the staged list must be read NUL-delimited. The previous version iterated an
+# unquoted variable, which split each path on whitespace into fragments that
+# matched no file — SwiftFormat and SwiftLint were never invoked on anything,
+# and the hook reported success on every commit.
+
+set -uo pipefail
+
+echo "🔍 Running pre-commit checks..."
+
+# Must match `excluded` in .swiftlint.yml and `--exclude` in .swiftformat,
+# otherwise the hook blocks commits that CI would accept.
+EXCLUDED_DIRS=(.build DerivedData .swiftpm Pods Carthage Scripts)
+
+is_excluded() {
+    local path="$1" dir
+    for dir in "${EXCLUDED_DIRS[@]}"; do
+        case "$path" in
+            "$dir"/*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+FILES=()
+while IFS= read -r -d '' file; do
+    [ -f "$file" ] || continue
+    is_excluded "$file" && continue
+    FILES+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.swift')
+
+if [ ${#FILES[@]} -eq 0 ]; then
+    echo "✅ No Swift files to check"
+    exit 0
+fi
+
+echo "📝 Checking ${#FILES[@]} Swift file(s)..."
+
+SKIPPED=0
+
+if command -v swiftformat &>/dev/null; then
+    echo "🎨 Running SwiftFormat..."
+    swiftformat "${FILES[@]}" --config .swiftformat >/dev/null 2>&1
+    git add -- "${FILES[@]}"
+
+    # Auto-format cannot fix every rule, so gate on the same --lint check as CI.
+    if ! swiftformat "${FILES[@]}" --config .swiftformat --lint >/dev/null 2>&1; then
+        echo "❌ SwiftFormat: files still fail --lint after formatting:"
+        swiftformat "${FILES[@]}" --config .swiftformat --lint 2>&1 | grep -E "error|warning"
+        exit 1
+    fi
+    echo "✅ SwiftFormat clean"
+else
+    echo "⚠️  SwiftFormat NOT INSTALLED — formatting was NOT checked (brew install swiftformat)"
+    SKIPPED=1
+fi
+
+if command -v swiftlint &>/dev/null; then
+    echo "🔎 Running SwiftLint..."
+    LINT_OUTPUT=$(swiftlint lint --config .swiftlint.yml --quiet "${FILES[@]}" 2>&1)
+    LINT_STATUS=$?
+    ERRORS=$(printf '%s\n' "$LINT_OUTPUT" | grep -c "error:")
+
+    if [ "$LINT_STATUS" -ne 0 ] || [ "$ERRORS" -gt 0 ]; then
+        printf '%s\n' "$LINT_OUTPUT" | grep "error:"
+        echo "❌ SwiftLint found $ERRORS error(s). Fix before committing (swiftlint --fix may help)."
+        exit 1
+    fi
+    echo "✅ SwiftLint passed"
+else
+    echo "⚠️  SwiftLint NOT INSTALLED — linting was NOT checked (brew install swiftlint)"
+    SKIPPED=1
+fi
+
+if [ "$SKIPPED" -eq 1 ]; then
+    echo "⚠️  Some checks were SKIPPED — CI may still reject this commit."
+    exit 0
+fi
+
+echo "✅ All pre-commit checks passed!"
+exit 0
