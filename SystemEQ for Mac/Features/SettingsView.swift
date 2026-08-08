@@ -3,7 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
-    @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @StateObject private var launchManager = LaunchAtLoginManager()
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
 
@@ -229,7 +229,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-                Toggle(isOn: $launchAtLogin) {
+                Toggle(isOn: $launchManager.isEnabled) {
                     HStack {
                         Image(systemName: "power.circle.fill")
                             .foregroundColor(.purple)
@@ -238,7 +238,9 @@ struct SettingsView: View {
                     }
                 }
                 .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .help(localization.localized(.launchAtLoginHelp))
                 .padding()
+                .onAppear { launchManager.refreshStatus() }
 
                 Divider()
 

@@ -160,44 +160,43 @@ import ServiceManagement
 class LaunchAtLoginManager: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
+            guard !isMirroringSystemState else { return }
             setLaunchAtLogin(enabled: isEnabled)
         }
     }
 
+    /// 🔧 Guards didSet while `isEnabled` is written to mirror system state, not to change it.
+    private var isMirroringSystemState = false
+
     init() {
-        // Check current status
-        if #available(macOS 13.0, *) {
-            self.isEnabled = SMAppService.mainApp.status == .enabled
-        } else {
-            self.isEnabled = false
-        }
+        self.isEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    /// Background Task Management may drop the registration when the app's cdhash changes
+    /// (every ad-hoc-signed rebuild), so re-read the real status instead of trusting our own.
+    func refreshStatus() {
+        mirror(SMAppService.mainApp.status == .enabled)
     }
 
     private func setLaunchAtLogin(enabled: Bool) {
-        if #available(macOS 13.0, *) {
-            do {
-                if enabled {
-                    try SMAppService.mainApp.register()
-                    dlog("✅ Launch at login enabled", category: .general)
-                } else {
-                    try SMAppService.mainApp.unregister()
-                    dlog("✅ Launch at login disabled", category: .general)
-                }
-            } catch {
-                dlog("❌ Failed to set launch at login: \(error)", category: .general)
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
             }
+            dlog("Launch at login \(enabled ? "enabled" : "disabled")", category: .general)
+        } catch {
+            errorLog("Launch at login \(enabled ? "register" : "unregister") failed: \(error)")
+            // Never leave the toggle claiming a state the system did not accept.
+            mirror(SMAppService.mainApp.status == .enabled)
         }
     }
-}
 
-// MARK: - Enhanced Settings View Integration
-
-struct LaunchAtLoginToggle: View {
-    @StateObject private var launchManager = LaunchAtLoginManager()
-    @ObservedObject private var localization = LocalizationManager.shared
-
-    var body: some View {
-        Toggle(localization.localized(.launchAtLogin), isOn: $launchManager.isEnabled)
-            .help(localization.localized(.launchAtLoginHelp))
+    private func mirror(_ value: Bool) {
+        guard value != isEnabled else { return }
+        isMirroringSystemState = true
+        isEnabled = value
+        isMirroringSystemState = false
     }
 }
