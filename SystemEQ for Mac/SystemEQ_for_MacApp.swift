@@ -108,6 +108,7 @@ struct SystemEQ_for_MacApp: App {
                         if let saved = PresetPersistence.load() {
                             let engine = AudioEngine.shared
                             engine.bandMode = saved.mode
+                            engine.syncBandsToMode()
 
                             // Load values into UI bands WITHOUT syncing to CoreAudioEngine
                             for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
@@ -139,6 +140,7 @@ struct SystemEQ_for_MacApp: App {
                         if let saved = PresetPersistence.load() {
                             let engine = AudioEngine.shared
                             engine.bandMode = saved.mode
+                            engine.syncBandsToMode()
 
                             // Load values into UI bands WITHOUT syncing to CoreAudioEngine
                             for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {

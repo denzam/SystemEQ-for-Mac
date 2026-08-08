@@ -155,6 +155,13 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    /// 🔧 `bandMode`'s didSet rebuilds `bands` only on the next main-loop turn; callers
+    /// that touch `bands` in the same turn must force the rebuild first. No-op when in sync.
+    func syncBandsToMode() {
+        guard bands.count != bandMode.bandCount else { return }
+        setupEQBands()
+    }
+
     private static func interpolatedGain(at freq: Float, from previous: [EQBand]) -> Float {
         guard !previous.isEmpty else { return 0.0 }
         if let exact = previous.first(where: { abs($0.frequency - freq) < 0.5 }) {
@@ -258,6 +265,7 @@ public final class AudioEngine: ObservableObject {
     }
 
     func applyEQValues(_ values: [Float]) {
+        syncBandsToMode()
         guard values.count == bands.count else {
             eqLog("EQ values count mismatch: got \(values.count), expected \(bands.count)", level: .error)
             return
