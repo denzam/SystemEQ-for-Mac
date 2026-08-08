@@ -38,6 +38,11 @@ struct AutoEQView: View {
     @State private var activePresetName: String?
     @State private var activePresetSource: String?
     @State private var activePresetTarget: String? // JM-1, Harman, etc.
+    @State private var activePresetPath: String? // шлях у БД, коли пресет прийшов з пошуку/обраного
+
+    // Відновлення UI при відкритті вікна ставить parsed, і вотчер .task(id: parsed)
+    // застосував би пресет повторно поверх уже відновленого рушія — гасимо один раз.
+    @State private var suppressNextAutoApply = false
 
     @State private var bassBoost: Double = 0
     @State private var rawText: String = ""
@@ -146,9 +151,13 @@ struct AutoEQView: View {
     @State private var favorites: [FavoritePreset] = []
     @State private var showFavorites: Bool = false
 
-    // Останній імпортований custom-пресет (відновлюється при старті)
+    // Останній імпортований custom-пресет (легасі-ключі, лишаються для міграції)
     @AppStorage("lastCustomPresetText") private var lastCustomPresetText: String = ""
     @AppStorage("lastCustomPresetName") private var lastCustomPresetName: String = ""
+
+    // Останній ЗАСТОСОВАНИЙ пресет будь-якого походження (custom або БД) —
+    // саме він відновлюється в UI при відкритті вікна
+    @AppStorage("lastAppliedPresetJSON") private var lastAppliedPresetJSON: String = ""
 
     /// URLSession з кешуванням (computed property для struct)
     private var cachedSession: URLSession {
@@ -516,7 +525,12 @@ struct AutoEQView: View {
                     try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
-                        if !self.mapped.isEmpty, audioEngine.isEnabled {
+                        // Без завантаженого пресета mapped — це самі нулі: авто-застосування
+                        // тут означало б стерти відновлений стан рушія плоским EQ.
+                        guard !self.parsed.isEmpty, !self.mapped.isEmpty else { return }
+                        let suppressed = suppressNextAutoApply
+                        suppressNextAutoApply = false
+                        if !suppressed, audioEngine.isEnabled {
                             applyToAudioEngine()
                         }
                     }
@@ -532,17 +546,6 @@ struct AutoEQView: View {
                 // Restore bassBoost from saved preset
                 if let saved = PresetPersistence.load() {
                     bassBoost = Double(saved.bassBoost)
-                }
-
-                // Відновити останній імпортований custom-пресет (без повторного застосування,
-                // PresetPersistence вже відновив gains у движку — тут лише UI/графік)
-                if !lastCustomPresetText.isEmpty {
-                    applyCustomPreset(
-                        text: lastCustomPresetText,
-                        name: lastCustomPresetName,
-                        persist: false,
-                        autoApply: false
-                    )
                 }
 
                 // Load offline index from user or bundle
@@ -569,6 +572,11 @@ struct AutoEQView: View {
                 } else {
                     Task { await buildOrUpdateIndex() }
                 }
+
+                // Показати у вікні останній застосований пресет (рушій його вже відновив
+                // сам при старті — тут лише UI, без повторного застосування).
+                // Після завантаження індексу: відновлення БД-пресета шукає в ньому шляхи.
+                restoreLastAppliedPresetUI()
             }
         }
         .sheet(isPresented: $showAutoEQSetup) {
@@ -1181,6 +1189,8 @@ struct AutoEQView: View {
             self.preampDB31 = cached.preampDB31
             self.preampDB = (bandMode == .ten) ? cached.preampDB10 : cached.preampDB31
             self.rawText = "Imported from cache"
+            self.activePresetName = c.display
+            self.activePresetPath = c.path
 
             // Update mapped bands
             self.mapped = mappedBands()
@@ -1192,6 +1202,7 @@ struct AutoEQView: View {
         self.activePresetName = nil
         self.activePresetSource = nil
         self.activePresetTarget = nil
+        self.activePresetPath = nil
 
         // Request deduplication
         if activeRequests.contains(c.path) {
@@ -1265,6 +1276,7 @@ struct AutoEQView: View {
                 self.activePresetName = "\(entry.brand) \(entry.model)"
                 self.activePresetSource = entry.source
                 self.activePresetTarget = nil
+                self.activePresetPath = c.path
 
                 // ✅ Cache the import result
                 importCache[c.path] = ImportCacheEntry(
@@ -1286,6 +1298,7 @@ struct AutoEQView: View {
                 self.activePresetName = "\(entry.brand) \(entry.model)"
                 self.activePresetSource = entry.source
                 self.activePresetTarget = nil // TIER 1 doesn't specify target
+                self.activePresetPath = c.path
 
                 return
             }
@@ -1454,6 +1467,7 @@ struct AutoEQView: View {
         activePresetName = name
         activePresetSource = "Custom"
         activePresetTarget = nil
+        activePresetPath = nil
         searchError = nil
         mapped = mappedBands()
 
@@ -1555,6 +1569,7 @@ struct AutoEQView: View {
             self.activePresetSource = nil
         }
         self.activePresetTarget = nil // README doesn't specify target
+        self.activePresetPath = candidate.path
 
         dlog(
             "Import successful - 10-band: \(self.parsed10.count), 31-band: \(self.parsed31.count)",
@@ -1692,10 +1707,86 @@ struct AutoEQView: View {
             preamp: engine.preampGain,
             bassBoost: Float(bassBoost)
         )
+        persistLastAppliedDescriptor()
 
         // Вмикаємо EQ якщо він вимкнений
         if !engine.isEnabled {
             engine.setEnabled(true)
+        }
+    }
+
+    // MARK: - Last Applied Preset (UI restore)
+
+    private struct LastAppliedDescriptor: Codable {
+        let name: String?
+        let source: String?
+        let path: String? // БД-пресет: шлях у AutoEQ-репозиторії
+        let rawText: String? // custom-пресет: повний текст
+    }
+
+    private func persistLastAppliedDescriptor() {
+        let descriptor: LastAppliedDescriptor
+        if let path = activePresetPath {
+            descriptor = LastAppliedDescriptor(
+                name: activePresetName,
+                source: activePresetSource,
+                path: path,
+                rawText: nil
+            )
+        } else if activePresetSource == "Custom", !rawText.isEmpty {
+            descriptor = LastAppliedDescriptor(
+                name: activePresetName,
+                source: activePresetSource,
+                path: nil,
+                rawText: rawText
+            )
+        } else {
+            return
+        }
+        if let data = try? JSONEncoder().encode(descriptor),
+           let json = String(data: data, encoding: .utf8) {
+            lastAppliedPresetJSON = json
+        }
+    }
+
+    /// Відновлює у вікні останній застосований пресет — лише UI: рушій свій стан
+    /// уже відновив через PresetPersistence, тому вотчер parsed гаситься на один цикл.
+    private func restoreLastAppliedPresetUI() {
+        guard parsed.isEmpty else { return }
+
+        if let data = lastAppliedPresetJSON.data(using: .utf8),
+           let descriptor = try? JSONDecoder().decode(LastAppliedDescriptor.self, from: data) {
+            if let text = descriptor.rawText, !text.isEmpty {
+                suppressNextAutoApply = true
+                if !applyCustomPreset(text: text, name: descriptor.name ?? "", persist: false, autoApply: false) {
+                    suppressNextAutoApply = false
+                }
+            } else if let path = descriptor.path, !path.isEmpty {
+                suppressNextAutoApply = true
+                let isParametric = path.contains("ParametricEQ.txt")
+                let candidate = SearchCandidate(
+                    path: path,
+                    name: isParametric ? "ParametricEQ.txt" : "README.md",
+                    display: descriptor.name ?? path,
+                    isParametric: isParametric
+                )
+                Task {
+                    await importCandidate(candidate)
+                    // Невдалий імпорт не ставить parsed — повертаємо вотчер до звичайної роботи
+                    if parsed.isEmpty { suppressNextAutoApply = false }
+                }
+            }
+        } else if !lastCustomPresetText.isEmpty {
+            // Легасі-міграція: до появи дескриптора зберігався лише custom-імпорт
+            suppressNextAutoApply = true
+            if !applyCustomPreset(
+                text: lastCustomPresetText,
+                name: lastCustomPresetName,
+                persist: false,
+                autoApply: false
+            ) {
+                suppressNextAutoApply = false
+            }
         }
     }
 
