@@ -241,6 +241,11 @@ struct SettingsView: View {
                 .help(localization.localized(.launchAtLoginHelp))
                 .padding()
                 .onAppear { launchManager.refreshStatus() }
+                // Login item can be flipped in System Settings while this window stays open —
+                // re-read whenever the user comes back to the app.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    launchManager.refreshStatus()
+                }
 
                 Divider()
 
