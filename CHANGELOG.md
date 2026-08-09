@@ -4,6 +4,27 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-09
+
+Launch reliability overhaul and two community-requested features
+([#30](https://github.com/denzam/SystemEQ-for-Mac/issues/30),
+[#31](https://github.com/denzam/SystemEQ-for-Mac/issues/31)).
+
+### Added
+- Auto-switch preset per output device (opt-in): the preset applied on each output is remembered and re-applied when you switch outputs, and launch restore follows the connected output (#31)
+- "Hide Dock Icon" setting: run the app from the menu bar only; the two icon toggles guard each other so the app always stays reachable (#30)
+- The AutoEQ window now remembers the last applied preset of any origin — database presets included — and shows it on open without touching the running EQ
+
+### Fixed
+- "Launch at login" never actually registered a login item; the toggle now uses the system service, reflects the real registration status, and reverts when the system refuses
+- The saved preset was not restored on launch in 31-band mode (band array rebuilt one run-loop turn too late)
+- EQ state was not restored at all when the app auto-started at login without opening a window
+- Opening the AutoEQ window could silently replace the active preset with a stale custom import or a flat all-zero EQ
+- A failed startup restore (device not yet available, permission not yet granted) permanently disabled future restores
+- Oversized gain arrays could crash the 10-band apply path
+- Database update checks no longer report success without checking; buffer sizes follow the actual `MaximumFramesPerSlice` the audio units accept
+- Running the test suite no longer erases the developer's saved preset
+
 ## [1.1.2] — 2026-07-26
 
 Security audit follow-up. See [SECURITY.md](SECURITY.md) for the full audit
