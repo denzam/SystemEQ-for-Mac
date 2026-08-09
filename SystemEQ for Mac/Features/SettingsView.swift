@@ -5,6 +5,7 @@ struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
     @StateObject private var launchManager = LaunchAtLoginManager()
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+    @AppStorage("hideDockIcon") private var hideDockIcon = false
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
 
     private var startupMode: EQStartupMode {
@@ -258,6 +259,34 @@ struct SettingsView: View {
                     }
                 }
                 .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .onChange(of: showMenuBarIcon) { visible in
+                    // Без іконки в меню схований Dock зробив би застосунок недосяжним
+                    if !visible, hideDockIcon {
+                        hideDockIcon = false
+                    }
+                }
+                .padding()
+
+                Divider()
+
+                Toggle(isOn: $hideDockIcon) {
+                    HStack {
+                        Image(systemName: "dock.rectangle")
+                            .foregroundColor(.orange)
+                            .frame(width: 24)
+                        Text(localization.localized(.hideDockIcon))
+                    }
+                }
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .help(localization.localized(.hideDockIconHelp))
+                .onChange(of: hideDockIcon) { hidden in
+                    if hidden {
+                        showMenuBarIcon = true
+                    }
+                    NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                    // Повернути фокус вікну Налаштувань після зміни політики
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
             .background(Color(NSColor.textBackgroundColor).opacity(0.05))
             .cornerRadius(8)

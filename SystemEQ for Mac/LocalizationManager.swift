@@ -65,6 +65,8 @@ public enum LocalizedString: String, CaseIterable {
     case general
     case launchAtLogin
     case showMenuBarIcon
+    case hideDockIcon
+    case hideDockIconHelp
     case links
     case appearance
     case accessibility
@@ -859,6 +861,16 @@ private enum LocalizationData {
                     .english: "Show Menu Bar Icon",
                     .italian: "Mostra icona barra menu",
                     .ukrainian: "Показувати іконку в меню"
+                ],
+                .hideDockIcon: [
+                    .english: "Hide Dock Icon",
+                    .italian: "Nascondi icona dal Dock",
+                    .ukrainian: "Ховати іконку з Dock"
+                ],
+                .hideDockIconHelp: [
+                    .english: "Keeps the menu bar icon on so the app stays reachable",
+                    .italian: "Mantiene l'icona nella barra dei menu per accedere all'app",
+                    .ukrainian: "Іконка в рядку меню лишається, щоб застосунок був доступний"
                 ],
                 .links: [
                     .english: "Links",

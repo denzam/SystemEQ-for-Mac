@@ -137,6 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !isRunningUnitTests else { return }
 
+        // Issue #30: опція «сховати з Dock» — лише menu-bar-режим
+        if UserDefaults.standard.bool(forKey: "hideDockIcon") {
+            NSApp.setActivationPolicy(.accessory)
+        }
+
         StatusItemController.shared.install()
 
         // Логін-айтем може стартувати без жодного вікна — тоді .task головного

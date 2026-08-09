@@ -36,6 +36,15 @@ final class StatusItemController: NSObject {
 
         bindUpdates()
         refresh()
+        refreshVisibility()
+    }
+
+    /// "Показувати іконку в меню" з Налаштувань. Коли Dock-іконка схована,
+    /// SettingsView гарантує, що цей перемикач увімкнено — інакше застосунок
+    /// стає недосяжним.
+    func refreshVisibility() {
+        let visible = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true
+        statusItem?.isVisible = visible
     }
 
     private func buildMenu() -> NSMenu {
@@ -112,6 +121,7 @@ final class StatusItemController: NSObject {
             queue: .main
         ) { [weak self] _ in
             self?.refreshPresetLine()
+            self?.refreshVisibility()
         }
 
         languageObserver = NotificationCenter.default.addObserver(
