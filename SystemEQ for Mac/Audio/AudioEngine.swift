@@ -109,6 +109,9 @@ public final class AudioEngine: ObservableObject {
     // value is always applied via the trailing edge of the work item.
     private var syncDebounceWorkItem: DispatchWorkItem?
     private let syncDebounceInterval: DispatchTimeInterval = .milliseconds(20)
+    private let defaults: UserDefaults
+    private let enableRouting: (Bool) -> Bool
+    private let disableRouting: (Bool) -> Void
 
     // MARK: - Singleton
 
@@ -116,7 +119,20 @@ public final class AudioEngine: ObservableObject {
 
     // MARK: - Initialization
 
-    private init() {
+    init(
+        defaults: UserDefaults = .standard,
+        enableRouting: @escaping (Bool) -> Bool = { persistEnabledStateOnFailure in
+            AudioRouter.shared.enableEQRouting(
+                persistEnabledStateOnFailure: persistEnabledStateOnFailure
+            )
+        },
+        disableRouting: @escaping (Bool) -> Void = { persistEnabledState in
+            AudioRouter.shared.disableEQRouting(persistEnabledState: persistEnabledState)
+        }
+    ) {
+        self.defaults = defaults
+        self.enableRouting = enableRouting
+        self.disableRouting = disableRouting
         setupEQBands()
         setupBindings()
         engineLog("AudioEngine Facade initialized with \(bandMode.rawValue)", level: .info)
@@ -218,7 +234,8 @@ public final class AudioEngine: ObservableObject {
     /// `persistState: false` — для стартового відновлення: провал автостарту
     /// (пристрій ще не enumerated, дозвіл не надано) не має стирати збережений
     /// намір користувача, інакше наступні запуски перестають відновлювати EQ.
-    func setEnabled(_ enabled: Bool, persistState: Bool = true) {
+    @discardableResult
+    func setEnabled(_ enabled: Bool, persistState: Bool = true) -> Bool {
         CoreAudioEngine.shared.setEnabled(enabled)
 
         // Enable/disable routing based on EQ state
@@ -227,21 +244,22 @@ public final class AudioEngine: ObservableObject {
             // so filters exist before routing starts pulling audio).
             syncToCoreAudioEngineImmediate()
             // Then enable routing
-            guard AudioRouter.shared.enableEQRouting() else {
+            guard enableRouting(false) else {
                 CoreAudioEngine.shared.setEnabled(false)
                 if persistState {
-                    UserDefaults.standard.set(false, forKey: "eqWasEnabled")
+                    defaults.set(false, forKey: "eqWasEnabled")
                 }
-                return
+                return false
             }
         } else {
-            AudioRouter.shared.disableEQRouting()
+            disableRouting(false)
         }
 
         // Save EQ enabled state for startup behavior
         if persistState {
-            UserDefaults.standard.set(enabled, forKey: "eqWasEnabled")
+            defaults.set(enabled, forKey: "eqWasEnabled")
         }
+        return true
     }
 
     func setPreampGain(_ gain: Float) {

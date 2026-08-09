@@ -16,6 +16,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         engine.bandMode = .tenBand
         engine.syncBandsToMode()
         engine.resetAllBands()
+        CoreAudioEngine.shared.setEnabled(false)
         super.tearDown()
     }
 
@@ -71,5 +72,91 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         // Повернути конфіг у чистий 10-band стан
         CoreAudioEngine.shared.applyFixedBandEQ([Float](repeating: 0, count: 10), preamp: 0)
+    }
+
+    // MARK: - Startup state persistence
+
+    func testSetEnabled_routingFailureWithoutPersistence_preservesIntent() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "eqWasEnabled")
+        var routerPersistence: Bool?
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: {
+                routerPersistence = $0
+                return false
+            },
+            disableRouting: { _ in }
+        )
+
+        let succeeded = engine.setEnabled(true, persistState: false)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(routerPersistence, false)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+    }
+
+    func testSetEnabled_routingFailureFromUserAction_disablesFutureRestore() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "eqWasEnabled")
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: { _ in false },
+            disableRouting: { _ in }
+        )
+
+        let succeeded = engine.setEnabled(true, persistState: true)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertFalse(defaults.bool(forKey: "eqWasEnabled"))
+        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+    }
+
+    func testSetEnabled_routingSuccessFromUserAction_persistsEnabledState() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: "eqWasEnabled")
+        var routerPersistence: Bool?
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: {
+                routerPersistence = $0
+                return true
+            },
+            disableRouting: { _ in }
+        )
+
+        let succeeded = engine.setEnabled(true, persistState: true)
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(routerPersistence, false)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+        XCTAssertTrue(CoreAudioEngine.shared.isEnabled)
+    }
+
+    func testSetEnabled_startupDisable_preservesSavedIntent() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "eqWasEnabled")
+        var routerPersistence: Bool?
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: { _ in true },
+            disableRouting: { routerPersistence = $0 }
+        )
+
+        let succeeded = engine.setEnabled(false, persistState: false)
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(routerPersistence, false)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
     }
 }

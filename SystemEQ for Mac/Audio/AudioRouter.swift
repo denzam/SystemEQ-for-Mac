@@ -466,7 +466,10 @@ public final class AudioRouter: ObservableObject {
     ///   like it is already running on these device IDs. Needed after sleep and
     ///   after a replug, where the IDs can match while the units are already dead.
     @discardableResult
-    func enableEQRouting(forceRestart: Bool = false) -> Bool {
+    func enableEQRouting(
+        forceRestart: Bool = false,
+        persistEnabledStateOnFailure: Bool = true
+    ) -> Bool {
         // Get physical output device
         guard let physicalOutput = preferredOutputDevice() else {
             errorLog("No physical output device found!", category: .routing)
@@ -523,7 +526,7 @@ public final class AudioRouter: ObservableObject {
         // Start Core Audio Engine
         guard engine.start() else {
             errorLog("Core Audio Engine failed to start; restoring system output", category: .routing)
-            disableEQRouting()
+            disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
             return false
         }
 
