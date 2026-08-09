@@ -186,7 +186,9 @@ dist/
 
 # Internal docs (not for public)
 Docs/internal/
-.claude/
+.claude/*
+# Скіли — це джерельний код інструкцій, а не локальний стан: їх треба тримати в репозиторії
+!.claude/skills/
 
 # Coverage artifacts
 default.profraw
