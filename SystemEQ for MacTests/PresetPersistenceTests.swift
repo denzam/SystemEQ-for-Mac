@@ -26,6 +26,20 @@ final class PresetPersistenceTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - Suite Isolation
+
+    // Тест-хост — реальний застосунок: запис повз ізольований suite стирав би
+    // справжній збережений пресет користувача при кожному прогоні тестів.
+    func testSuiteIsolation_standardDefaultsUntouched() {
+        let standard = UserDefaults.standard
+        let before = standard.string(forKey: "lastPreset.mode")
+
+        PresetPersistence.save(mode: .thirtyOneBand, gains: [1, 2, 3], preamp: -3)
+        PresetPersistence.clear()
+
+        XCTAssertEqual(standard.string(forKey: "lastPreset.mode"), before)
+    }
+
     // MARK: - Save & Load Roundtrip
 
     func testSaveAndLoad_tenBandMode_roundtrip() {
