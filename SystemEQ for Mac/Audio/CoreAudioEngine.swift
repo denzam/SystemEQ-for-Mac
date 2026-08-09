@@ -928,8 +928,9 @@ public final class CoreAudioEngine: ObservableObject {
         let frequencies = AutoEQConstants.tenBandFrequencies
         var bands: [ParametricBand] = []
 
-        for (index, gain) in gains.enumerated() {
-            let freq = frequencies[index]
+        // zip: більше 10 gain-значень сюди приходити не повинно, але індексація
+        // frequencies[index] за таким масивом — це краш, а не деградація
+        for (gain, freq) in zip(gains, frequencies) {
             let type: FilterType
             let q: Float
 

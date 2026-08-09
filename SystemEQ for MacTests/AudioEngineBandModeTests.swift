@@ -60,4 +60,16 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         XCTAssertEqual(engine.bands.map(\.gain), Array(repeating: Float(0), count: 10))
     }
+
+    // MARK: - CoreAudioEngine guard rails
+
+    // Раніше frequencies[index] за масивом з 31 значення падав out-of-bounds.
+    func testApplyFixedBandEQ_oversizedGains_doesNotCrash() {
+        let gains = [Float](repeating: 1.0, count: 31)
+
+        CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: 0)
+
+        // Повернути конфіг у чистий 10-band стан
+        CoreAudioEngine.shared.applyFixedBandEQ([Float](repeating: 0, count: 10), preamp: 0)
+    }
 }
