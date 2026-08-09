@@ -11,11 +11,137 @@ import SwiftUI
 
 private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
+// MARK: - App Startup
+
+/// Стартовий сценарій: скан пристроїв → перевірка доступу → відновлення стану EQ.
+/// Викликається з двох місць (applicationDidFinishLaunching і .task головного
+/// вікна), виконується лише раз — головне вікно при старті може й не з'явитись.
+@MainActor
+enum AppStartup {
+    private static var hasRun = false
+
+    static func run() async {
+        guard !hasRun, !isRunningUnitTests else { return }
+        hasRun = true
+
+        // First, perform the async device scan to ensure the list is ready.
+        dlog("Scanning for audio devices...", category: .routing)
+        await AudioRouter.shared.refreshDevices()
+        dlog("Device scan complete", category: .routing)
+
+        // Check status but DO NOT request access immediately (let WelcomeView do it)
+        if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            dlog("Audio access not authorized - waiting for user setup", level: .warning, category: .audio)
+        } else {
+            dlog("Audio access authorized", category: .audio)
+        }
+
+        // Listen for calibration activation hints
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ShowCalibrationActivationHint"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            // Show alert about enabling EQ
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                NSAlert.show(
+                    title: LocalizationManager.shared.localized(.calibrationActivatedTitle),
+                    message: LocalizationManager.shared.localized(.calibrationActivatedMessage),
+                    style: .informational
+                )
+            }
+        }
+
+        // Apply startup behavior based on user settings
+        let startupModeRaw = UserDefaults.standard.string(forKey: "eqStartupMode") ?? EQStartupMode
+            .restoreLastState.rawValue
+        let startupMode = EQStartupMode(rawValue: startupModeRaw) ?? .restoreLastState
+
+        if startupMode == .restoreLastState {
+            // 🔧 FIX: Restore preset values to UI WITHOUT applying filters
+            // Filters will be created only when user enables EQ
+            if let saved = PresetPersistence.load() {
+                let engine = AudioEngine.shared
+                engine.bandMode = saved.mode
+                engine.syncBandsToMode()
+
+                // Load values into UI bands WITHOUT syncing to CoreAudioEngine
+                for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
+                    engine.bands[index].gain = gain
+                }
+                engine.preampGain = saved.preamp
+
+                // Restore EQ enabled state
+                let wasEnabled = UserDefaults.standard.bool(forKey: "eqWasEnabled")
+                if wasEnabled {
+                    // Now apply to CoreAudioEngine (this will create filters)
+                    engine.applyEQValues(saved.gains)
+                    engine.setPreampGain(saved.preamp)
+                    engine.setEnabled(true)
+                    CoreAudioEngine.shared.isEnabled = true
+                    dlog("Restored last state: preset + EQ enabled", category: .preset)
+                } else {
+                    // EQ disabled - values loaded to UI but NO filters created
+                    engine.setEnabled(false)
+                    CoreAudioEngine.shared.isEnabled = false
+                    dlog(
+                        "Restored last state: preset loaded to UI, EQ disabled (no filters)",
+                        category: .preset
+                    )
+                }
+            }
+        } else if startupMode == .restorePresetOnly {
+            // Load preset but keep EQ disabled
+            if let saved = PresetPersistence.load() {
+                let engine = AudioEngine.shared
+                engine.bandMode = saved.mode
+                engine.syncBandsToMode()
+
+                // Load values into UI bands WITHOUT syncing to CoreAudioEngine
+                for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
+                    engine.bands[index].gain = gain
+                }
+                engine.preampGain = saved.preamp
+
+                // Keep EQ disabled - NO filters created
+                engine.setEnabled(false)
+                CoreAudioEngine.shared.isEnabled = false
+                dlog(
+                    "Restored preset to UI but EQ is disabled (no filters, user must enable manually)",
+                    category: .preset
+                )
+            }
+        } else if startupMode == .startClean {
+            // Start with flat EQ and disabled
+            let engine = AudioEngine.shared
+            engine.setEnabled(false)
+            CoreAudioEngine.shared.isEnabled = false
+            dlog("Started clean - no preset loaded, EQ disabled", category: .preset)
+        }
+
+        // Now that devices are loaded, we can reliably check for BlackHole
+        if AudioRouter.shared.blackHoleDetected {
+            dlog("\(AppConstants.DeviceNames.blackHole) detected", category: .routing)
+            dlog("Routing will enable when you toggle 'Enable EQ'", category: .routing)
+        } else {
+            dlog(
+                "\(AppConstants.DeviceNames.blackHole) not detected - please install for system-wide EQ",
+                level: .warning,
+                category: .routing
+            )
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !isRunningUnitTests else { return }
 
         StatusItemController.shared.install()
+
+        // Логін-айтем може стартувати без жодного вікна — тоді .task головного
+        // вікна не виконається, і відновлення EQ не мало б звідки запуститись.
+        Task { await AppStartup.run() }
 
         guard !UserDefaults.standard.bool(forKey: "hasCompletedSetup") else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -64,117 +190,9 @@ struct SystemEQ_for_MacApp: App {
                 .background(WindowAccessor(id: "main", localizationKey: .mainWindowTitle))
                 .dynamicWindowTitle(id: "main", key: .mainWindowTitle)
                 .task {
-                    guard !isRunningUnitTests else { return }
-
-                    // First, perform the async device scan to ensure the list is ready.
-                    dlog("Scanning for audio devices...", category: .routing)
-                    await audioRouter.refreshDevices()
-                    dlog("Device scan complete", category: .routing)
-
-                    // Check status but DO NOT request access immediately (let WelcomeView do it)
-                    if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
-                        dlog("Audio access not authorized - waiting for user setup", level: .warning, category: .audio)
-                    } else {
-                        dlog("Audio access authorized", category: .audio)
-                    }
-
-                    // NOTE: Python AutoEQ Server removed - using SQLite database instead
-                    // To restore: see git history for AutoEQServer.swift
-
-                    // Listen for calibration activation hints
-                    NotificationCenter.default.addObserver(
-                        forName: NSNotification.Name("ShowCalibrationActivationHint"),
-                        object: nil,
-                        queue: .main
-                    ) { _ in
-                        // Show alert about enabling EQ
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            NSAlert.show(
-                                title: LocalizationManager.shared.localized(.calibrationActivatedTitle),
-                                message: LocalizationManager.shared.localized(.calibrationActivatedMessage),
-                                style: .informational
-                            )
-                        }
-                    }
-
-                    // Apply startup behavior based on user settings
-                    let startupModeRaw = UserDefaults.standard.string(forKey: "eqStartupMode") ?? EQStartupMode
-                        .restoreLastState.rawValue
-                    let startupMode = EQStartupMode(rawValue: startupModeRaw) ?? .restoreLastState
-
-                    if startupMode == .restoreLastState {
-                        // 🔧 FIX: Restore preset values to UI WITHOUT applying filters
-                        // Filters will be created only when user enables EQ
-                        if let saved = PresetPersistence.load() {
-                            let engine = AudioEngine.shared
-                            engine.bandMode = saved.mode
-                            engine.syncBandsToMode()
-
-                            // Load values into UI bands WITHOUT syncing to CoreAudioEngine
-                            for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
-                                engine.bands[index].gain = gain
-                            }
-                            engine.preampGain = saved.preamp
-
-                            // Restore EQ enabled state
-                            let wasEnabled = UserDefaults.standard.bool(forKey: "eqWasEnabled")
-                            if wasEnabled {
-                                // Now apply to CoreAudioEngine (this will create filters)
-                                engine.applyEQValues(saved.gains)
-                                engine.setPreampGain(saved.preamp)
-                                engine.setEnabled(true)
-                                CoreAudioEngine.shared.isEnabled = true
-                                dlog("Restored last state: preset + EQ enabled", category: .preset)
-                            } else {
-                                // EQ disabled - values loaded to UI but NO filters created
-                                engine.setEnabled(false)
-                                CoreAudioEngine.shared.isEnabled = false
-                                dlog(
-                                    "Restored last state: preset loaded to UI, EQ disabled (no filters)",
-                                    category: .preset
-                                )
-                            }
-                        }
-                    } else if startupMode == .restorePresetOnly {
-                        // Load preset but keep EQ disabled
-                        if let saved = PresetPersistence.load() {
-                            let engine = AudioEngine.shared
-                            engine.bandMode = saved.mode
-                            engine.syncBandsToMode()
-
-                            // Load values into UI bands WITHOUT syncing to CoreAudioEngine
-                            for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
-                                engine.bands[index].gain = gain
-                            }
-                            engine.preampGain = saved.preamp
-
-                            // Keep EQ disabled - NO filters created
-                            engine.setEnabled(false)
-                            CoreAudioEngine.shared.isEnabled = false
-                            dlog(
-                                "Restored preset to UI but EQ is disabled (no filters, user must enable manually)",
-                                category: .preset
-                            )
-                        }
-                    } else if startupMode == .startClean {
-                        // Start with flat EQ and disabled
-                        let engine = AudioEngine.shared
-                        engine.setEnabled(false)
-                        CoreAudioEngine.shared.isEnabled = false
-                        dlog("Started clean - no preset loaded, EQ disabled", category: .preset)
-                    }
-
-                    // Now that devices are loaded, we can reliably check for BlackHole
-                    if audioRouter.blackHoleDetected {
-                        dlog("\(AppConstants.DeviceNames.blackHole) detected", category: .routing)
-                        dlog("Routing will enable when you toggle 'Enable EQ'", category: .routing)
-                    } else {
-                        dlog(
-                            "\(AppConstants.DeviceNames.blackHole) not detected - please install for system-wide EQ",
-                            level: .warning,
-                            category: .routing
-                        )
-                    }
+                    // Дублює виклик з applicationDidFinishLaunching — AppStartup.run()
+                    // виконується лише раз, хто перший встиг.
+                    await AppStartup.run()
                 }
         }
         .windowStyle(.titleBar)
