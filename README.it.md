@@ -1,12 +1,30 @@
 # SystemEQ for Mac
 
-Equalizzatore professionale a livello di sistema per macOS 13+
+Equalizzatore parametrico gratuito e open source a livello di sistema per macOS 13+
+
+Regola ogni suono del Mac — Spotify, YouTube, Apple Music e altro.
+EQ a 10/31 bande, database AutoEQ per 8.665 modelli di cuffie, calibrazione
+dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abbonamento o telemetria.
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Download](https://img.shields.io/github/v/release/denzam/SystemEQ-for-Mac?label=download)](https://github.com/denzam/SystemEQ-for-Mac/releases/latest)
+[![Website](https://img.shields.io/badge/website-denzam.github.io-black)](https://denzam.github.io/SystemEQ-for-Mac/)
 
 > 🇮🇹 Italiano | 🇬🇧 [English](README.md) | 🇺🇦 [Українська](README.ua.md)
+
+![SystemEQ for Mac — finestra principale](Docs/screenshots/01-main.png)
+
+## 📸 Schermate
+
+| EQ parametrico | Database AutoEQ | Calibrazione | Visualizzatore |
+| :---: | :---: | :---: | :---: |
+| [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibrazione](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizzatore](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
+
+| Regolazione Soggettiva Stanza | Trova Risonanze |
+| :---: | :---: |
+| [![Regolazione ambiente](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Ricerca risonanze](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) |
 
 ## ✨ Funzionalità
 
@@ -16,8 +34,13 @@ Equalizzatore professionale a livello di sistema per macOS 13+
 - **Database AutoEQ** — 8.665 modelli di cuffie, 8.850 preset (SQLite, 18 MB)
 - **Visualizzazione in tempo reale** — Spettro, Forma d'onda, Particelle, Psichedelico
 - **Modulo di calibrazione** — Test dell'udito + profili personalizzati + confronto A/B
+- **Regolazione Soggettiva Stanza** — Regola la risposta della stanza a orecchio
+- **Trova Risonanze** — Sweep sinusoidale per trovare frequenze rimbombanti o squillanti
 - **Integrazione BlackHole** — Routing audio di sistema con Setup Assistant automatico
 - **Gestione preset** — Salva, carica e organizza le impostazioni EQ
+- **Cambio preset automatico per uscita** — Facoltativamente riapplica il preset salvato quando cambi uscita fisica
+- **Avvia al login** — Login Item opzionale di macOS
+- **Nascondi icona dal Dock** — Mantiene il controllo nella barra dei menu
 - **Multilingua** — Inglese, Italiano, Ucraino
 
 ### Motore audio
@@ -39,21 +62,22 @@ Equalizzatore professionale a livello di sistema per macOS 13+
 ### Requisiti
 
 - macOS 13.0 (Ventura) o successivo
-- Apple Silicon (M1/M2/M3) o Mac Intel
+- Apple Silicon o Mac Intel
 - [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (driver audio virtuale gratuito)
 - 4 GB RAM (8 GB consigliati)
 
 ### Installazione
 
-#### Opzione 1: Homebrew (più semplice — aggira Gatekeeper automaticamente)
+#### ✅ Consigliato: Homebrew — nessun passaggio manuale con Gatekeeper
 
 ```bash
 brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Il Cask rimuove l'attributo di quarantena durante l'installazione, quindi
-l'app si avvia senza avvisi di Gatekeeper.
+Il Cask rimuove l'attributo macOS di quarantena durante l'installazione, quindi
+l'app si avvia senza la conferma manuale di Gatekeeper richiesta dal DMG.
+L'app resta firmata ad-hoc e non è notarizzata.
 
 > **Perché `brew trust`?** Da Homebrew 6.0 i tap di terze parti devono essere
 > considerati attendibili in modo esplicito, altrimenti Homebrew si rifiuta di
@@ -61,10 +85,10 @@ l'app si avvia senza avvisi di Gatekeeper.
 > del tap non può farlo al posto tuo. Il comando va eseguito una sola volta per
 > Mac. Su Homebrew 5 e precedenti saltalo: quel comando non esiste.
 
-#### Opzione 2: Scarica il DMG
+#### Opzione 2: Scarica DMG o ZIP — serve la conferma manuale di Gatekeeper
 
 1. Scarica l'ultimo `.dmg` o `.zip` dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-2. Apri il DMG e trascina `SystemEQ for Mac.app` in `/Applicazioni`
+2. Apri il DMG e trascina `SystemEQ for Mac.app` nella cartella Applicazioni (`/Applications`)
 3. **Al primo avvio (una di queste opzioni):**
    - **Clic destro sull'app → Apri → Apri** nella finestra di conferma, oppure
    - Prova ad avviarla, poi apri **Impostazioni di Sistema → Privacy e Sicurezza → Apri comunque**, oppure
@@ -100,6 +124,7 @@ open "SystemEQ for Mac.xcodeproj"
    - Apri SystemEQ → scheda Routing
    - Seleziona BlackHole come ingresso, le tue cuffie/altoparlanti come uscita
    - Imposta l'uscita di sistema su BlackHole nelle Impostazioni audio di macOS
+   - Fai clic su **Abilita EQ** e mantieni SystemEQ in esecuzione
 
 3. **Applica un preset EQ**:
    - Scheda AutoEQ → cerca il modello delle tue cuffie
@@ -184,6 +209,17 @@ SystemEQ for Mac/
 - Regola l'intensità (0–100%)
 - FFT in tempo reale a 60 FPS
 
+### Regolazione Soggettiva Stanza e Trova Risonanze
+
+- Usa **Regolazione Soggettiva Stanza** per impostare la risposta della stanza a orecchio
+- Usa **Trova Risonanze** per trovare frequenze rimbombanti o squillanti e creare un filtro notch correttivo
+
+### Preset per uscita
+
+In **Impostazioni**, abilita **Cambio automatico del preset per uscita**.
+SystemEQ ricorda il preset applicato a ogni uscita fisica e lo riapplica quando
+cambi dispositivo. Qui puoi anche abilitare **Avvia al login**.
+
 ## 🎚️ Compatibilità con DAW (Reaper, Logic, Ableton, ecc.)
 
 SystemEQ elabora **l'uscita audio di sistema**. I DAW di solito bypassano l'uscita di sistema e comunicano direttamente con l'interfaccia audio — quindi l'EQ **non viene applicato** di default.
@@ -207,15 +243,12 @@ SystemEQ elabora **l'uscita audio di sistema**. I DAW di solito bypassano l'usci
 
 **Ableton:** Preferenze → Audio → Dispositivo di uscita → BlackHole 2ch
 
-> Questo aggiunge ~10-20ms di latenza extra rispetto al monitoraggio diretto. Limitazione architetturale di BlackHole (driver di sistema). Un futuro HAL Audio Plugin risolverebbe il problema, ma richiede un account Apple Developer a pagamento.
+> Questo aggiunge ~10-20ms di latenza extra rispetto al monitoraggio diretto. È un limite architetturale del routing tramite il driver di sistema BlackHole.
 
 ## 📊 Stato del progetto
 
-- ✅ Fase 1: Core EQ + routing BlackHole
-- ✅ Fase 2: Calibrazione + Visualizzatore
-- ✅ Fase 3: Integrazione database AutoEQ (8.665 modelli)
-- ⏭️ Fase 4: HAL plugin (richiede account Apple Developer a pagamento)
-- ⏭️ Fase 5: Rifinitura visiva Liquid Glass
+SystemEQ include e mantiene attivamente le funzioni principali di EQ, routing,
+calibrazione, AutoEQ, preset per uscita e visualizzatore.
 
 ## 🩺 Risoluzione dei problemi
 
@@ -249,6 +282,17 @@ xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
 
 Installando tramite Homebrew questo passaggio non serve: il Cask rimuove il flag.
 
+### Nessun suono dopo la configurazione
+
+In **Routing**, seleziona BlackHole come ingresso e cuffie o altoparlanti come
+uscita. Imposta **BlackHole 2ch** come uscita di sistema macOS, fai clic su
+**Abilita EQ** e mantieni SystemEQ in esecuzione.
+
+### Il suono è più basso dopo aver selezionato BlackHole
+
+macOS conserva un livello di volume separato per ogni dispositivo di uscita.
+Dopo il passaggio a BlackHole, alza il volume di sistema con i tasti della tastiera o nelle Impostazioni audio di macOS.
+
 ## ⚠️ Nota sulla sicurezza
 
 - L'app **non è in sandbox** (incompatibile con i dispositivi audio virtuali CoreAudio/AUHAL)
@@ -270,8 +314,8 @@ Installando tramite Homebrew questo passaggio non serve: il Cask rimuove il flag
 
 SystemEQ è software libero. Puoi usarlo, modificarlo e ridistribuirlo, ma
 **qualsiasi fork o opera derivata** deve essere rilasciato sotto GPLv3 con
-il codice sorgente completo. Fork chiusi o commerciali a pagamento non
-sono permessi.
+il codice sorgente completo. I fork chiusi non sono permessi; la distribuzione
+commerciale resta soggetta agli obblighi GPLv3 sul codice sorgente e sulla licenza.
 
 I componenti di terze parti e le rispettive licenze sono elencati in
 [THIRDPARTY.md](THIRDPARTY.md).

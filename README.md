@@ -4,7 +4,8 @@
 
 Tune every sound on your Mac — Spotify, YouTube, Apple Music, anything.
 10/31-band parametric EQ with an 8,665-headphone AutoEQ database, hearing
-calibration, and a real-time visualizer. No subscriptions, no telemetry.
+calibration, room-tuning tools, and a real-time visualizer. No subscriptions,
+no telemetry.
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange)](https://swift.org)
@@ -22,6 +23,10 @@ calibration, and a real-time visualizer. No subscriptions, no telemetry.
 | :---: | :---: | :---: | :---: |
 | [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibration](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizer](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
 
+| Subjective Room Tuning | Resonance Finder |
+| :---: | :---: |
+| [![Room Tuning](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Resonance Finder](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) |
+
 ## ✨ Features
 
 ### Core Features
@@ -30,8 +35,13 @@ calibration, and a real-time visualizer. No subscriptions, no telemetry.
 - **AutoEQ Database** — 8,665 headphone models, 8,850 presets (SQLite, 18 MB)
 - **Real-time Visualization** — Spectrum, Waveform, Particles, Psychedelic
 - **Calibration Module** — Hearing test + custom profiles + A/B comparison
+- **Subjective Room Tuning** — Tune your room response by ear
+- **Resonance Finder** — Sine sweep to identify boomy or ringing frequencies
 - **BlackHole Integration** — System-wide audio routing with automated Setup Assistant
 - **Preset Management** — Save, load, and organize your EQ settings
+- **Auto-Switch Preset per Output** — Optionally re-apply the saved preset when you change physical output devices
+- **Launch at Login** — Optional macOS login item
+- **Menu Bar Mode** — Optionally hide the Dock icon while keeping the menu bar control
 - **Multi-language** — English, Italian, Ukrainian
 
 ### Audio Engine
@@ -53,21 +63,22 @@ calibration, and a real-time visualizer. No subscriptions, no telemetry.
 ### Requirements
 
 - macOS 13.0 (Ventura) or later
-- Apple Silicon (M1/M2/M3) or Intel Mac
+- Apple Silicon or Intel Mac
 - [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (free virtual audio driver)
 - 4GB RAM (8GB recommended)
 
 ### Installation
 
-#### Option 1: Homebrew (easiest — bypasses Gatekeeper automatically)
+#### ✅ Recommended: Homebrew — no manual Gatekeeper step
 
 ```bash
 brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-The Cask removes the quarantine attribute on install, so the app opens
-without a Gatekeeper prompt.
+The Cask removes the macOS quarantine attribute during installation, so the
+app opens without the manual Gatekeeper confirmation required by the DMG.
+The app remains ad-hoc signed and is not notarized.
 
 > **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
 > explicitly before Homebrew will load them, and there is no way for a tap
@@ -75,7 +86,7 @@ without a Gatekeeper prompt.
 > `Refusing to load cask ... from untrusted tap`. It is a one-time command per
 > machine. On Homebrew 5 and older, skip it — the command does not exist there.
 
-#### Option 2: Download DMG
+#### Option 2: Download DMG or ZIP — manual Gatekeeper confirmation required
 
 1. Download the latest `.dmg` or `.zip` from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
 2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`
@@ -113,6 +124,7 @@ open "SystemEQ for Mac.xcodeproj"
    - Open SystemEQ → Routing tab
    - Select BlackHole as input, your speakers/headphones as output
    - Set System Output to BlackHole in macOS Sound Settings
+   - Click **Enable EQ** and keep SystemEQ running
 
 3. **Apply EQ Preset**:
    - AutoEQ tab → Search your headphone model
@@ -197,6 +209,17 @@ SystemEQ for Mac/
 - Adjust intensity (0–100%)
 - Real-time FFT at 60 FPS
 
+### Room Tuning and Resonance Finder
+
+- Use **Subjective Room Tuning** to tune your room response by ear
+- Use **Resonance Finder** to sweep for boomy or ringing frequencies, then create a corrective notch filter
+
+### Output-Specific Presets
+
+In **Settings**, enable **Auto-Switch Preset per Output**. SystemEQ remembers
+the preset applied on each physical output and re-applies it when you switch
+outputs. You can also enable **Launch at Login** there.
+
 ## 🎚️ DAW Compatibility (Reaper, Logic, Ableton, etc.)
 
 SystemEQ processes **system-wide audio output**. DAWs typically bypass the system output and talk directly to your audio interface — so EQ is **not applied** by default.
@@ -220,19 +243,11 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 
 **Ableton:** Preferences → Audio → Output Device → BlackHole 2ch
 
-> This adds ~10-20ms extra latency vs direct monitoring. Architectural limitation of BlackHole (system-level driver). A future HAL Audio Plugin would solve this but requires a paid Apple Developer account.
+> This adds ~10-20ms extra latency vs direct monitoring. This is an architectural limitation of routing through the BlackHole system driver.
 
 ## 📊 Project Status
 
-- ✅ Phase 1: Core EQ + BlackHole routing
-- ✅ Phase 2: Calibration + Visualizer
-- ✅ Phase 3: AutoEQ database integration (8,665 models)
-- ⏭️ Phase 4: HAL plugin (requires paid Apple Developer account)
-- ⏭️ Phase 5: Liquid Glass visual polish
-
-### Development Note
-
-SystemEQ began as a learning project with Claude Code and is now maintained through a tool-agnostic workflow focused on review and testing.
+SystemEQ ships its core EQ, routing, calibration, AutoEQ, output-specific preset, and visualizer features and is actively maintained.
 
 ## 🩺 Troubleshooting
 
@@ -265,6 +280,18 @@ xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
 ```
 
 Installing through Homebrew avoids this — the Cask clears the flag for you.
+
+### No sound after setup
+
+In **Routing**, select BlackHole as input and your speakers or headphones as
+output. Set **BlackHole 2ch** as the macOS System Output, click **Enable EQ**,
+and keep SystemEQ running.
+
+### Sound is quieter after switching to BlackHole
+
+macOS stores a separate volume level for each output device. After switching
+to BlackHole, raise the system volume with the keyboard volume keys or in
+macOS Sound settings.
 
 ## ⚠️ Security Notice
 
@@ -302,7 +329,8 @@ Found something? See [SECURITY.md](SECURITY.md) for how to report it.
 SystemEQ is free software. You may use, modify, and redistribute it, but
 any redistributed version (including forks and derivative works) must
 also be released under GPLv3 with full source code available. Closed-source
-or paid commercial forks are not permitted.
+forks are not permitted; commercial distribution remains subject to GPLv3's
+source-code and license obligations.
 
 Third-party components and their licenses are listed in
 [THIRDPARTY.md](THIRDPARTY.md).
