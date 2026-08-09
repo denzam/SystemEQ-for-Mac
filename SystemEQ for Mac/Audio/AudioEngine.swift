@@ -215,7 +215,10 @@ public final class AudioEngine: ObservableObject {
 
     // MARK: - Control Methods
 
-    func setEnabled(_ enabled: Bool) {
+    /// `persistState: false` — для стартового відновлення: провал автостарту
+    /// (пристрій ще не enumerated, дозвіл не надано) не має стирати збережений
+    /// намір користувача, інакше наступні запуски перестають відновлювати EQ.
+    func setEnabled(_ enabled: Bool, persistState: Bool = true) {
         CoreAudioEngine.shared.setEnabled(enabled)
 
         // Enable/disable routing based on EQ state
@@ -226,7 +229,9 @@ public final class AudioEngine: ObservableObject {
             // Then enable routing
             guard AudioRouter.shared.enableEQRouting() else {
                 CoreAudioEngine.shared.setEnabled(false)
-                UserDefaults.standard.set(false, forKey: "eqWasEnabled")
+                if persistState {
+                    UserDefaults.standard.set(false, forKey: "eqWasEnabled")
+                }
                 return
             }
         } else {
@@ -234,7 +239,9 @@ public final class AudioEngine: ObservableObject {
         }
 
         // Save EQ enabled state for startup behavior
-        UserDefaults.standard.set(enabled, forKey: "eqWasEnabled")
+        if persistState {
+            UserDefaults.standard.set(enabled, forKey: "eqWasEnabled")
+        }
     }
 
     func setPreampGain(_ gain: Float) {

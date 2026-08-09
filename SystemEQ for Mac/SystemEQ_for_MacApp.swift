@@ -77,12 +77,12 @@ enum AppStartup {
                     // Now apply to CoreAudioEngine (this will create filters)
                     engine.applyEQValues(saved.gains)
                     engine.setPreampGain(saved.preamp)
-                    engine.setEnabled(true)
+                    engine.setEnabled(true, persistState: false)
                     CoreAudioEngine.shared.isEnabled = true
                     dlog("Restored last state: preset + EQ enabled", category: .preset)
                 } else {
                     // EQ disabled - values loaded to UI but NO filters created
-                    engine.setEnabled(false)
+                    engine.setEnabled(false, persistState: false)
                     CoreAudioEngine.shared.isEnabled = false
                     dlog(
                         "Restored last state: preset loaded to UI, EQ disabled (no filters)",
@@ -104,7 +104,7 @@ enum AppStartup {
                 engine.preampGain = saved.preamp
 
                 // Keep EQ disabled - NO filters created
-                engine.setEnabled(false)
+                engine.setEnabled(false, persistState: false)
                 CoreAudioEngine.shared.isEnabled = false
                 dlog(
                     "Restored preset to UI but EQ is disabled (no filters, user must enable manually)",
@@ -114,7 +114,7 @@ enum AppStartup {
         } else if startupMode == .startClean {
             // Start with flat EQ and disabled
             let engine = AudioEngine.shared
-            engine.setEnabled(false)
+            engine.setEnabled(false, persistState: false)
             CoreAudioEngine.shared.isEnabled = false
             dlog("Started clean - no preset loaded, EQ disabled", category: .preset)
         }
