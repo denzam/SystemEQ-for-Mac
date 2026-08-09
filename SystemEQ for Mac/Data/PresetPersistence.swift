@@ -14,8 +14,11 @@ public enum PresetPersistence {
     private static let preampKey = "lastPreset.preamp"
     private static let bassBoostKey = "lastPreset.bassBoost"
 
+    // 🔧 Тести підміняють на ізольований suite: запис у .standard у тест-хості
+    // стирає реальний збережений пресет користувача.
+    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+
     public static func save(mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float = 0.0) {
-        let defaults = UserDefaults.standard
         defaults.set(mode.rawValue, forKey: modeKey)
         if let data = try? JSONEncoder().encode(gains) {
             defaults.set(data, forKey: gainsKey)
@@ -25,7 +28,6 @@ public enum PresetPersistence {
     }
 
     public static func load() -> (mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float)? {
-        let defaults = UserDefaults.standard
         guard let raw = defaults.string(forKey: modeKey), let mode = EQBandMode(rawValue: raw) else { return nil }
         guard let data = defaults.data(forKey: gainsKey),
               let gains = try? JSONDecoder().decode([Float].self, from: data) else { return nil }
@@ -35,7 +37,6 @@ public enum PresetPersistence {
     }
 
     public static func clear() {
-        let defaults = UserDefaults.standard
         defaults.removeObject(forKey: modeKey)
         defaults.removeObject(forKey: gainsKey)
         defaults.removeObject(forKey: preampKey)
@@ -43,6 +44,6 @@ public enum PresetPersistence {
     }
 
     public static var hasSavedPreset: Bool {
-        UserDefaults.standard.string(forKey: modeKey) != nil && UserDefaults.standard.data(forKey: gainsKey) != nil
+        defaults.string(forKey: modeKey) != nil && defaults.data(forKey: gainsKey) != nil
     }
 }

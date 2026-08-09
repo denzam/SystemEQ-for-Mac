@@ -9,15 +9,20 @@
 import XCTest
 
 final class PresetPersistenceTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        // Clean state before each test
-        PresetPersistence.clear()
+    // Ізольований suite: тест-хост — реальний застосунок, і запис у .standard
+    // стирав би справжній збережений пресет користувача.
+    private static let suiteName = "PresetPersistenceTests"
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        let suite = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
+        suite.removePersistentDomain(forName: Self.suiteName)
+        PresetPersistence.defaults = suite
     }
 
     override func tearDown() {
-        // Clean up after each test
-        PresetPersistence.clear()
+        UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
+        PresetPersistence.defaults = .standard
         super.tearDown()
     }
 
