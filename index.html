@@ -984,7 +984,7 @@
   "description": "Free, open-source system-wide parametric audio equalizer for macOS. AutoEQ presets, calibration tools, room tuning, MilkDrop visualizer. Powered by BlackHole.",
   "url": "https://denzam.github.io/SystemEQ-for-Mac/",
   "downloadUrl": "https://github.com/denzam/SystemEQ-for-Mac/releases/latest",
-  "softwareVersion": "1.1.1",
+  "softwareVersion": "1.2.0",
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
   "image": "https://denzam.github.io/SystemEQ-for-Mac/og-image.png",
   "author": {
@@ -1056,8 +1056,8 @@
     <p class="hero-version reveal reveal-delay-3" id="heroVersion" hidden><span data-i18n="hero.latest">Latest:</span> <strong id="heroVersionTag"></strong> · <span data-i18n="hero.free">free</span></p>
     <div class="badges reveal reveal-delay-3">
       <span class="badge">GPLv3</span>
-      <span class="badge" data-i18n="hero.badgeTelemetry">No telemetry</span>
-      <span class="badge">EN · IT · UK</span>
+      <span class="badge" data-i18n="hero.badgeTelemetry">No app telemetry</span>
+      <span class="badge">EN · IT · UA</span>
       <span class="badge" data-i18n="hero.badgePresets">8,850+ AutoEQ presets</span>
     </div>
     <div class="hero-preview reveal reveal-delay-3">
@@ -1083,6 +1083,7 @@
       <div class="feature reveal"><div class="feature-icon">🎨</div><h3 data-i18n="features.f7.title">MilkDrop visualizer</h3><p data-i18n="features.f7.body">Built-in ProjectM/MilkDrop visualizer reacts to your audio in real time. Lock or shuffle presets.</p></div>
       <div class="feature reveal"><div class="feature-icon">⚡</div><h3 data-i18n="features.f8.title">Low latency, low CPU</h3><p data-i18n="features.f8.body">Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.</p></div>
       <div class="feature reveal"><div class="feature-icon">🌍</div><h3 data-i18n="features.f9.title">Multilingual</h3><p data-i18n="features.f9.body">Full interface localization in English, Italian and Ukrainian. Switch language on the fly.</p></div>
+      <div class="feature reveal"><div class="feature-icon">💾</div><h3 data-i18n="features.f10.title">Device-aware presets &amp; startup</h3><p data-i18n="features.f10.body">Optionally remember a preset for each output device, launch at login, or keep SystemEQ in the menu bar only.</p></div>
     </div>
   </div>
 </section>
@@ -1131,13 +1132,13 @@
     <h2 class="section-title reveal" data-i18n="install.title">Get started in 2 minutes.</h2>
     <p class="section-sub reveal" data-i18n="install.sub">SystemEQ is distributed as a free open-source build outside the App Store.</p>
     <div class="install-grid">
-      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">Install BlackHole 2ch</h4><p data-i18n="install.s1.body">The virtual audio driver SystemEQ uses to capture system audio.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew install blackhole-2ch" data-i18n="copy.btn">Copy</button><pre><code>brew install blackhole-2ch</code></pre></div></div></div>
-      <div class="install-step reveal"><div class="num">2</div><div class="body"><h4 data-i18n="install.s2.title">Download SystemEQ</h4><p data-i18n-html="install.s2.body">Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="install.s2.btn">Download from GitHub Releases</a></div></div>
-      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Allow unsigned app on first launch</h4><p data-i18n-html="install.s3.body">macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:</p><div class="codeblock"><button class="copy-btn" type="button" data-copy='xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"' data-i18n="copy.btn">Copy</button><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div></div>
-      <div class="install-step reveal"><div class="num">4</div><div class="body"><h4 data-i18n="install.s4.title">Set system output to BlackHole 2ch</h4><p data-i18n-html="install.s4.body">In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).</p></div></div>
+      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">Install BlackHole 2ch</h4><p data-i18n="install.s1.body">The virtual audio driver SystemEQ uses to capture system audio. Restart your Mac after installing it.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew install --cask blackhole-2ch" data-i18n="copy.btn">Copy</button><pre><code>brew install --cask blackhole-2ch</code></pre></div></div></div>
+      <div class="install-step reveal"><div class="num">2</div><div class="body"><h4 data-i18n="install.s2.title">Recommended: install SystemEQ with Homebrew</h4><p data-i18n-html="install.s2.body">Homebrew removes the macOS quarantine attribute during installation, so no manual Gatekeeper confirmation is needed.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew trust denzam/systemeq&#10;brew install --cask denzam/systemeq/systemeq" data-i18n="copy.btn">Copy</button><pre><code>brew trust denzam/systemeq<br/>brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
+      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Alternative: download DMG or ZIP</h4><p data-i18n-html="install.s3.body">Download from GitHub Releases and move the app to <code>/Applications</code>. Because it is not notarized, right-click it → <strong>Open</strong> on first launch, or remove the quarantine flag:</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="install.s3.btn">Download from GitHub Releases</a><div class="codeblock"><button class="copy-btn" type="button" data-copy='xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"' data-i18n="copy.btn">Copy</button><pre><code>xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"</code></pre></div></div></div>
+      <div class="install-step reveal"><div class="num">4</div><div class="body"><h4 data-i18n="install.s4.title">Set up audio routing</h4><p data-i18n-html="install.s4.body">In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. In SystemEQ, select your real output device, click <strong>Enable EQ</strong>, and leave the app running.</p></div></div>
       <div class="install-step reveal"><div class="num">5</div><div class="body"><h4 data-i18n="install.s5.title">(Alternative) Build from source</h4><p data-i18n="install.s5.body">Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p></div></div>
     </div>
-    <div class="note reveal" data-i18n-html="install.note"><strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.</div>
+    <div class="note reveal" data-i18n-html="install.note"><strong>About Gatekeeper.</strong> SystemEQ is ad-hoc signed and not notarized. The recommended Homebrew Cask removes quarantine during installation; a DMG or ZIP needs the one-time manual confirmation above.</div>
   </div>
 </section>
 
@@ -1148,8 +1149,8 @@
     <p class="section-sub reveal" data-i18n="faq.sub">Everything you might wonder before installing.</p>
     <div class="faq">
       <div class="faq-item reveal">
-        <button class="faq-q" type="button"><span data-i18n="faq.q1">Is SystemEQ safe to use even though it's unsigned?</span><span class="faq-icon" aria-hidden="true"></span></button>
-        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a1">Yes. The app is unsigned only because an Apple Developer ID costs $99/year. The full source code is public on <a href="https://github.com/denzam/SystemEQ-for-Mac">GitHub</a> — you can read every line and build it yourself. There is no telemetry and no network access beyond optional preset downloads.</div></div>
+        <button class="faq-q" type="button"><span data-i18n="faq.q1">Is SystemEQ safe if it is not notarized?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a1">SystemEQ is ad-hoc signed and not notarized. Its source is public on <a href="https://github.com/denzam/SystemEQ-for-Mac">GitHub</a>. The app has no telemetry, analytics, or accounts and does not upload user data. It contacts fixed HTTPS endpoints only for AutoEQ data, ProjectM presets, and GitHub Releases update checks.</div></div>
       </div>
       <div class="faq-item reveal">
         <button class="faq-q" type="button"><span data-i18n="faq.q2">Why do I need BlackHole?</span><span class="faq-icon" aria-hidden="true"></span></button>
@@ -1157,7 +1158,7 @@
       </div>
       <div class="faq-item reveal">
         <button class="faq-q" type="button"><span data-i18n="faq.q3">Does it collect any data?</span><span class="faq-icon" aria-hidden="true"></span></button>
-        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a3">No telemetry, no analytics, no account. The only network requests are optional: downloading the AutoEQ database update and visualizer presets, both from public sources.</div></div>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a3">The app does not. This landing page uses GoatCounter only to count page visits; that is website analytics and does not affect SystemEQ.</div></div>
       </div>
       <div class="faq-item reveal">
         <button class="faq-q" type="button"><span data-i18n="faq.q4">Will it add latency to my audio?</span><span class="faq-icon" aria-hidden="true"></span></button>
@@ -1169,7 +1170,11 @@
       </div>
       <div class="faq-item reveal">
         <button class="faq-q" type="button"><span data-i18n="faq.q6">How do I uninstall it?</span><span class="faq-icon" aria-hidden="true"></span></button>
-        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a6">Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall blackhole-2ch</code> if you no longer need it.</div></div>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n-html="faq.a6">Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall --cask blackhole-2ch</code> if you no longer need it.</div></div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" type="button"><span data-i18n="faq.q7">Why is sound quieter after switching to BlackHole?</span><span class="faq-icon" aria-hidden="true"></span></button>
+        <div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a7">macOS keeps a separate volume level for BlackHole. Raise the system volume with your keyboard after switching the output; SystemEQ does not change the volume itself.</div></div>
       </div>
     </div>
   </div>
@@ -1181,6 +1186,10 @@
     <h2 class="section-title reveal" data-i18n="changelog.title">Actively maintained.</h2>
     <p class="section-sub reveal" data-i18n="changelog.sub">Recent releases — see the full history on GitHub.</p>
     <div class="changelog reveal">
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.2.0</h4><span class="cl-date">2026-08-09</span></div>
+        <p data-i18n="changelog.v120">Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.</p>
+      </div>
       <div class="cl-item">
         <div class="cl-ver"><h4>v1.0.7</h4><span class="cl-date">2026-05-30</span></div>
         <p data-i18n="changelog.v107">AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.</p>
@@ -1249,7 +1258,7 @@
       "hero.sub": "A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.",
       "hero.ctaDownload": "Download Latest Release",
       "hero.ctaGithub": "View on GitHub",
-      "hero.badgeTelemetry": "No telemetry",
+      "hero.badgeTelemetry": "No app telemetry",
       "hero.badgePresets": "8,850+ AutoEQ presets",
       "features.label": "Features",
       "features.title": "Everything you need<br/>to tune your sound.",
@@ -1272,6 +1281,8 @@
       "features.f8.body": "Native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers. Optimized for real-time audio.",
       "features.f9.title": "Multilingual",
       "features.f9.body": "Full interface localization in English, Italian and Ukrainian. Switch language on the fly.",
+      "features.f10.title": "Device-aware presets &amp; startup",
+      "features.f10.body": "Optionally remember a preset for each output device, launch at login, or keep SystemEQ in the menu bar only.",
       "how.label": "How it works",
       "how.title": "Audio flows through<br/>BlackHole.",
       "how.sub": "macOS doesn't expose a system-wide audio EQ — so SystemEQ uses the BlackHole virtual driver to route, process and output your audio.",
@@ -1305,17 +1316,17 @@
       "install.title": "Get started in 2 minutes.",
       "install.sub": "SystemEQ is distributed as a free open-source build outside the App Store.",
       "install.s1.title": "Install BlackHole 2ch",
-      "install.s1.body": "The virtual audio driver SystemEQ uses to capture system audio.",
-      "install.s2.title": "Download SystemEQ",
-      "install.s2.body": "Grab the latest <code>.dmg</code> from GitHub Releases and drag the app to <code>/Applications</code>.",
-      "install.s2.btn": "Download from GitHub Releases",
-      "install.s3.title": "Allow unsigned app on first launch",
-      "install.s3.body": "macOS will block the app because it isn't notarized. Right-click the app in <code>/Applications</code> → <strong>Open</strong>, or remove the quarantine flag:",
-      "install.s4.title": "Set system output to BlackHole 2ch",
-      "install.s4.body": "In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. Then in SystemEQ, select your real output device (speakers, headphones, DAC).",
+      "install.s1.body": "The virtual audio driver SystemEQ uses to capture system audio. Restart your Mac after installing it.",
+      "install.s2.title": "Recommended: install SystemEQ with Homebrew",
+      "install.s2.body": "Homebrew removes the macOS quarantine attribute during installation, so no manual Gatekeeper confirmation is needed.",
+      "install.s3.title": "Alternative: download DMG or ZIP",
+      "install.s3.body": "Download from GitHub Releases and move the app to <code>/Applications</code>. Because it is not notarized, right-click it → <strong>Open</strong> on first launch, or remove the quarantine flag:",
+      "install.s3.btn": "Download from GitHub Releases",
+      "install.s4.title": "Set up audio routing",
+      "install.s4.body": "In <strong>System Settings → Sound → Output</strong>, choose <code>BlackHole 2ch</code>. In SystemEQ, select your real output device, click <strong>Enable EQ</strong>, and leave the app running.",
       "install.s5.title": "(Alternative) Build from source",
       "install.s5.body": "Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.",
-      "install.note": "<strong>Why unsigned?</strong> SystemEQ is a free, donation-supported project. An Apple Developer ID certificate costs $99/year — instead, the source code is fully open on GitHub so you can verify and build it yourself.",
+      "install.note": "<strong>About Gatekeeper.</strong> SystemEQ is ad-hoc signed and not notarized. The recommended Homebrew Cask removes quarantine during installation; a DMG or ZIP needs the one-time manual confirmation above.",
       "support.label": "Support",
       "support.title": "Made with ❤️<br/>for the audio community.",
       "support.sub": "SystemEQ is free forever. If it makes your audio better, consider supporting development — completely optional.",
@@ -1340,21 +1351,24 @@
       "faq.label": "FAQ",
       "faq.title": "Common questions.",
       "faq.sub": "Everything you might wonder before installing.",
-      "faq.q1": "Is SystemEQ safe to use even though it's unsigned?",
-      "faq.a1": "Yes. The app is unsigned only because an Apple Developer ID costs $99/year. The full source code is public on <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — you can read every line and build it yourself. There is no telemetry and no network access beyond optional preset downloads.",
+      "faq.q1": "Is SystemEQ safe if it is not notarized?",
+      "faq.a1": "SystemEQ is ad-hoc signed and not notarized. Its source is public on <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a>. The app has no telemetry, analytics, or accounts and does not upload user data. It contacts fixed HTTPS endpoints only for AutoEQ data, ProjectM presets, and GitHub Releases update checks.",
       "faq.q2": "Why do I need BlackHole?",
       "faq.a2": "macOS has no public API for a system-wide audio EQ. BlackHole is a free, open-source virtual driver that lets SystemEQ capture all system audio, process it, and send it back to your real output device.",
       "faq.q3": "Does it collect any data?",
-      "faq.a3": "No telemetry, no analytics, no account. The only network requests are optional: downloading the AutoEQ database update and visualizer presets, both from public sources.",
+      "faq.a3": "The app does not. This landing page uses GoatCounter only to count page visits; that is website analytics and does not affect SystemEQ.",
       "faq.q4": "Will it add latency to my audio?",
       "faq.a4": "Latency is minimal. SystemEQ uses a native CoreAudio (AUHAL) dual-I/O engine with lock-free ring buffers and vDSP-accelerated biquad filters, designed for real-time processing with low CPU usage.",
       "faq.q5": "How much does it cost?",
       "faq.a5": "It's free and open source forever, released under GPLv3. There's no paid tier. Donations are completely optional and only support development.",
       "faq.q6": "How do I uninstall it?",
-      "faq.a6": "Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall blackhole-2ch</code> if you no longer need it.",
+      "faq.a6": "Delete <code>SystemEQ for Mac.app</code> from <code>/Applications</code> and set your system output back to your real device in System Settings → Sound. BlackHole can be removed with <code>brew uninstall --cask blackhole-2ch</code> if you no longer need it.",
+      "faq.q7": "Why is sound quieter after switching to BlackHole?",
+      "faq.a7": "macOS keeps a separate volume level for BlackHole. Raise the system volume with your keyboard after switching the output; SystemEQ does not change the volume itself.",
       "changelog.label": "Changelog",
       "changelog.title": "Actively maintained.",
       "changelog.sub": "Recent releases — see the full history on GitHub.",
+      "changelog.v120": "Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.",
       "changelog.v107": "AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.",
       "changelog.v106": "Fixed a language-save race in LocalizationManager that could persist a stale value.",
       "changelog.v105": "Resolved a main-thread hang when switching language after using the visualizer, plus an AutoEQ label rendering regression.",
@@ -1373,7 +1387,7 @@
       "hero.sub": "Un equalizzatore parametrico di sistema con strumenti di calibrazione, preset AutoEQ, taratura della stanza e un visualizzatore MilkDrop in tempo reale — tutto in esecuzione nativa sul tuo Mac.",
       "hero.ctaDownload": "Scarica l'ultima versione",
       "hero.ctaGithub": "Guarda su GitHub",
-      "hero.badgeTelemetry": "Nessuna telemetria",
+      "hero.badgeTelemetry": "Nessuna telemetria nell'app",
       "hero.badgePresets": "8.850+ preset AutoEQ",
       "features.label": "Funzioni",
       "features.title": "Tutto ciò che serve<br/>per regolare il tuo suono.",
@@ -1396,6 +1410,8 @@
       "features.f8.body": "Motore nativo CoreAudio (AUHAL) a doppio I/O con ring buffer lock-free. Ottimizzato per l'audio in tempo reale.",
       "features.f9.title": "Multilingua",
       "features.f9.body": "Localizzazione completa dell'interfaccia in inglese, italiano e ucraino. Cambia lingua al volo.",
+      "features.f10.title": "Preset per uscita e avvio",
+      "features.f10.body": "Memorizza facoltativamente un preset per ogni dispositivo di uscita, avvia al login o mantieni SystemEQ solo nella barra dei menu.",
       "how.label": "Come funziona",
       "how.title": "L'audio passa attraverso<br/>BlackHole.",
       "how.sub": "macOS non espone un EQ audio di sistema — quindi SystemEQ usa il driver virtuale BlackHole per instradare, elaborare e riprodurre il tuo audio.",
@@ -1429,17 +1445,17 @@
       "install.title": "Inizia in 2 minuti.",
       "install.sub": "SystemEQ è distribuito come build open source gratuita al di fuori dell'App Store.",
       "install.s1.title": "Installa BlackHole 2ch",
-      "install.s1.body": "Il driver audio virtuale che SystemEQ usa per catturare l'audio di sistema.",
-      "install.s2.title": "Scarica SystemEQ",
-      "install.s2.body": "Scarica l'ultimo <code>.dmg</code> dalle Release di GitHub e trascina l'app in <code>/Applications</code>.",
-      "install.s2.btn": "Scarica dalle Release di GitHub",
-      "install.s3.title": "Consenti l'app non firmata al primo avvio",
-      "install.s3.body": "macOS bloccherà l'app perché non è autenticata. Fai clic destro sull'app in <code>/Applications</code> → <strong>Apri</strong>, oppure rimuovi il flag di quarantena:",
-      "install.s4.title": "Imposta l'uscita di sistema su BlackHole 2ch",
-      "install.s4.body": "In <strong>Impostazioni di Sistema → Suono → Uscita</strong>, scegli <code>BlackHole 2ch</code>. Poi in SystemEQ seleziona il tuo vero dispositivo di uscita (altoparlanti, cuffie, DAC).",
+      "install.s1.body": "Il driver audio virtuale che SystemEQ usa per catturare l'audio di sistema. Riavvia il Mac dopo l'installazione.",
+      "install.s2.title": "Consigliato: installa SystemEQ con Homebrew",
+      "install.s2.body": "Homebrew rimuove l'attributo di quarantena di macOS durante l'installazione, quindi non serve una conferma manuale di Gatekeeper.",
+      "install.s3.title": "Alternativa: scarica DMG o ZIP",
+      "install.s3.body": "Scarica dalle Release di GitHub e sposta l'app in <code>/Applications</code>. Poiché non è notarizzata, al primo avvio fai clic destro → <strong>Apri</strong>, oppure rimuovi il flag di quarantena:",
+      "install.s3.btn": "Scarica dalle Release di GitHub",
+      "install.s4.title": "Configura l'instradamento audio",
+      "install.s4.body": "In <strong>Impostazioni di Sistema → Suono → Uscita</strong>, scegli <code>BlackHole 2ch</code>. In SystemEQ seleziona il vero dispositivo di uscita, fai clic su <strong>Abilita EQ</strong> e lascia l'app in esecuzione.",
       "install.s5.title": "(Alternativa) Compila dal sorgente",
       "install.s5.body": "Apri il progetto Xcode su macOS con Xcode 16.2+ e compila per il tuo Mac locale.",
-      "install.note": "<strong>Perché non firmata?</strong> SystemEQ è un progetto gratuito sostenuto da donazioni. Un certificato Apple Developer ID costa 99 $/anno — invece, il codice sorgente è completamente aperto su GitHub così puoi verificarlo e compilarlo tu stesso.",
+      "install.note": "<strong>Informazioni su Gatekeeper.</strong> SystemEQ è firmata ad-hoc e non notarizzata. Il Cask Homebrew consigliato rimuove la quarantena durante l'installazione; DMG e ZIP richiedono la conferma manuale una sola volta indicata sopra.",
       "support.label": "Sostieni",
       "support.title": "Fatto con ❤️<br/>per la community audio.",
       "support.sub": "SystemEQ è gratuito per sempre. Se migliora il tuo audio, valuta di sostenere lo sviluppo — del tutto facoltativo.",
@@ -1464,21 +1480,24 @@
       "faq.label": "FAQ",
       "faq.title": "Domande frequenti.",
       "faq.sub": "Tutto ciò che potresti chiederti prima di installare.",
-      "faq.q1": "SystemEQ è sicuro da usare anche se non è firmato?",
-      "faq.a1": "Sì. L'app non è firmata solo perché un Apple Developer ID costa 99 $/anno. Il codice sorgente completo è pubblico su <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — puoi leggerne ogni riga e compilarlo tu stesso. Nessuna telemetria e nessun accesso alla rete oltre ai download opzionali dei preset.",
+      "faq.q1": "SystemEQ è sicuro se non è notarizzato?",
+      "faq.a1": "SystemEQ è firmata ad-hoc e non notarizzata. Il codice sorgente è pubblico su <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a>. L'app non ha telemetria, analisi o account e non carica dati utente. Contatta solo endpoint HTTPS fissi per dati AutoEQ, preset ProjectM e controlli aggiornamenti su GitHub Releases.",
       "faq.q2": "Perché ho bisogno di BlackHole?",
       "faq.a2": "macOS non ha alcuna API pubblica per un EQ audio di sistema. BlackHole è un driver virtuale gratuito e open source che permette a SystemEQ di catturare tutto l'audio di sistema, elaborarlo e rimandarlo al tuo dispositivo di uscita reale.",
       "faq.q3": "Raccoglie qualche dato?",
-      "faq.a3": "Nessuna telemetria, nessuna analisi, nessun account. Le uniche richieste di rete sono opzionali: il download dell'aggiornamento del database AutoEQ e dei preset del visualizzatore, entrambi da fonti pubbliche.",
+      "faq.a3": "L'app no. Questa pagina usa GoatCounter solo per contare le visite: è analisi del sito e non riguarda SystemEQ.",
       "faq.q4": "Aggiunge latenza al mio audio?",
       "faq.a4": "La latenza è minima. SystemEQ usa un motore nativo CoreAudio (AUHAL) dual-I/O con ring buffer lock-free e filtri biquad accelerati da vDSP, progettato per l'elaborazione in tempo reale con basso uso della CPU.",
       "faq.q5": "Quanto costa?",
       "faq.a5": "È gratuito e open source per sempre, rilasciato sotto GPLv3. Non esiste una versione a pagamento. Le donazioni sono del tutto facoltative e servono solo a sostenere lo sviluppo.",
       "faq.q6": "Come lo disinstallo?",
-      "faq.a6": "Elimina <code>SystemEQ for Mac.app</code> da <code>/Applications</code> e riporta l'uscita di sistema sul tuo dispositivo reale in Impostazioni di Sistema → Suono. BlackHole può essere rimosso con <code>brew uninstall blackhole-2ch</code> se non ti serve più.",
+      "faq.a6": "Elimina <code>SystemEQ for Mac.app</code> da <code>/Applications</code> e riporta l'uscita di sistema sul tuo dispositivo reale in Impostazioni di Sistema → Suono. BlackHole può essere rimosso con <code>brew uninstall --cask blackhole-2ch</code> se non ti serve più.",
+      "faq.q7": "Perché il suono è più basso dopo il passaggio a BlackHole?",
+      "faq.a7": "macOS mantiene un volume separato per BlackHole. Dopo aver cambiato uscita, alza il volume di sistema con la tastiera; SystemEQ non modifica il volume da solo.",
       "changelog.label": "Changelog",
       "changelog.title": "Mantenuto attivamente.",
       "changelog.sub": "Versioni recenti — la cronologia completa è su GitHub.",
+      "changelog.v120": "Preset automatici per uscita, Nascondi icona dal Dock, avvio al login funzionante e ripristino di avvio/preset più affidabile.",
       "changelog.v107": "Importazione AutoEQ <code>.txt</code> (4 formati rilevati automaticamente) e correzioni di localizzazione live per la finestra AutoEQ.",
       "changelog.v106": "Corretta una race nel salvataggio della lingua in LocalizationManager che poteva persistere un valore obsoleto.",
       "changelog.v105": "Risolto un blocco del thread principale al cambio lingua dopo l'uso del visualizzatore, più una regressione nel rendering delle etichette AutoEQ.",
@@ -1497,7 +1516,7 @@
       "hero.sub": "Системний параметричний еквалайзер з інструментами калібрування, пресетами AutoEQ, налаштуванням кімнати та живим візуалізатором MilkDrop — усе працює нативно на вашому Mac.",
       "hero.ctaDownload": "Завантажити останній реліз",
       "hero.ctaGithub": "Переглянути на GitHub",
-      "hero.badgeTelemetry": "Без телеметрії",
+      "hero.badgeTelemetry": "Без телеметрії в застосунку",
       "hero.badgePresets": "8 850+ пресетів AutoEQ",
       "features.label": "Можливості",
       "features.title": "Усе необхідне,<br/>щоб налаштувати ваш звук.",
@@ -1520,6 +1539,8 @@
       "features.f8.body": "Нативний двонапрямний рушій CoreAudio (AUHAL) із lock-free кільцевими буферами. Оптимізовано для звуку в реальному часі.",
       "features.f9.title": "Багатомовність",
       "features.f9.body": "Повна локалізація інтерфейсу англійською, італійською та українською. Перемикайте мову на льоту.",
+      "features.f10.title": "Пресети для виходів і запуск",
+      "features.f10.body": "За бажанням зберігайте пресет для кожного пристрою виводу, запускайте застосунок при вході або лишайте його тільки в рядку меню.",
       "how.label": "Як це працює",
       "how.title": "Звук проходить через<br/>BlackHole.",
       "how.sub": "macOS не надає системного аудіо-еквалайзера — тож SystemEQ використовує віртуальний драйвер BlackHole, щоб маршрутизувати, обробляти й виводити ваш звук.",
@@ -1553,17 +1574,17 @@
       "install.title": "Почніть за 2 хвилини.",
       "install.sub": "SystemEQ розповсюджується як безкоштовна збірка з відкритим кодом поза App Store.",
       "install.s1.title": "Встановіть BlackHole 2ch",
-      "install.s1.body": "Віртуальний аудіодрайвер, який SystemEQ використовує для захоплення системного звуку.",
-      "install.s2.title": "Завантажте SystemEQ",
-      "install.s2.body": "Візьміть останній <code>.dmg</code> з GitHub Releases і перетягніть застосунок у <code>/Applications</code>.",
-      "install.s2.btn": "Завантажити з GitHub Releases",
-      "install.s3.title": "Дозвольте непідписаний застосунок при першому запуску",
-      "install.s3.body": "macOS заблокує застосунок, бо він не нотаризований. Клацніть правою кнопкою по застосунку в <code>/Applications</code> → <strong>Відкрити</strong>, або зніміть прапорець карантину:",
-      "install.s4.title": "Встановіть системний вихід на BlackHole 2ch",
-      "install.s4.body": "У <strong>Системних параметрах → Звук → Вихід</strong> оберіть <code>BlackHole 2ch</code>. Потім у SystemEQ виберіть свій справжній пристрій виводу (колонки, навушники, ЦАП).",
+      "install.s1.body": "Віртуальний аудіодрайвер, який SystemEQ використовує для захоплення системного звуку. Після встановлення перезавантажте Mac.",
+      "install.s2.title": "Рекомендовано: встановіть SystemEQ через Homebrew",
+      "install.s2.body": "Homebrew знімає атрибут карантину macOS під час встановлення, тому ручне підтвердження Gatekeeper не потрібне.",
+      "install.s3.title": "Альтернатива: завантажте DMG або ZIP",
+      "install.s3.body": "Завантажте з GitHub Releases і перемістіть застосунок у <code>/Applications</code>. Оскільки він не нотаризований, при першому запуску клацніть правою кнопкою → <strong>Відкрити</strong> або зніміть прапорець карантину:",
+      "install.s3.btn": "Завантажити з GitHub Releases",
+      "install.s4.title": "Налаштуйте маршрутизацію звуку",
+      "install.s4.body": "У <strong>Системних параметрах → Звук → Вихід</strong> оберіть <code>BlackHole 2ch</code>. У SystemEQ виберіть справжній пристрій виводу, натисніть <strong>Увімкнути EQ</strong> та залиште застосунок запущеним.",
       "install.s5.title": "(Альтернатива) Зберіть із вихідного коду",
       "install.s5.body": "Відкрийте проєкт Xcode на macOS з Xcode 16.2+ і зберіть для свого Mac.",
-      "install.note": "<strong>Чому непідписаний?</strong> SystemEQ — безкоштовний проєкт на пожертвах. Сертифікат Apple Developer ID коштує $99/рік — натомість вихідний код повністю відкритий на GitHub, тож ви можете перевірити та зібрати його самостійно.",
+      "install.note": "<strong>Про Gatekeeper.</strong> SystemEQ підписаний ad-hoc, але не нотаризований. Рекомендований Homebrew Cask знімає карантин під час встановлення; для DMG або ZIP потрібне одноразове ручне підтвердження, описане вище.",
       "support.label": "Підтримка",
       "support.title": "Зроблено з ❤️<br/>для аудіоспільноти.",
       "support.sub": "SystemEQ безкоштовний назавжди. Якщо він покращує ваш звук, подумайте про підтримку розробки — цілком за бажанням.",
@@ -1588,21 +1609,24 @@
       "faq.label": "FAQ",
       "faq.title": "Поширені питання.",
       "faq.sub": "Усе, що варто знати перед встановленням.",
-      "faq.q1": "Чи безпечно користуватися SystemEQ, якщо застосунок не підписаний?",
-      "faq.a1": "Так. Застосунок не підписаний лише тому, що Apple Developer ID коштує $99/рік. Повний вихідний код відкритий на <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a> — ви можете прочитати кожен рядок і зібрати його самостійно. Жодної телеметрії й жодного доступу до мережі, окрім опціонального завантаження пресетів.",
+      "faq.q1": "Чи безпечний SystemEQ, якщо він не нотаризований?",
+      "faq.a1": "SystemEQ підписаний ad-hoc, але не нотаризований. Вихідний код відкритий на <a href=\"https://github.com/denzam/SystemEQ-for-Mac\">GitHub</a>. У застосунку немає телеметрії, аналітики чи акаунтів, і він не надсилає дані користувача. Він звертається лише до фіксованих HTTPS-адрес за даними AutoEQ, пресетами ProjectM та перевіркою оновлень GitHub Releases.",
       "faq.q2": "Навіщо потрібен BlackHole?",
       "faq.a2": "macOS не має публічного API для системного аудіо-еквалайзера. BlackHole — це безкоштовний відкритий віртуальний драйвер, який дозволяє SystemEQ перехоплювати весь системний звук, обробляти його й повертати на ваш реальний пристрій виводу.",
       "faq.q3": "Чи збирає він якісь дані?",
-      "faq.a3": "Жодної телеметрії, аналітики чи акаунтів. Єдині мережеві запити опціональні: завантаження оновлення бази AutoEQ та пресетів візуалайзера — обидва з публічних джерел.",
+      "faq.a3": "Застосунок — ні. Ця сторінка використовує GoatCounter лише для підрахунку відвідувань: це аналітика сайту й вона не стосується SystemEQ.",
       "faq.q4": "Чи додає він затримку звуку?",
       "faq.a4": "Затримка мінімальна. SystemEQ використовує нативний рушій CoreAudio (AUHAL) з dual-I/O, lock-free кільцевими буферами та biquad-фільтрами на vDSP, розрахований на обробку в реальному часі з низьким навантаженням на CPU.",
       "faq.q5": "Скільки це коштує?",
       "faq.a5": "Це безкоштовно й відкрито назавжди, під ліцензією GPLv3. Платної версії немає. Донати повністю добровільні й лише підтримують розробку.",
       "faq.q6": "Як його видалити?",
-      "faq.a6": "Видаліть <code>SystemEQ for Mac.app</code> з <code>/Applications</code> і поверніть системний вивід на ваш реальний пристрій у Системних налаштуваннях → Звук. BlackHole можна видалити командою <code>brew uninstall blackhole-2ch</code>, якщо він більше не потрібен.",
+      "faq.a6": "Видаліть <code>SystemEQ for Mac.app</code> з <code>/Applications</code> і поверніть системний вивід на ваш реальний пристрій у Системних налаштуваннях → Звук. BlackHole можна видалити командою <code>brew uninstall --cask blackhole-2ch</code>, якщо він більше не потрібен.",
+      "faq.q7": "Чому після перемикання на BlackHole звук тихіший?",
+      "faq.a7": "macOS зберігає окремий рівень гучності для BlackHole. Після зміни виходу підніміть системну гучність клавіатурою; SystemEQ сам її не змінює.",
       "changelog.label": "Список змін",
       "changelog.title": "Активно підтримується.",
       "changelog.sub": "Останні випуски — повну історію дивіться на GitHub.",
+      "changelog.v120": "Авто-пресети для кожного виводу, приховування іконки з Dock, робочий запуск при вході та надійніше відновлення стану й пресетів.",
       "changelog.v107": "Імпорт AutoEQ <code>.txt</code> (4 формати з автовизначенням) та виправлення живої локалізації вікна AutoEQ.",
       "changelog.v106": "Виправлено гонитву збереження мови в LocalizationManager, яка могла зберегти застаріле значення.",
       "changelog.v105": "Усунено зависання головного потоку при зміні мови після візуалайзера та регресію рендеру підписів AutoEQ.",
@@ -1877,6 +1901,6 @@
 </script>
 
 <script data-goatcounter="https://systemeqformac.goatcounter.com/count"
-        defer src="//gc.zgo.at/count.js"></script>
+        defer src="https://gc.zgo.at/count.js"></script>
 </body>
 </html>
