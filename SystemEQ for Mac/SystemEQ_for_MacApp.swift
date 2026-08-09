@@ -119,6 +119,9 @@ enum AppStartup {
             dlog("Started clean - no preset loaded, EQ disabled", category: .preset)
         }
 
+        // Issue #31: після відновлення — стежити за зміною пристрою виводу
+        DevicePresetManager.shared.bind()
+
         // Now that devices are loaded, we can reliably check for BlackHole
         if AudioRouter.shared.blackHoleDetected {
             dlog("\(AppConstants.DeviceNames.blackHole) detected", category: .routing)

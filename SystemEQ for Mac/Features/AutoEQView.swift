@@ -1707,7 +1707,16 @@ struct AutoEQView: View {
             preamp: engine.preampGain,
             bassBoost: Float(bassBoost)
         )
-        persistLastAppliedDescriptor()
+        if let descriptorJSON = persistLastAppliedDescriptor() {
+            DevicePresetManager.shared.recordApply(DevicePresetRecord(
+                mode: targetBandMode.rawValue,
+                appliedGains: eqValues,
+                cleanGains: cleanGains,
+                preamp: engine.preampGain,
+                bassBoost: Float(bassBoost),
+                descriptorJSON: descriptorJSON
+            ))
+        }
 
         // Вмикаємо EQ якщо він вимкнений
         if !engine.isEnabled {
@@ -1724,7 +1733,8 @@ struct AutoEQView: View {
         let rawText: String? // custom-пресет: повний текст
     }
 
-    private func persistLastAppliedDescriptor() {
+    @discardableResult
+    private func persistLastAppliedDescriptor() -> String? {
         let descriptor: LastAppliedDescriptor
         if let path = activePresetPath {
             descriptor = LastAppliedDescriptor(
@@ -1741,12 +1751,12 @@ struct AutoEQView: View {
                 rawText: rawText
             )
         } else {
-            return
+            return nil
         }
-        if let data = try? JSONEncoder().encode(descriptor),
-           let json = String(data: data, encoding: .utf8) {
-            lastAppliedPresetJSON = json
-        }
+        guard let data = try? JSONEncoder().encode(descriptor),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        lastAppliedPresetJSON = json
+        return json
     }
 
     /// Відновлює у вікні останній застосований пресет — лише UI: рушій свій стан

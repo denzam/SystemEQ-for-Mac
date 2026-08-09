@@ -67,6 +67,8 @@ public enum LocalizedString: String, CaseIterable {
     case showMenuBarIcon
     case hideDockIcon
     case hideDockIconHelp
+    case autoSwitchPresetPerDevice
+    case autoSwitchPresetPerDeviceHelp
     case links
     case appearance
     case accessibility
@@ -871,6 +873,16 @@ private enum LocalizationData {
                     .english: "Keeps the menu bar icon on so the app stays reachable",
                     .italian: "Mantiene l'icona nella barra dei menu per accedere all'app",
                     .ukrainian: "Іконка в рядку меню лишається, щоб застосунок був доступний"
+                ],
+                .autoSwitchPresetPerDevice: [
+                    .english: "Auto-Switch Preset per Output",
+                    .italian: "Cambio preset automatico per uscita",
+                    .ukrainian: "Авто-пресет для кожного виводу"
+                ],
+                .autoSwitchPresetPerDeviceHelp: [
+                    .english: "Remembers the preset applied on each output device and re-applies it when you switch outputs",
+                    .italian: "Ricorda il preset applicato su ogni uscita e lo riapplica quando cambi dispositivo",
+                    .ukrainian: "Пам'ятає пресет кожного пристрою виводу і сам застосовує його при перемиканні"
                 ],
                 .links: [
                     .english: "Links",

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @StateObject private var launchManager = LaunchAtLoginManager()
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("hideDockIcon") private var hideDockIcon = false
+    @AppStorage(DevicePresetManager.autoSwitchKey) private var autoSwitchPresetPerDevice = false
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
 
     private var startupMode: EQStartupMode {
@@ -287,6 +288,20 @@ struct SettingsView: View {
                     // Повернути фокус вікну Налаштувань після зміни політики
                     NSApp.activate(ignoringOtherApps: true)
                 }
+                .padding()
+
+                Divider()
+
+                Toggle(isOn: $autoSwitchPresetPerDevice) {
+                    HStack {
+                        Image(systemName: "hifispeaker.2")
+                            .foregroundColor(.green)
+                            .frame(width: 24)
+                        Text(localization.localized(.autoSwitchPresetPerDevice))
+                    }
+                }
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .help(localization.localized(.autoSwitchPresetPerDeviceHelp))
             }
             .background(Color(NSColor.textBackgroundColor).opacity(0.05))
             .cornerRadius(8)
