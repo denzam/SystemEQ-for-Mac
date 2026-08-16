@@ -1,5 +1,56 @@
 import Foundation
 
+struct DiagnosticEvent: Equatable {
+    let timestamp: Date
+    let name: String
+    let details: [String: String]
+}
+
+nonisolated final class DiagnosticEventStore: @unchecked Sendable {
+    static let shared = DiagnosticEventStore()
+
+    private let capacity: Int
+    private let lock = NSLock()
+    private var events: [DiagnosticEvent] = []
+
+    init(capacity: Int = 100) {
+        self.capacity = max(capacity, 1)
+    }
+
+    func record(_ name: String, details: [String: String] = [:]) {
+        let event = DiagnosticEvent(timestamp: Date(), name: name, details: details)
+        lock.lock()
+        events.append(event)
+        if events.count > capacity {
+            events.removeFirst(events.count - capacity)
+        }
+        lock.unlock()
+    }
+
+    func snapshot() -> [DiagnosticEvent] {
+        lock.lock()
+        let snapshot = events
+        lock.unlock()
+        return snapshot
+    }
+
+    func reportText() -> String {
+        let events = snapshot()
+        guard !events.isEmpty else { return "No SystemEQ diagnostic events were recorded in this session." }
+
+        let formatter = ISO8601DateFormatter()
+        return events.map { event in
+            let details = event.details
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: ", ")
+            return details.isEmpty
+                ? "\(formatter.string(from: event.timestamp)) \(event.name)"
+                : "\(formatter.string(from: event.timestamp)) \(event.name): \(details)"
+        }.joined(separator: "\n")
+    }
+}
+
 // MARK: - Debug Logger
 
 // Централізована система логування для SystemEQ

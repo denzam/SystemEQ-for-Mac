@@ -60,7 +60,7 @@ enum AppStartup {
         if startupMode == .restoreLastState {
             // 🔧 FIX: Restore preset values to UI WITHOUT applying filters
             // Filters will be created only when user enables EQ
-            if let saved = PresetPersistence.load() {
+            if let saved = PresetPersistence.loadPlaybackState() {
                 let engine = AudioEngine.shared
                 engine.bandMode = saved.mode
                 engine.syncBandsToMode()
@@ -93,7 +93,7 @@ enum AppStartup {
             }
         } else if startupMode == .restorePresetOnly {
             // Load preset but keep EQ disabled
-            if let saved = PresetPersistence.load() {
+            if let saved = PresetPersistence.loadPlaybackState() {
                 let engine = AudioEngine.shared
                 engine.bandMode = saved.mode
                 engine.syncBandsToMode()
@@ -161,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Restore the real output device before quitting, otherwise the user is
         // left with no sound until they fix it manually in System Settings.
         // AudioObjectSetPropertyData is synchronous, so .terminateNow is safe.
+        AudioEngine.shared.persistCurrentPlaybackState()
         if AudioRouter.shared.isRoutingOwned {
             AudioRouter.shared.disableEQRouting(persistEnabledState: false)
         }

@@ -180,4 +180,35 @@ final class PresetPersistenceTests: XCTestCase {
             "Default bass boost should be 0.0"
         )
     }
+
+    // MARK: - Playback State
+
+    func testPlaybackState_roundtrip() {
+        let gains: [Float] = [1, -2, 3, -4, 5, -6, 7, -8, 9, -10]
+
+        PresetPersistence.savePlaybackState(mode: .tenBand, gains: gains, preamp: -4.5)
+
+        let playback = PresetPersistence.loadPlaybackState()
+        XCTAssertEqual(playback?.mode, .tenBand)
+        XCTAssertEqual(playback?.gains, gains)
+        XCTAssertEqual(playback?.preamp, -4.5)
+    }
+
+    func testPlaybackState_fallsBackToLegacyPreset() {
+        let gains: [Float] = Array(repeating: 1.5, count: 31)
+        PresetPersistence.save(mode: .thirtyOneBand, gains: gains, preamp: -2)
+
+        let playback = PresetPersistence.loadPlaybackState()
+        XCTAssertEqual(playback?.mode, .thirtyOneBand)
+        XCTAssertEqual(playback?.gains, gains)
+        XCTAssertEqual(playback?.preamp, -2)
+    }
+
+    func testClear_removesPlaybackState() {
+        PresetPersistence.savePlaybackState(mode: .tenBand, gains: Array(repeating: 1, count: 10), preamp: 0)
+
+        PresetPersistence.clear()
+
+        XCTAssertNil(PresetPersistence.loadPlaybackState())
+    }
 }

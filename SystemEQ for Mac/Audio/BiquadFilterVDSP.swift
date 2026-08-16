@@ -9,6 +9,86 @@
 import Accelerate
 import Foundation
 
+struct OutputSafetyProcessor {
+    static let maximumBoostDB: Float = 3.0
+    private static let ceiling: Float = 0.891_250_9
+
+    private var boostLinear: Float = 1.0
+    private var releaseCoefficient: Float = 0.0
+    private var limiterGain: Float = 1.0
+
+    mutating func configure(boostDB: Float, sampleRate: Float) {
+        let sanitizedBoost = boostDB.isFinite ? min(max(boostDB, 0), Self.maximumBoostDB) : 0
+        boostLinear = pow(10.0, sanitizedBoost / 20.0)
+        let safeSampleRate = max(sampleRate, 1)
+        releaseCoefficient = 1 - exp(-1 / (safeSampleRate * 0.1))
+        limiterGain = 1.0
+    }
+
+    mutating func reset() {
+        limiterGain = 1.0
+    }
+
+    @inline(__always)
+    mutating func processMono(_ buffer: UnsafeMutablePointer<Float>, frameCount: Int) {
+        guard boostLinear != 1.0 else { return }
+
+        var currentGain = limiterGain
+        for index in 0..<frameCount {
+            let boosted = buffer[index] * boostLinear
+            guard boosted.isFinite else {
+                buffer[index] = 0
+                currentGain = 1.0
+                continue
+            }
+
+            let peak = abs(boosted)
+            let targetGain = peak > Self.ceiling ? Self.ceiling / peak : 1.0
+            if targetGain < currentGain {
+                currentGain = targetGain
+            } else {
+                currentGain += (targetGain - currentGain) * releaseCoefficient
+            }
+            buffer[index] = boosted * currentGain
+        }
+        limiterGain = currentGain
+    }
+
+    @inline(__always)
+    mutating func processStereo(
+        _ bufferL: UnsafeMutablePointer<Float>,
+        _ bufferR: UnsafeMutablePointer<Float>,
+        frameCount: Int
+    ) {
+        guard boostLinear != 1.0 else { return }
+
+        var currentGain = limiterGain
+        for index in 0..<frameCount {
+            let boostedL = bufferL[index] * boostLinear
+            let boostedR = bufferR[index] * boostLinear
+            guard boostedL.isFinite, boostedR.isFinite else {
+                bufferL[index] = 0
+                bufferR[index] = 0
+                currentGain = 1.0
+                continue
+            }
+
+            let peakL = abs(boostedL)
+            let peakR = abs(boostedR)
+            let peak = peakL > peakR ? peakL : peakR
+            let targetGain = peak > Self.ceiling ? Self.ceiling / peak : 1.0
+            if targetGain < currentGain {
+                currentGain = targetGain
+            } else {
+                currentGain += (targetGain - currentGain) * releaseCoefficient
+            }
+            bufferL[index] = boostedL * currentGain
+            bufferR[index] = boostedR * currentGain
+        }
+        limiterGain = currentGain
+    }
+}
+
 /// Cascaded biquad filter using Apple's vDSP_biquad (single-precision).
 /// Processes N filters as one SIMD cascade per buffer — ~20-50x faster
 /// than a scalar per-sample loop.
@@ -29,6 +109,7 @@ public final class BiquadFilterVDSP {
 
     /// Preamp gain (linear)
     private var preampLinear: Float = 1.0
+    private var outputSafety = OutputSafetyProcessor()
 
     // MARK: - Initialization
 
@@ -45,9 +126,15 @@ public final class BiquadFilterVDSP {
 
     /// Configure filter chain from parametric bands (skips zero-gain bands automatically).
     /// Allocates new vDSP setup; previous state is destroyed.
-    public func configure(bands: [ParametricBand], preamp: Float, sampleRate: Float) {
+    public func configure(
+        bands: [ParametricBand],
+        preamp: Float,
+        outputBoost: Float = 0.0,
+        sampleRate: Float
+    ) {
         self.sampleRate = sampleRate
         self.preampLinear = pow(10.0, preamp / 20.0)
+        outputSafety.configure(boostDB: outputBoost, sampleRate: sampleRate)
 
         let activeBands = bands.filter { abs($0.gain) >= 0.01 }
         let newCount = activeBands.count
@@ -104,16 +191,18 @@ public final class BiquadFilterVDSP {
             vDSP_vsmul(bufferR, 1, &scalar, bufferR, 1, vDSP_Length(frameCount))
         }
 
-        guard filterCount > 0, let sL = setupL, let sR = setupR else { return }
+        if filterCount > 0, let sL = setupL, let sR = setupR {
+            delaysL.withUnsafeMutableBufferPointer { dL in
+                guard let addressL = dL.baseAddress else { return }
+                vDSP_biquad(sL, addressL, bufferL, 1, bufferL, 1, vDSP_Length(frameCount))
+            }
+            delaysR.withUnsafeMutableBufferPointer { dR in
+                guard let addressR = dR.baseAddress else { return }
+                vDSP_biquad(sR, addressR, bufferR, 1, bufferR, 1, vDSP_Length(frameCount))
+            }
+        }
 
-        delaysL.withUnsafeMutableBufferPointer { dL in
-            guard let addressL = dL.baseAddress else { return }
-            vDSP_biquad(sL, addressL, bufferL, 1, bufferL, 1, vDSP_Length(frameCount))
-        }
-        delaysR.withUnsafeMutableBufferPointer { dR in
-            guard let addressR = dR.baseAddress else { return }
-            vDSP_biquad(sR, addressR, bufferR, 1, bufferR, 1, vDSP_Length(frameCount))
-        }
+        outputSafety.processStereo(bufferL, bufferR, frameCount: frameCount)
     }
 
     // MARK: - Coefficient calculation (RBJ audio EQ cookbook)
@@ -192,5 +281,6 @@ public final class BiquadFilterVDSP {
         for i in delaysR.indices {
             delaysR[i] = 0
         }
+        outputSafety.reset()
     }
 }

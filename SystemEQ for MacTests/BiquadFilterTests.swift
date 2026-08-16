@@ -179,6 +179,41 @@ final class BiquadFilterTests: XCTestCase {
         }
     }
 
+    func testOutputBoostRaisesQuietSignalAndLimitsStereoPeaks() {
+        let filter = BiquadFilterVDSP()
+        filter.configure(bands: [], preamp: 0, outputBoost: 3, sampleRate: 48000)
+
+        var quietL = [Float](repeating: 0.25, count: 64)
+        var quietR = [Float](repeating: 0.25, count: 64)
+        let frameCount = quietL.count
+        quietL.withUnsafeMutableBufferPointer { left in
+            quietR.withUnsafeMutableBufferPointer { right in
+                guard let leftAddress = left.baseAddress,
+                      let rightAddress = right.baseAddress else { return }
+                filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
+            }
+        }
+
+        let boostedQuietSignal = Float(0.25 * pow(10.0, 3.0 / 20.0))
+        XCTAssertEqual(quietL[0], boostedQuietSignal, accuracy: 0.0001)
+        XCTAssertEqual(quietR[0], boostedQuietSignal, accuracy: 0.0001)
+
+        filter.configure(bands: [], preamp: 0, outputBoost: 3, sampleRate: 48000)
+        var loudL = [Float](repeating: 0.9, count: 64)
+        var loudR = [Float](repeating: 0.4, count: 64)
+        loudL.withUnsafeMutableBufferPointer { left in
+            loudR.withUnsafeMutableBufferPointer { right in
+                guard let leftAddress = left.baseAddress,
+                      let rightAddress = right.baseAddress else { return }
+                filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
+            }
+        }
+
+        XCTAssertLessThanOrEqual(abs(loudL[0]), 0.891_251)
+        XCTAssertLessThanOrEqual(abs(loudR[0]), 0.891_251)
+        XCTAssertEqual(loudL[0] / loudR[0], 0.9 / 0.4, accuracy: 0.0001)
+    }
+
     // MARK: - BiquadFilterChain Tests
 
     func testFilterChain_preampApplied() {

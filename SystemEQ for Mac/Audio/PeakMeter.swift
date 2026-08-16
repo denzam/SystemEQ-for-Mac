@@ -41,8 +41,17 @@ public final class PeakMeter: ObservableObject {
         return p
     }()
 
+    private let nonFiniteOutputPeakCount: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
+
+    private var reportedNonFiniteOutputPeak = false
+
     deinit {
         pendingPublishFlag.deallocate()
+        nonFiniteOutputPeakCount.deallocate()
     }
 
     // MARK: - Audio Thread API
@@ -66,12 +75,12 @@ public final class PeakMeter: ObservableObject {
         frameCount: Int,
         channelCount: UInt32
     ) {
-        rtInputPeak = PeakMeter.peak(
+        rtInputPeak = PeakMeter.sanitizedPeak(PeakMeter.peak(
             bufferL: bufferL,
             bufferR: bufferR,
             frameCount: frameCount,
             channelCount: channelCount
-        )
+        ))
     }
 
     /// Post-EQ level, and the trigger that pushes both values to the UI.
@@ -83,13 +92,25 @@ public final class PeakMeter: ObservableObject {
         frameCount: Int,
         channelCount: UInt32
     ) {
-        rtOutputPeak = PeakMeter.peak(
+        let peak = PeakMeter.peak(
             bufferL: bufferL,
             bufferR: bufferR,
             frameCount: frameCount,
             channelCount: channelCount
         )
+        if peak.isFinite {
+            rtOutputPeak = max(peak, 0)
+        } else {
+            rtOutputPeak = 0
+            _ = seq_atomic_int32_fetch_add(nonFiniteOutputPeakCount, 1)
+        }
         schedulePublish()
+    }
+
+    @inline(__always)
+    static func sanitizedPeak(_ peak: Float) -> Float {
+        guard peak.isFinite else { return 0 }
+        return max(peak, 0)
     }
 
     @inline(__always)
@@ -133,6 +154,11 @@ public final class PeakMeter: ObservableObject {
             guard let self else { return }
             self.inputPeakLevel = inVal
             self.outputPeakLevel = outVal
+            if !self.reportedNonFiniteOutputPeak,
+               seq_atomic_int32_load(self.nonFiniteOutputPeakCount) > 0 {
+                self.reportedNonFiniteOutputPeak = true
+                dlog("Discarded a non-finite post-EQ peak value", level: .warning, category: .engine)
+            }
             seq_atomic_flag_clear(self.pendingPublishFlag)
         }
     }

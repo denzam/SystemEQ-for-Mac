@@ -6,6 +6,7 @@ import SwiftUI
 
 struct RoutingView: View {
     @StateObject private var audioRouter = AudioRouter.shared
+    @ObservedObject private var audioEngine = AudioEngine.shared
     @ObservedObject private var core = CoreAudioEngine.shared
     @StateObject private var localization = LocalizationManager.shared
 
@@ -58,27 +59,17 @@ struct RoutingView: View {
             meterCancellable = Timer.publish(every: 1.0 / 20.0, on: .main, in: .common)
                 .autoconnect()
                 .sink { _ in
-                    // Exponential smoothing for peak values
                     let smoothingFactor: Float = 0.3
-
-                    // Attack: fast rise
-                    if core.inputPeakLevel > smoothedInputPeak {
-                        smoothedInputPeak = core.inputPeakLevel
-                    } else {
-                        // Release: slow fall
-                        smoothedInputPeak = smoothingFactor * core
-                            .inputPeakLevel + (1 - smoothingFactor) * smoothedInputPeak
-                    }
-
-                    if core.outputPeakLevel > smoothedOutputPeak {
-                        smoothedOutputPeak = core.outputPeakLevel
-                    } else {
-                        smoothedOutputPeak = smoothingFactor * core
-                            .outputPeakLevel + (1 - smoothingFactor) * smoothedOutputPeak
-                    }
-
-                    // ⚡ REMOVED: meterUpdateTrigger.toggle() was forcing full view redraw 30 times per second
-                    // SwiftUI automatically updates when @State variables change
+                    smoothedInputPeak = Self.nextSmoothedPeak(
+                        current: smoothedInputPeak,
+                        incoming: core.inputPeakLevel,
+                        smoothingFactor: smoothingFactor
+                    )
+                    smoothedOutputPeak = Self.nextSmoothedPeak(
+                        current: smoothedOutputPeak,
+                        incoming: core.outputPeakLevel,
+                        smoothingFactor: smoothingFactor
+                    )
                 }
         }
         .onDisappear {
@@ -212,7 +203,7 @@ struct RoutingView: View {
                 HStack(spacing: 12) {
                     // Main controls
                     Button(action: {
-                        audioRouter.enableEQRouting()
+                        Self.setEQEnabled(true, engine: audioEngine)
                     }) {
                         Label(localization.localized(.enableEQ), systemImage: "waveform.circle.fill")
                             .font(AppTypography.body)
@@ -221,7 +212,7 @@ struct RoutingView: View {
                     .disabled(!audioRouter.blackHoleDetected)
 
                     Button(action: {
-                        audioRouter.disableEQRouting()
+                        Self.setEQEnabled(false, engine: audioEngine)
                     }) {
                         Label(localization.localized(.disableEQ), systemImage: "stop.circle")
                             .font(AppTypography.body)
@@ -286,17 +277,18 @@ struct RoutingView: View {
     }
 
     private func meterRow(title: String, peak: Float) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let displayPeak = Self.normalizedPeak(peak)
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                     .font(AppTypography.bodySmall)
                     .fontWeight(.medium)
                     .frame(width: 60, alignment: .leading)
                 Spacer()
-                Text(peakToDB(peak))
+                Text(peakToDB(displayPeak))
                     .font(.system(.body, design: .monospaced))
                     .fontWeight(.semibold)
-                    .foregroundColor(peakColor(peak))
+                    .foregroundColor(peakColor(displayPeak))
                     .frame(width: 80, alignment: .trailing)
                     .monospacedDigit()
             }
@@ -309,9 +301,9 @@ struct RoutingView: View {
 
                     // Peak bar with gradient
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(peakGradient(peak))
-                        .frame(width: geometry.size.width * CGFloat(min(peak, 1.0)))
-                        .animation(.easeOut(duration: 0.1), value: peak)
+                        .fill(peakGradient(displayPeak))
+                        .frame(width: geometry.size.width * CGFloat(min(displayPeak, 1.0)))
+                        .animation(.easeOut(duration: 0.1), value: displayPeak)
                 }
             }
             .frame(height: 8)
@@ -479,12 +471,32 @@ struct RoutingView: View {
 
     // MARK: - Peak Meter Helpers
 
+    static func setEQEnabled(_ enabled: Bool, engine: AudioEngine) {
+        engine.setEnabled(enabled)
+    }
+
+    static func normalizedPeak(_ peak: Float) -> Float {
+        guard peak.isFinite, peak >= 0.0001 else { return 0 }
+        return max(peak, 0)
+    }
+
+    static func nextSmoothedPeak(current: Float, incoming: Float, smoothingFactor: Float) -> Float {
+        let stableCurrent = normalizedPeak(current)
+        let stableIncoming = normalizedPeak(incoming)
+        let factor = min(max(smoothingFactor, 0), 1)
+        if stableIncoming > stableCurrent {
+            return stableIncoming
+        }
+        return factor * stableIncoming + (1 - factor) * stableCurrent
+    }
+
     /// Convert linear peak value to dB string
     private func peakToDB(_ peak: Float) -> String {
-        if peak <= 0.0 {
+        let stablePeak = Self.normalizedPeak(peak)
+        if stablePeak <= 0.0 {
             return "-∞ dB"
         }
-        let db = 20 * log10(peak)
+        let db = 20 * log10(stablePeak)
         return String(format: "%.1f dB", db)
     }
 

@@ -94,6 +94,7 @@ public final class AudioEngine: ObservableObject {
                 DispatchQueue.main.async { [weak self] in
                     self?.setupEQBands()
                     self?.syncToCoreAudioEngineImmediate()
+                    self?.persistCurrentPlaybackState()
                 }
             }
         }
@@ -101,6 +102,7 @@ public final class AudioEngine: ObservableObject {
 
     @Published var bands: [EQBand] = []
     @Published var preampGain: Float = 0.0
+    @Published var outputBoostGain: Float
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -109,9 +111,12 @@ public final class AudioEngine: ObservableObject {
     // value is always applied via the trailing edge of the work item.
     private var syncDebounceWorkItem: DispatchWorkItem?
     private let syncDebounceInterval: DispatchTimeInterval = .milliseconds(20)
+    private var persistenceDebounceWorkItem: DispatchWorkItem?
+    private let persistenceDebounceInterval: DispatchTimeInterval = .milliseconds(250)
     private let defaults: UserDefaults
     private let enableRouting: (Bool) -> Bool
     private let disableRouting: (Bool) -> Void
+    private static let outputBoostGainKey = "outputBoostGain"
 
     // MARK: - Singleton
 
@@ -133,6 +138,7 @@ public final class AudioEngine: ObservableObject {
         self.defaults = defaults
         self.enableRouting = enableRouting
         self.disableRouting = disableRouting
+        outputBoostGain = Self.sanitizedOutputBoost(defaults.float(forKey: Self.outputBoostGainKey))
         setupEQBands()
         setupBindings()
         engineLog("AudioEngine Facade initialized with \(bandMode.rawValue)", level: .info)
@@ -206,9 +212,17 @@ public final class AudioEngine: ObservableObject {
             let gains = self.bands.map(\.gain)
             switch self.bandMode {
             case .tenBand:
-                CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: self.preampGain)
+                CoreAudioEngine.shared.applyFixedBandEQ(
+                    gains,
+                    preamp: self.preampGain,
+                    outputBoost: self.outputBoostGain
+                )
             case .thirtyOneBand:
-                CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: self.preampGain)
+                CoreAudioEngine.shared.applyGraphicEQ31(
+                    gains,
+                    preamp: self.preampGain,
+                    outputBoost: self.outputBoostGain
+                )
             }
         }
         syncDebounceWorkItem = work
@@ -223,9 +237,9 @@ public final class AudioEngine: ObservableObject {
         let gains = bands.map(\.gain)
         switch bandMode {
         case .tenBand:
-            CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: preampGain)
+            CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: preampGain, outputBoost: outputBoostGain)
         case .thirtyOneBand:
-            CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: preampGain)
+            CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: preampGain, outputBoost: outputBoostGain)
         }
     }
 
@@ -251,8 +265,17 @@ public final class AudioEngine: ObservableObject {
                 }
                 return false
             }
+            syncToCoreAudioEngineImmediate()
+            if persistState {
+                persistCurrentPlaybackState()
+            }
+            DiagnosticEventStore.shared.record("eq.enabled", details: diagnosticStateDetails())
         } else {
+            if persistState {
+                persistCurrentPlaybackState()
+            }
             disableRouting(false)
+            DiagnosticEventStore.shared.record("eq.disabled", details: diagnosticStateDetails())
         }
 
         // Save EQ enabled state for startup behavior
@@ -263,8 +286,16 @@ public final class AudioEngine: ObservableObject {
     }
 
     func setPreampGain(_ gain: Float) {
-        preampGain = gain
-        CoreAudioEngine.shared.setPreampGain(gain)
+        preampGain = Self.sanitizedPreamp(gain)
+        syncToCoreAudioEngineImmediate()
+        persistCurrentPlaybackState()
+    }
+
+    func setOutputBoostGain(_ gain: Float) {
+        let sanitized = Self.sanitizedOutputBoost(gain)
+        outputBoostGain = sanitized
+        defaults.set(sanitized, forKey: Self.outputBoostGainKey)
+        syncToCoreAudioEngineImmediate()
     }
 
     func updateBandGain(bandId: Int, gain: Float) {
@@ -273,11 +304,13 @@ public final class AudioEngine: ObservableObject {
         if Thread.isMainThread {
             bands[bandId].gain = clampedGain
             syncToCoreAudioEngine()
+            schedulePlaybackStatePersistence()
         } else {
             DispatchQueue.main.async { [weak self] in
                 guard let self, bandId < self.bands.count else { return }
                 self.bands[bandId].gain = clampedGain
                 self.syncToCoreAudioEngine()
+                self.schedulePlaybackStatePersistence()
             }
         }
     }
@@ -287,6 +320,7 @@ public final class AudioEngine: ObservableObject {
             bands[index].gain = 0.0
         }
         syncToCoreAudioEngineImmediate()
+        persistCurrentPlaybackState()
     }
 
     func applyEQValues(_ values: [Float]) {
@@ -300,6 +334,7 @@ public final class AudioEngine: ObservableObject {
             bands[index].gain = gain
         }
         syncToCoreAudioEngineImmediate()
+        persistCurrentPlaybackState()
     }
 
     // MARK: - Legacy / Helpers
@@ -317,6 +352,44 @@ public final class AudioEngine: ObservableObject {
             setPreampGain(0.0)
         }
         eqLog("Auto preamp applied: \(formatGain(preampGain))")
+    }
+
+    private static func sanitizedPreamp(_ gain: Float) -> Float {
+        gain.isFinite ? max(-20.0, min(20.0, gain)) : 0.0
+    }
+
+    private static func sanitizedOutputBoost(_ gain: Float) -> Float {
+        gain.isFinite ? min(max(gain, 0.0), OutputSafetyProcessor.maximumBoostDB) : 0.0
+    }
+
+    func persistCurrentPlaybackState() {
+        PresetPersistence.savePlaybackState(
+            mode: bandMode,
+            gains: bands.map(\.gain),
+            preamp: preampGain,
+            in: defaults
+        )
+    }
+
+    private func schedulePlaybackStatePersistence() {
+        persistenceDebounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.persistCurrentPlaybackState()
+        }
+        persistenceDebounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + persistenceDebounceInterval, execute: work)
+    }
+
+    private func diagnosticStateDetails() -> [String: String] {
+        let gains = bands.map(\.gain)
+        return [
+            "activeBands": "\(gains.filter { abs($0) >= 0.01 }.count)",
+            "bandMode": bandMode.rawValue,
+            "boostDB": String(format: "%.1f", outputBoostGain),
+            "maxGainDB": String(format: "%.1f", gains.max() ?? 0),
+            "minGainDB": String(format: "%.1f", gains.min() ?? 0),
+            "preampDB": String(format: "%.1f", preampGain)
+        ]
     }
 
     func formatFrequency(_ freq: Float) -> String {

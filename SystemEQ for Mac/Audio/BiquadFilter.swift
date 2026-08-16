@@ -244,6 +244,7 @@ public class BiquadFilterChain {
     public var filters: [BiquadFilter]
     public var preamp: Float = 0.0
     public var activeFilterCount: Int = 0 // Track number of non-bypassed filters
+    private var outputSafety = OutputSafetyProcessor()
 
     public init(filterCount: Int = 10) {
         filters = (0..<filterCount).map { _ in BiquadFilter() }
@@ -280,6 +281,10 @@ public class BiquadFilterChain {
         }
     }
 
+    public func configureOutputSafety(outputBoost: Float, sampleRate: Float) {
+        outputSafety.configure(boostDB: outputBoost, sampleRate: sampleRate)
+    }
+
     private func configureBand(
         at index: Int,
         frequency: Float,
@@ -313,7 +318,9 @@ public class BiquadFilterChain {
             output = filters[i].process(output)
         }
 
-        return output
+        var result = output
+        withUnsafeMutablePointer(to: &result) { outputSafety.processMono($0, frameCount: 1) }
+        return result
     }
 
     /// ⚡ OPTIMIZED: Process entire buffer at once (10-100x faster than sample-by-sample)
@@ -329,6 +336,7 @@ public class BiquadFilterChain {
         for filter in filters {
             filter.processBuffer(buffer, frameCount: frameCount)
         }
+        outputSafety.processMono(buffer, frameCount: frameCount)
     }
 
     /// ⚡ OPTIMIZED: Process stereo buffers simultaneously (2x faster than separate calls)
@@ -349,5 +357,6 @@ public class BiquadFilterChain {
         for filter in filters {
             filter.processStereoBuffers(bufferL, bufferR, frameCount: frameCount)
         }
+        outputSafety.processStereo(bufferL, bufferR, frameCount: frameCount)
     }
 }

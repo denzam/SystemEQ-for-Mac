@@ -126,6 +126,7 @@ public final class CoreAudioEngine: ObservableObject {
     private let eqFrequencies: [Float] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
     fileprivate var preampGain: Float = 0.0
+    fileprivate var outputBoostGain: Float = 0.0
 
     // Reusable buffer to avoid allocation in render callback
     fileprivate var inputBufferList: UnsafeMutablePointer<AudioBufferList>?
@@ -457,7 +458,16 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Setup
 
+    private func recordSetupFailure(_ step: String, status: OSStatus? = nil) {
+        var details = ["step": step]
+        if let status {
+            details["status"] = "\(status)"
+        }
+        DiagnosticEventStore.shared.record("engine.setup.stepFailed", details: details)
+    }
+
     public func setup(inputDevice: AudioDeviceID, outputDevice: AudioDeviceID) {
+        DiagnosticEventStore.shared.record("engine.setup.request")
         dlog("🔧 Setting up Core Audio Engine...", category: .engine)
         dlog("   Input device: \(inputDevice)", category: .engine)
         dlog("   Output device: \(outputDevice)", category: .engine)
@@ -476,6 +486,7 @@ public final class CoreAudioEngine: ObservableObject {
         var setupSucceeded = false
         defer {
             if !setupSucceeded {
+                DiagnosticEventStore.shared.record("engine.setup.failed")
                 cleanup()
             }
         }
@@ -502,6 +513,14 @@ public final class CoreAudioEngine: ObservableObject {
         let finalInRate = getDeviceSampleRate(inputDevice) ?? preferred
         let finalOutRate = getDeviceSampleRate(outputDevice) ?? preferred
         self.currentSampleRate = finalOutRate
+        DiagnosticEventStore.shared.record(
+            "engine.setup.format",
+            details: [
+                "inputRateHz": String(format: "%.0f", finalInRate),
+                "outputRateHz": String(format: "%.0f", finalOutRate),
+                "ratesMatch": String(abs(finalInRate - finalOutRate) < 1.0)
+            ]
+        )
         dlog("📡 Final sample rates: input=\(finalInRate)Hz, output=\(finalOutRate)Hz", category: .engine)
 
         // Force identical buffer sizes on both devices so their I/O deadlines
@@ -514,6 +533,7 @@ public final class CoreAudioEngine: ObservableObject {
         logDeviceBufferInfo(outputDevice, label: "OUTPUT")
 
         if abs(finalInRate - finalOutRate) >= 1.0 {
+            DiagnosticEventStore.shared.record("engine.setup.rateMismatch")
             dlog("⚠️ WARNING: Sample rate mismatch! This will cause audio quality degradation!", category: .engine)
             dlog("   Input: \(finalInRate)Hz, Output: \(finalOutRate)Hz", category: .engine)
             dlog("   Please set both devices to the same sample rate in Audio MIDI Setup", category: .engine)
@@ -547,12 +567,14 @@ public final class CoreAudioEngine: ObservableObject {
                 componentFlagsMask: 0
             )
             guard let comp = AudioComponentFindNext(nil, &desc) else {
+                recordSetupFailure("inputComponent")
                 dlog("❌ Failed to find HAL Output Audio Component (input)", category: .engine)
                 return
             }
             var unit: AudioUnit?
             var status = AudioComponentInstanceNew(comp, &unit)
             guard status == noErr, let iu = unit else {
+                recordSetupFailure("inputUnitCreate", status: status)
                 dlog("❌ Failed to create INPUT unit: \(status)", category: .engine)
                 return
             }
@@ -570,7 +592,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &enable,
                 UInt32(MemoryLayout<UInt32>.size)
             )
-            if status != noErr { dlog("❌ Failed to enable INPUT on inputUnit: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("inputEnable", status: status)
+                dlog("❌ Failed to enable INPUT on inputUnit: \(status)", category: .engine)
+                return
+            }
             status = AudioUnitSetProperty(
                 iu,
                 kAudioOutputUnitProperty_EnableIO,
@@ -579,7 +605,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &disable,
                 UInt32(MemoryLayout<UInt32>.size)
             )
-            if status != noErr { dlog("❌ Failed to disable OUTPUT on inputUnit: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("inputDisableOutput", status: status)
+                dlog("❌ Failed to disable OUTPUT on inputUnit: \(status)", category: .engine)
+                return
+            }
 
             // Attach to virtual audio input device
             var inDev = inputDevice
@@ -591,7 +621,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &inDev,
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
-            if status != noErr { dlog("❌ Failed to set INPUT device: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("inputDevice", status: status)
+                dlog("❌ Failed to set INPUT device: \(status)", category: .engine)
+                return
+            }
 
             // Query actual input format to derive channel count
             var inFormat = AudioStreamBasicDescription()
@@ -680,6 +714,7 @@ public final class CoreAudioEngine: ObservableObject {
             if statusCB == noErr {
                 dlog("✅ INPUT: SetInputCallback registered", category: .engine)
             } else {
+                recordSetupFailure("inputCallback", status: statusCB)
                 dlog("❌ INPUT: SetInputCallback failed — status=\(statusCB)", category: .engine)
             }
         }
@@ -695,12 +730,14 @@ public final class CoreAudioEngine: ObservableObject {
                 componentFlagsMask: 0
             )
             guard let comp = AudioComponentFindNext(nil, &desc) else {
+                recordSetupFailure("outputComponent")
                 dlog("❌ Failed to find HAL Output Audio Component (output)", category: .engine)
                 return
             }
             var unit: AudioUnit?
             var status = AudioComponentInstanceNew(comp, &unit)
             guard status == noErr, let ou = unit else {
+                recordSetupFailure("outputUnitCreate", status: status)
                 dlog("❌ Failed to create OUTPUT unit: \(status)", category: .engine)
                 return
             }
@@ -718,7 +755,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &enable,
                 UInt32(MemoryLayout<UInt32>.size)
             )
-            if status != noErr { dlog("❌ Failed to enable OUTPUT on outputUnit: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("outputEnable", status: status)
+                dlog("❌ Failed to enable OUTPUT on outputUnit: \(status)", category: .engine)
+                return
+            }
             status = AudioUnitSetProperty(
                 ou,
                 kAudioOutputUnitProperty_EnableIO,
@@ -727,7 +768,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &disable,
                 UInt32(MemoryLayout<UInt32>.size)
             )
-            if status != noErr { dlog("❌ Failed to disable INPUT on outputUnit: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("outputDisableInput", status: status)
+                dlog("❌ Failed to disable INPUT on outputUnit: \(status)", category: .engine)
+                return
+            }
 
             // Attach to physical output device
             var outDev = outputDevice
@@ -739,7 +784,11 @@ public final class CoreAudioEngine: ObservableObject {
                 &outDev,
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
-            if status != noErr { dlog("❌ Failed to set OUTPUT device: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("outputDevice", status: status)
+                dlog("❌ Failed to set OUTPUT device: \(status)", category: .engine)
+                return
+            }
 
             // Configure client stream format on OUTPUT unit's input (element 0)
             // Match device interleaving to avoid conversion issues
@@ -822,8 +871,10 @@ public final class CoreAudioEngine: ObservableObject {
                 &shouldAllocate,
                 UInt32(MemoryLayout<UInt32>.size)
             )
-            if status !=
-                noErr { dlog("⚠️ Failed to set ShouldAllocateBuffer on outputUnit: \(status)", category: .engine) }
+            if status != noErr {
+                recordSetupFailure("outputBufferAllocation", status: status)
+                dlog("⚠️ Failed to set ShouldAllocateBuffer on outputUnit: \(status)", category: .engine)
+            }
 
             // Set render callback on OUTPUT unit (scope Input, element 0)
             let selfPointer = Unmanaged.passUnretained(self).toOpaque()
@@ -839,17 +890,29 @@ public final class CoreAudioEngine: ObservableObject {
                 &renderCallback,
                 UInt32(MemoryLayout<AURenderCallbackStruct>.size)
             )
-            if status != noErr { dlog("❌ Failed to set render callback: \(status)", category: .engine); return }
+            if status != noErr {
+                recordSetupFailure("outputRenderCallback", status: status)
+                dlog("❌ Failed to set render callback: \(status)", category: .engine)
+                return
+            }
         }
 
         // Initialize both units
         if let iu = inputUnit {
             let s = AudioUnitInitialize(iu)
-            if s != noErr { dlog("❌ Failed to initialize INPUT unit: \(s)", category: .engine); return }
+            if s != noErr {
+                recordSetupFailure("inputInitialize", status: s)
+                dlog("❌ Failed to initialize INPUT unit: \(s)", category: .engine)
+                return
+            }
         }
         if let ou = outputUnit {
             let s = AudioUnitInitialize(ou)
-            if s != noErr { dlog("❌ Failed to initialize OUTPUT unit: \(s)", category: .engine); return }
+            if s != noErr {
+                recordSetupFailure("outputInitialize", status: s)
+                dlog("❌ Failed to initialize OUTPUT unit: \(s)", category: .engine)
+                return
+            }
         }
 
         // Diagnostic: Inspect output unit stream formats
@@ -899,11 +962,20 @@ public final class CoreAudioEngine: ObservableObject {
         guard inputBufferList != nil,
               outputBufferList != nil,
               ringBuffer.isAllocated else {
+            recordSetupFailure("bufferAllocation")
             dlog("❌ Failed to allocate audio buffers", level: .error, category: .engine)
             return
         }
         isSetupComplete = true
         setupSucceeded = true
+        DiagnosticEventStore.shared.record(
+            "engine.setup.ready",
+            details: [
+                "bufferFrames": "\(allocatedFrameCapacity)",
+                "channels": "\(channelCount)",
+                "sampleRateHz": String(format: "%.0f", currentSampleRate)
+            ]
+        )
 
         dlog("✅ Core Audio Units initialized successfully", category: .engine)
         dlog("🎤 Ready for real-time audio processing", category: .engine)
@@ -917,11 +989,17 @@ public final class CoreAudioEngine: ObservableObject {
         value.isFinite ? max(-20.0, min(20.0, value)) : 0.0
     }
 
+    nonisolated private static func sanitizedOutputBoost(_ value: Float) -> Float {
+        value.isFinite ? min(max(value, 0.0), 3.0) : 0.0
+    }
+
     /// Apply fixed-band EQ (10 bands)
-    public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0) {
+    public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
+        let outputBoost = Self.sanitizedOutputBoost(outputBoost)
         self.preampGain = preamp
+        self.outputBoostGain = outputBoost
         self.eqGains = gains
 
         // Convert to parametric bands
@@ -957,7 +1035,12 @@ public final class CoreAudioEngine: ObservableObject {
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU)
         if useVDSPFilter {
             let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-            filter.configure(bands: bands, preamp: preamp, sampleRate: Float(currentSampleRate))
+            filter.configure(
+                bands: bands,
+                preamp: preamp,
+                outputBoost: outputBoost,
+                sampleRate: Float(currentSampleRate)
+            )
             self.vdspFilter = filter
             self.filterChain = nil // Clear old filter chain
         } else {
@@ -975,16 +1058,22 @@ public final class CoreAudioEngine: ObservableObject {
                 types: bandTypes,
                 sampleRate: Float(currentSampleRate)
             )
+            self.filterChain?.configureOutputSafety(
+                outputBoost: outputBoost,
+                sampleRate: Float(currentSampleRate)
+            )
             self.vdspFilter = nil
             dlog("🎛️ Applied 10-band EQ with standard filters", category: .engine)
         }
     }
 
     /// Apply 31-band graphic EQ using parametric peaks
-    public func applyGraphicEQ31(_ gains: [Float], preamp: Float = 0.0) {
+    public func applyGraphicEQ31(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
+        let outputBoost = Self.sanitizedOutputBoost(outputBoost)
         self.preampGain = preamp
+        self.outputBoostGain = outputBoost
 
         var bands: [ParametricBand] = []
         let centers = AutoEQConstants.thirtyOneCenters
@@ -1004,7 +1093,12 @@ public final class CoreAudioEngine: ObservableObject {
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU even with 31 bands)
         if useVDSPFilter {
             let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-            filter.configure(bands: bands, preamp: preamp, sampleRate: Float(currentSampleRate))
+            filter.configure(
+                bands: bands,
+                preamp: preamp,
+                outputBoost: outputBoost,
+                sampleRate: Float(currentSampleRate)
+            )
             self.vdspFilter = filter
             self.filterChain = nil // Clear old filter chain
         } else {
@@ -1035,6 +1129,10 @@ public final class CoreAudioEngine: ObservableObject {
                 types: bandTypes31,
                 sampleRate: Float(currentSampleRate)
             )
+            self.filterChain?.configureOutputSafety(
+                outputBoost: outputBoost,
+                sampleRate: Float(currentSampleRate)
+            )
             self.vdspFilter = nil
             dlog(
                 "🎛️ Applied 31-band EQ with \(activeBands.count) active filters (skipped \(count - activeBands.count) zero-gain bands)",
@@ -1057,6 +1155,7 @@ public final class CoreAudioEngine: ObservableObject {
     @discardableResult
     public func start() -> Bool {
         guard let iu = inputUnit, let ou = outputUnit, isSetupComplete, !isRunning else {
+            DiagnosticEventStore.shared.record("engine.start.failed", details: ["reason": "notReady"])
             dlog("⚠️ Core Audio Engine already running or not set up", category: .engine)
             return false
         }
@@ -1065,17 +1164,20 @@ public final class CoreAudioEngine: ObservableObject {
         ringBuffer.primeSilence(frames: 1024)
         let s1 = AudioOutputUnitStart(iu)
         guard s1 == noErr else {
+            DiagnosticEventStore.shared.record("engine.start.failed", details: ["inputStatus": "\(s1)"])
             dlog("❌ Failed to start Core Audio Engine input: \(s1)", level: .error, category: .engine)
             return false
         }
         let s2 = AudioOutputUnitStart(ou)
         guard s2 == noErr else {
             AudioOutputUnitStop(iu)
+            DiagnosticEventStore.shared.record("engine.start.failed", details: ["outputStatus": "\(s2)"])
             dlog("❌ Failed to start Core Audio Engine output: \(s2)", level: .error, category: .engine)
             return false
         }
 
         isRunning = true
+        DiagnosticEventStore.shared.record("engine.start.succeeded")
         dlog("✅ Core Audio Engine started", category: .engine)
         dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
         #if DEBUG
@@ -1130,6 +1232,7 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     public func stop() {
+        let wasRunning = isRunning
         // Stop test tone if running
         if testToneEnabled {
             testToneEnabled = false
@@ -1139,6 +1242,9 @@ public final class CoreAudioEngine: ObservableObject {
         if let iu = inputUnit { AudioOutputUnitStop(iu) }
         if let ou = outputUnit { AudioOutputUnitStop(ou) }
         isRunning = false
+        if wasRunning {
+            DiagnosticEventStore.shared.record("engine.stop")
+        }
 
         // Re-promote callback threads on next start (they may be new threads).
         didPromoteInputThread = false
@@ -1156,6 +1262,18 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     // MARK: - Diagnostics API
+
+    func diagnosticSummary() -> String {
+        let pipeline = vdspFilter != nil ? "vDSP" : filterChain != nil ? "scalar" : "none"
+        return """
+        Setup complete: \(isSetupComplete)
+        Engine running: \(isRunning)
+        Processing pipeline: \(pipeline)
+        Client sample rate: \(String(format: "%.0f", currentSampleRate)) Hz
+        Channels: \(channelCount)
+        Buffer capacity: \(allocatedFrameCapacity) frames
+        """
+    }
 
     public func printAudioUnitDiagnostics() {
         dlog("===== CoreAudioEngine Diagnostics =====", category: .engine)
@@ -1344,18 +1462,13 @@ public final class CoreAudioEngine: ObservableObject {
         eqGains[index] = max(-20.0, min(20.0, gain))
 
         // Rebuild filter chain with new gains
-        applyFixedBandEQ(eqGains, preamp: preampGain)
+        applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
     }
 
     /// Get current band gain
     public func getBandGain(index: Int) -> Float {
         guard index < eqGains.count else { return 0.0 }
         return eqGains[index]
-    }
-
-    /// Set preamp gain
-    public func setPreampGain(_ gain: Float) {
-        preampGain = Self.sanitizedDB(gain)
     }
 
     /// Enable/disable EQ processing (bypass)
@@ -1389,7 +1502,7 @@ public final class CoreAudioEngine: ObservableObject {
         }
 
         // Rebuild filter chain
-        applyFixedBandEQ(eqGains, preamp: preampGain)
+        applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
     }
 
     // MARK: - Room Correction
@@ -1404,7 +1517,12 @@ public final class CoreAudioEngine: ObservableObject {
         }
 
         let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-        filter.configure(bands: bands, preamp: 0.0, sampleRate: Float(currentSampleRate))
+        filter.configure(
+            bands: bands,
+            preamp: 0.0,
+            outputBoost: outputBoostGain,
+            sampleRate: Float(currentSampleRate)
+        )
         self.vdspFilter = filter
         self.filterChain = nil
 

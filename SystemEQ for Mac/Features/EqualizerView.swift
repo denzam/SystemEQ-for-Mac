@@ -85,35 +85,58 @@ struct EqualizerView: View {
     // MARK: - Footer
 
     private var footerSection: some View {
-        HStack(spacing: AppSpacing.lg) {
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(localization.localized(.preamp))
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(spacing: AppSpacing.lg) {
+                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    Text(localization.localized(.preamp))
+                        .font(AppTypography.bodySmall)
+                        .foregroundColor(.secondary)
+                    Text(audioEngine.formatGain(audioEngine.preampGain))
+                        .font(AppTypography.mono)
+                }
+                .padding(AppSpacing.sm)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(AppRadius.sm)
+
+                Spacer()
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.3)) { audioEngine.resetAllBands() }
+                }) {
+                    Label(localization.localized(.reset), systemImage: "arrow.counterclockwise")
+                        .font(AppTypography.body)
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.3)) { audioEngine.applyAutoPreamp() }
+                }) {
+                    Label(localization.localized(.autoPreamp), systemImage: "wand.and.stars")
+                        .font(AppTypography.body)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            HStack(spacing: AppSpacing.sm) {
+                Text(localization.localized(.outputBoost))
                     .font(AppTypography.bodySmall)
                     .foregroundColor(.secondary)
-                Text(audioEngine.formatGain(audioEngine.preampGain))
+                Slider(
+                    value: Binding(
+                        get: { Double(audioEngine.outputBoostGain) },
+                        set: { audioEngine.setOutputBoostGain(Float($0)) }
+                    ),
+                    in: 0...Double(OutputSafetyProcessor.maximumBoostDB),
+                    step: 0.5
+                )
+                Text(audioEngine.formatGain(audioEngine.outputBoostGain))
                     .font(AppTypography.mono)
+                    .frame(width: 68, alignment: .trailing)
             }
-            .padding(AppSpacing.sm)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(AppRadius.sm)
 
-            Spacer()
-
-            Button(action: {
-                withAnimation(.spring(response: 0.3)) { audioEngine.resetAllBands() }
-            }) {
-                Label(localization.localized(.reset), systemImage: "arrow.counterclockwise")
-                    .font(AppTypography.body)
-            }
-            .buttonStyle(.bordered)
-
-            Button(action: {
-                withAnimation(.spring(response: 0.3)) { audioEngine.applyAutoPreamp() }
-            }) {
-                Label(localization.localized(.autoPreamp), systemImage: "wand.and.stars")
-                    .font(AppTypography.body)
-            }
-            .buttonStyle(.borderedProminent)
+            Text(localization.localized(.outputBoostDescription))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
         }
         .padding(AppSpacing.lg)
     }

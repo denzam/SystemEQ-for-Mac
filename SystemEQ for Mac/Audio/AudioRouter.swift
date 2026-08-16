@@ -31,6 +31,30 @@ public struct AudioDevice: Identifiable, Equatable {
     }
 }
 
+struct OutputVolumeState: Equatable {
+    let scalar: Float
+    let isMuted: Bool?
+
+    nonisolated init?(scalar: Float, isMuted: Bool?) {
+        guard scalar.isFinite else { return nil }
+        self.scalar = min(max(scalar, 0), 1)
+        self.isMuted = isMuted
+    }
+}
+
+enum OutputVolumeTransfer {
+    static func transfer(
+        from source: AudioDeviceID,
+        to destination: AudioDeviceID,
+        read: (AudioDeviceID) -> OutputVolumeState?,
+        write: (OutputVolumeState, AudioDeviceID) -> Bool,
+        fallback: OutputVolumeState? = nil
+    ) -> Bool {
+        guard source != destination, let state = read(source) ?? fallback else { return false }
+        return write(state, destination)
+    }
+}
+
 // MARK: - Audio Router
 
 public final class AudioRouter: ObservableObject {
@@ -462,6 +486,17 @@ public final class AudioRouter: ObservableObject {
         return findBestPhysicalOutputDevice()
     }
 
+    private func diagnosticDeviceKind(_ device: AudioDevice?) -> String {
+        guard let device else { return "unavailable" }
+        let identifier = "\(device.name) \(device.uid)".lowercased()
+        if identifier.contains(AppConstants.DeviceNames.blackHoleLowercase) { return "blackHole" }
+        if identifier.contains("built-in") || identifier.contains("macbook") || identifier.contains("mac mini") {
+            return "builtIn"
+        }
+        if identifier.contains("usb") { return "usbAudio" }
+        return "externalAudio"
+    }
+
     /// - Parameter forceRestart: rebuild the AudioUnits even when the engine looks
     ///   like it is already running on these device IDs. Needed after sleep and
     ///   after a replug, where the IDs can match while the units are already dead.
@@ -472,6 +507,7 @@ public final class AudioRouter: ObservableObject {
     ) -> Bool {
         // Get physical output device
         guard let physicalOutput = preferredOutputDevice() else {
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "noPhysicalOutput"])
             errorLog("No physical output device found!", category: .routing)
             return false
         }
@@ -479,9 +515,18 @@ public final class AudioRouter: ObservableObject {
         // Check if BlackHole is available
         guard let blackHoleDevice = inputDevices
             .first(where: { $0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) }) else {
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "blackHoleMissing"])
             errorLog("BlackHole not found! Install from: \(AppConstants.URLs.blackHoleWebsite)", category: .routing)
             return false
         }
+
+        DiagnosticEventStore.shared.record(
+            "routing.enable.request",
+            details: [
+                "forceRestart": "\(forceRestart)",
+                "outputKind": diagnosticDeviceKind(physicalOutput)
+            ]
+        )
 
         activeInputUID = blackHoleDevice.uid
         activeOutputUID = physicalOutput.uid
@@ -496,11 +541,18 @@ public final class AudioRouter: ObservableObject {
            engine.isRunning,
            engine.currentInputDeviceID == blackHoleDevice.id,
            engine.currentOutputDeviceID == physicalOutput.id {
+            DiagnosticEventStore.shared.record("routing.enable.skipped", details: ["reason": "alreadyActive"])
             dlog("EQ routing already active, skipping restart", category: .routing)
             return true
         }
 
         saveCurrentSystemOutputDevice()
+
+        if let current = currentSystemOutputDevice(), current.id != blackHoleDevice.id {
+            transferOutputVolume(from: current, to: blackHoleDevice)
+        } else if let originalSystemOutputDevice {
+            transferOutputVolume(from: originalSystemOutputDevice, to: blackHoleDevice)
+        }
 
         dlog("EQ routing setup - CORE AUDIO APPROACH", level: .info, category: .routing)
         dlog(
@@ -525,10 +577,16 @@ public final class AudioRouter: ObservableObject {
 
         // Start Core Audio Engine
         guard engine.start() else {
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStart"])
             errorLog("Core Audio Engine failed to start; restoring system output", category: .routing)
             disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
             return false
         }
+
+        DiagnosticEventStore.shared.record(
+            "routing.enable.succeeded",
+            details: ["outputKind": diagnosticDeviceKind(physicalOutput)]
+        )
 
         dlog(
             "EQ routing active: System → BlackHole → CoreAudio+EQ → \(physicalOutput.name) (~20-25ms latency)",
@@ -686,6 +744,10 @@ public final class AudioRouter: ObservableObject {
     }
 
     func disableEQRouting(persistEnabledState: Bool = true) {
+        DiagnosticEventStore.shared.record(
+            "routing.disable.request",
+            details: ["persistEnabledState": "\(persistEnabledState)"]
+        )
         dlog(
             "Disabling EQ routing, restoring to: \(originalSystemOutputDevice?.name ?? "Unknown")",
             level: .info,
@@ -737,6 +799,10 @@ public final class AudioRouter: ObservableObject {
         )
 
         if status == noErr {
+            DiagnosticEventStore.shared.record(
+                "routing.defaultOutput.requested",
+                details: ["outputKind": diagnosticDeviceKind(device), "result": "success"]
+            )
             dlog("Set default output to: \(device.name)", category: .routing)
 
             // Verify the change actually happened
@@ -758,6 +824,10 @@ public final class AudioRouter: ObservableObject {
                     &currentDeviceID
                 ) == noErr {
                     if currentDeviceID != device.id {
+                        DiagnosticEventStore.shared.record(
+                            "routing.defaultOutput.verified",
+                            details: ["result": "mismatch"]
+                        )
                         dlog(
                             "System output did NOT switch to \(device.name) (got \(currentDeviceID), expected \(device.id))",
                             level: .warning,
@@ -765,11 +835,19 @@ public final class AudioRouter: ObservableObject {
                         )
                         self.showManualSetupAlert(targetDevice: device.name)
                     } else {
+                        DiagnosticEventStore.shared.record(
+                            "routing.defaultOutput.verified",
+                            details: ["result": "success"]
+                        )
                         dlog("Verified: System output is now \(device.name)", category: .routing)
                     }
                 }
             }
         } else {
+            DiagnosticEventStore.shared.record(
+                "routing.defaultOutput.requested",
+                details: ["outputKind": diagnosticDeviceKind(device), "result": "failed", "status": "\(status)"]
+            )
             errorLog("Failed to set default output: \(status)", category: .routing)
             self.showManualSetupAlert(targetDevice: device.name)
         }
@@ -784,6 +862,7 @@ public final class AudioRouter: ObservableObject {
         // crashed while routing, the system default is already BlackHole, and
         // saving it would make restore a no-op — leaving the user with no sound.
         if device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) {
+            DiagnosticEventStore.shared.record("routing.originalOutput.recovered")
             dlog("System default is BlackHole; recovering original from persisted UID", category: .routing)
             if let savedUID = UserDefaults.standard.string(forKey: originalOutputUIDKey),
                let recovered = outputDevices.first(where: { $0.uid == savedUID }) {
@@ -794,6 +873,10 @@ public final class AudioRouter: ObservableObject {
 
         originalSystemOutputDevice = device
         UserDefaults.standard.set(device.uid, forKey: originalOutputUIDKey)
+        DiagnosticEventStore.shared.record(
+            "routing.originalOutput.saved",
+            details: ["outputKind": diagnosticDeviceKind(device)]
+        )
         dlog("Saved original system output: \(device.name)", category: .routing)
     }
 
@@ -828,7 +911,7 @@ public final class AudioRouter: ObservableObject {
         if let originalDevice = originalSystemOutputDevice,
            let currentDevice = outputDevices.first(where: { $0.uid == originalDevice.uid }) {
             dlog("Restoring original system output: \(currentDevice.name)", category: .routing)
-            setAsDefaultOutputDevice(currentDevice)
+            restoreSystemOutput(to: currentDevice)
             return
         }
 
@@ -839,7 +922,7 @@ public final class AudioRouter: ObservableObject {
                    !$0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
            }) {
             dlog("Restoring original system output by UID: \(recovered.name)", category: .routing)
-            setAsDefaultOutputDevice(recovered)
+            restoreSystemOutput(to: recovered)
             return
         }
 
@@ -850,7 +933,7 @@ public final class AudioRouter: ObservableObject {
                 level: .warning,
                 category: .routing
             )
-            setAsDefaultOutputDevice(physical)
+            restoreSystemOutput(to: physical)
         } else {
             dlog(
                 "No original system output device saved and no physical fallback found",
@@ -858,6 +941,170 @@ public final class AudioRouter: ObservableObject {
                 category: .routing
             )
         }
+    }
+
+    private func restoreSystemOutput(to device: AudioDevice) {
+        if let blackHole = blackHoleOutputDevice() {
+            transferOutputVolume(from: blackHole, to: device)
+        }
+        setAsDefaultOutputDevice(device)
+    }
+
+    private func blackHoleOutputDevice() -> AudioDevice? {
+        outputDevices.first {
+            $0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
+        }
+    }
+
+    private func transferOutputVolume(from source: AudioDevice, to destination: AudioDevice) {
+        let fallback = destination.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
+            ? OutputVolumeState(scalar: 1, isMuted: nil)
+            : nil
+        let sourceState = Self.outputVolumeState(for: source.id)
+        let state = sourceState ?? fallback
+        let didTransfer = state.map {
+            Self.applyOutputVolumeState($0, to: destination.id)
+        } ?? false
+        var details = [
+            "destinationKind": diagnosticDeviceKind(destination),
+            "result": didTransfer ? "success" : "notApplied",
+            "sourceKind": diagnosticDeviceKind(source),
+            "sourceSoftwareVolume": sourceState == nil ? "unavailable" : "available",
+            "usedMaximumFallback": "\(sourceState == nil && fallback != nil)"
+        ]
+        if let state {
+            details["requestedScalar"] = String(format: "%.3f", state.scalar)
+            details["requestedMute"] = state.isMuted.map { String($0) } ?? "unavailable"
+        }
+        DiagnosticEventStore.shared.record("routing.volumeTransfer", details: details)
+        if didTransfer {
+            dlog(
+                "Copied output volume from \(source.name) to \(destination.name)",
+                category: .routing
+            )
+        }
+    }
+
+    func diagnosticSummary() -> String {
+        let systemOutput = currentSystemOutputDevice()
+        let blackHole = blackHoleOutputDevice()
+        let blackHoleVolume = blackHole.flatMap { Self.outputVolumeState(for: $0.id) }
+        let blackHoleSettable = blackHole.map { Self.outputVolumeIsSettable(for: $0.id) } ?? false
+
+        return """
+        Routing active: \(isRoutingActive)
+        System output kind: \(diagnosticDeviceKind(systemOutput))
+        Selected output kind: \(diagnosticDeviceKind(selectedOutputDevice))
+        BlackHole detected: \(blackHoleDetected)
+        BlackHole volume readable: \(blackHoleVolume != nil)
+        BlackHole volume settable: \(blackHoleSettable)
+        BlackHole scalar: \(blackHoleVolume.map { String(format: "%.3f", $0.scalar) } ?? "unavailable")
+        BlackHole muted: \(blackHoleVolume?.isMuted.map { String($0) } ?? "unavailable")
+        """
+    }
+
+    nonisolated private static func outputVolumeIsSettable(for deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var isSettable: DarwinBoolean = false
+        return AudioObjectHasProperty(deviceID, &address) &&
+            AudioObjectIsPropertySettable(deviceID, &address, &isSettable) == noErr &&
+            isSettable.boolValue
+    }
+
+    nonisolated private static func outputVolumeState(for deviceID: AudioDeviceID) -> OutputVolumeState? {
+        var volumeAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(deviceID, &volumeAddress) else { return nil }
+
+        var scalar: Float = 0
+        var volumeSize = UInt32(MemoryLayout<Float>.size)
+        guard AudioObjectGetPropertyData(
+            deviceID,
+            &volumeAddress,
+            0,
+            nil,
+            &volumeSize,
+            &scalar
+        ) == noErr else { return nil }
+
+        var muteAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var muteValue: UInt32 = 0
+        var muteSize = UInt32(MemoryLayout<UInt32>.size)
+        let isMuted: Bool? = if AudioObjectHasProperty(deviceID, &muteAddress),
+                                AudioObjectGetPropertyData(
+                                    deviceID,
+                                    &muteAddress,
+                                    0,
+                                    nil,
+                                    &muteSize,
+                                    &muteValue
+                                ) == noErr {
+            muteValue != 0
+        } else {
+            nil
+        }
+
+        return OutputVolumeState(scalar: scalar, isMuted: isMuted)
+    }
+
+    nonisolated private static func applyOutputVolumeState(
+        _ state: OutputVolumeState,
+        to deviceID: AudioDeviceID
+    ) -> Bool {
+        var volumeAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var canSetVolume: DarwinBoolean = false
+        guard AudioObjectHasProperty(deviceID, &volumeAddress),
+              AudioObjectIsPropertySettable(deviceID, &volumeAddress, &canSetVolume) == noErr,
+              canSetVolume.boolValue else { return false }
+
+        var scalar = state.scalar
+        let volumeSize = UInt32(MemoryLayout<Float>.size)
+        guard AudioObjectSetPropertyData(
+            deviceID,
+            &volumeAddress,
+            0,
+            nil,
+            volumeSize,
+            &scalar
+        ) == noErr else { return false }
+
+        guard let isMuted = state.isMuted else { return true }
+        var muteAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var canSetMute: DarwinBoolean = false
+        guard AudioObjectHasProperty(deviceID, &muteAddress),
+              AudioObjectIsPropertySettable(deviceID, &muteAddress, &canSetMute) == noErr,
+              canSetMute.boolValue else { return true }
+
+        var muteValue: UInt32 = isMuted ? 1 : 0
+        let muteSize = UInt32(MemoryLayout<UInt32>.size)
+        _ = AudioObjectSetPropertyData(
+            deviceID,
+            &muteAddress,
+            0,
+            nil,
+            muteSize,
+            &muteValue
+        )
+        return true
     }
 
     // MARK: - BlackHole Detection
@@ -870,6 +1117,10 @@ public final class AudioRouter: ObservableObject {
 
         // Only log when state changes
         if blackHoleDetected != wasDetected {
+            DiagnosticEventStore.shared.record(
+                "routing.blackHoleAvailability",
+                details: ["available": "\(blackHoleDetected)"]
+            )
             if blackHoleDetected {
                 dlog("BlackHole detected", category: .routing)
             } else {
