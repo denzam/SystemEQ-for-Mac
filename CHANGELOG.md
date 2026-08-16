@@ -4,6 +4,24 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-16
+
+Audio reliability, safer output control, and privacy-safe diagnostics.
+
+### Added
+- Output Boost from +0 to +3 dB, protected by a linked-stereo safety limiter to prevent clipping
+- A diagnostic report export in Settings that contains only SystemEQ state and recent app events; it excludes audio, media, device names, identifiers, file paths, and raw macOS logs
+
+### Changed
+- SystemEQ now restores the exact last playback configuration — including manual band edits, preamp, and the active preset — after an EQ toggle or app relaunch
+
+### Fixed
+- Kept the physical output's volume when routing starts through BlackHole, preventing unexpectedly quiet audio after login launch or restart
+- Preamp values now rebuild and affect the live vDSP filter chain
+- Turning EQ off and on from the routing screen no longer loses the active preset
+- Preserved the intended EQ state when startup routing temporarily fails because an output device is unavailable
+- Audio meters show silence as −∞ dB instead of non-finite or implausibly low values
+
 ## [1.2.0] — 2026-08-09
 
 Launch reliability overhaul and two community-requested features
