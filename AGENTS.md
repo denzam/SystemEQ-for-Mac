@@ -17,6 +17,10 @@ xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac"
 
 Користувач перевіряє UI сам на реальному Mac. Зміни мають бути малими й сфокусованими; не полірувати UI без окремого запиту.
 
+## Робоча пам'ять
+
+Перед змістовною роботою над SystemEQ переглядай `/Users/denyszamorniak/Documents/DevNotes/SystemEQ — поточний стан.md`. Покажчик `/Users/denyszamorniak/Documents/DevNotes/000 Уроки розробки — покажчик.md` і пов'язані уроки відкривай лише коли задача стосується відповідної теми. Для коротких питань чи текстів Obsidian не відкривай.
+
 ## Ключові файли
 
 | Файл | Роль |
