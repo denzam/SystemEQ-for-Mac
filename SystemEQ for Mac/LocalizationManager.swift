@@ -79,6 +79,14 @@ public enum LocalizedString: String, CaseIterable {
     case accessibilityOpenSettingsButton
     case accessibilityTroubleshootHint
     case settingsHeaderSubtitle
+    case diagnostics
+    case diagnosticsDesc
+    case exportDiagnostics
+    case diagnosticsExported
+    case diagnosticsExportFailed
+    case diagnosticsPrivacy
+    case revealDiagnostics
+    case shareDiagnostics
 
     // Links
     case linkGitHub
@@ -130,6 +138,8 @@ public enum LocalizedString: String, CaseIterable {
     case reset
     case autoPreamp
     case preamp
+    case outputBoost
+    case outputBoostDescription
     case bands10
     case bands31
     case testTone1k
@@ -930,9 +940,49 @@ private enum LocalizationData {
                     .ukrainian: "Якщо ви вже увімкнули прапорець у Системних Налаштуваннях, перезапустіть SystemEQ або натисніть Оновити після повторного відкриття цього вікна."
                 ],
                 .settingsHeaderSubtitle: [
-                    .english: "General • Language • Links",
-                    .italian: "Generale • Lingua • Link",
-                    .ukrainian: "Загальне • Мова • Посилання"
+                    .english: "General • Language • Diagnostics • Links",
+                    .italian: "Generale • Lingua • Diagnostica • Link",
+                    .ukrainian: "Загальне • Мова • Діагностика • Посилання"
+                ],
+                .diagnostics: [
+                    .english: "Diagnostics",
+                    .italian: "Diagnostica",
+                    .ukrainian: "Діагностика"
+                ],
+                .diagnosticsDesc: [
+                    .english: "Export the current SystemEQ state and recent privacy-safe routing events.",
+                    .italian: "Esporta lo stato attuale di SystemEQ e gli eventi di routing recenti senza dati personali.",
+                    .ukrainian: "Експортує поточний стан SystemEQ і недавні події роутингу без приватних даних."
+                ],
+                .exportDiagnostics: [
+                    .english: "Export Diagnostic Report",
+                    .italian: "Esporta report diagnostico",
+                    .ukrainian: "Експортувати звіт діагностики"
+                ],
+                .diagnosticsExported: [
+                    .english: "Report saved.",
+                    .italian: "Report salvato.",
+                    .ukrainian: "Звіт збережено."
+                ],
+                .diagnosticsExportFailed: [
+                    .english: "Could not save the report.",
+                    .italian: "Impossibile salvare il report.",
+                    .ukrainian: "Не вдалося зберегти звіт."
+                ],
+                .diagnosticsPrivacy: [
+                    .english: "No audio, media metadata, device names, UIDs, file paths, or automatic upload are included.",
+                    .italian: "Non include audio, metadati multimediali, nomi o UID dei dispositivi, percorsi di file o caricamenti automatici.",
+                    .ukrainian: "Звіт не містить аудіо, метаданих медіа, назв чи UID пристроїв, шляхів до файлів або автоматичного надсилання."
+                ],
+                .revealDiagnostics: [
+                    .english: "Show in Finder",
+                    .italian: "Mostra nel Finder",
+                    .ukrainian: "Показати у Finder"
+                ],
+                .shareDiagnostics: [
+                    .english: "Share…",
+                    .italian: "Condividi…",
+                    .ukrainian: "Поділитися…"
                 ],
 
                 // Links
@@ -1164,6 +1214,16 @@ private enum LocalizationData {
                     .english: "Preamp",
                     .italian: "Preamp",
                     .ukrainian: "Підсилювач"
+                ],
+                .outputBoost: [
+                    .english: "Output Boost",
+                    .italian: "Boost di uscita",
+                    .ukrainian: "Підсилення виходу"
+                ],
+                .outputBoostDescription: [
+                    .english: "Up to +3 dB. A linked limiter prevents digital clipping.",
+                    .italian: "Fino a +3 dB. Un limiter stereo previene il clipping digitale.",
+                    .ukrainian: "До +3 дБ. Зв’язаний стереолімітер запобігає цифровому кліпінгу."
                 ],
                 .bands10: [
                     .english: "10 Bands",

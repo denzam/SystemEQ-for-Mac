@@ -1,5 +1,6 @@
-import ApplicationServices
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
@@ -8,6 +9,9 @@ struct SettingsView: View {
     @AppStorage("hideDockIcon") private var hideDockIcon = false
     @AppStorage(DevicePresetManager.autoSwitchKey) private var autoSwitchPresetPerDevice = false
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
+    @State private var isExportingDiagnostics = false
+    @State private var diagnosticsExportMessage: String?
+    @State private var diagnosticReportURL: URL?
 
     private var startupMode: EQStartupMode {
         EQStartupMode(rawValue: startupModeRaw) ?? .restoreLastState
@@ -35,8 +39,7 @@ struct SettingsView: View {
                 // EQ Database Section
                 databaseSection
 
-                // Accessibility Section
-                accessibilitySection
+                diagnosticsSection
 
                 // Links Section
                 linksSection
@@ -464,59 +467,145 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Accessibility Section
-
-    private var accessibilitySection: some View {
+    private var diagnosticsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(localization.localized(.accessibility))
+            Text(localization.localized(.diagnostics))
                 .font(AppTypography.heading2)
                 .padding(.horizontal, 4)
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "hand.raised.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(.orange)
-                        .frame(width: 32)
+            Text(localization.localized(.diagnosticsDesc))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(localization.localized(.accessibilityDesc))
-                            .font(AppTypography.body)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            Text(localization.localized(.diagnosticsPrivacy))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
 
-                        if !AXIsProcessTrusted() {
-                            Text(localization.localized(.accessibilityStatusNotGranted))
-                                .font(AppTypography.bodySmall)
-                                .foregroundColor(.orange)
-                                .bold()
-                                .padding(.top, 4)
+            HStack(spacing: 12) {
+                Button(action: exportDiagnosticReport) {
+                    HStack {
+                        if isExportingDiagnostics {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .frame(width: 16, height: 16)
                         } else {
-                            Text(localization.localized(.accessibilityStatusGranted))
-                                .font(AppTypography.bodySmall)
-                                .foregroundColor(.green)
-                                .bold()
-                                .padding(.top, 4)
+                            Image(systemName: "square.and.arrow.up")
                         }
+                        Text(localization.localized(.exportDiagnostics))
                     }
                 }
+                .disabled(isExportingDiagnostics)
 
-                HStack {
-                    Button(localization.localized(.accessibilityRequestButton)) { requestAccessibilityTrustPrompt() }
-                        .font(AppTypography.body)
-                    Button(localization.localized(.accessibilityOpenSettingsButton)) {
-                        openAccessibilityAccessibilityPane()
-                    }
-                    .font(AppTypography.body)
-                    .buttonStyle(.bordered)
+                if let diagnosticsExportMessage {
+                    Text(diagnosticsExportMessage)
+                        .font(AppTypography.bodySmall)
+                        .foregroundColor(.secondary)
                 }
-                .padding(.leading, 44)
+            }
+            .padding(.horizontal, 4)
+
+            if let diagnosticReportURL {
+                HStack(spacing: 12) {
+                    Button(action: {
+                        NSWorkspace.shared.activateFileViewerSelecting([diagnosticReportURL])
+                    }) {
+                        Label(localization.localized(.revealDiagnostics), systemImage: "folder")
+                    }
+                    ShareLink(item: diagnosticReportURL) {
+                        Label(localization.localized(.shareDiagnostics), systemImage: "square.and.arrow.up")
+                    }
+                }
+                .padding(.horizontal, 4)
             }
         }
         .padding(AppSpacing.xl)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    private func exportDiagnosticReport() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "SystemEQ-diagnostics-\(formatter.string(from: Date())).txt"
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        launchManager.refreshStatus()
+        diagnosticsExportMessage = nil
+        diagnosticReportURL = nil
+        isExportingDiagnostics = true
+        let snapshot = diagnosticSnapshot()
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try snapshot.write(to: url, atomically: true, encoding: .utf8)
+                DispatchQueue.main.async {
+                    diagnosticsExportMessage = localization.localized(.diagnosticsExported)
+                    diagnosticReportURL = url
+                    isExportingDiagnostics = false
+                }
+            } catch {
+                dlog(
+                    "Could not export diagnostic report: \(error.localizedDescription)",
+                    level: .warning,
+                    category: .general
+                )
+                DispatchQueue.main.async {
+                    diagnosticsExportMessage = localization.localized(.diagnosticsExportFailed)
+                    isExportingDiagnostics = false
+                }
+            }
+        }
+    }
+
+    private func diagnosticSnapshot() -> String {
+        let router = AudioRouter.shared
+        let engine = AudioEngine.shared
+        let core = CoreAudioEngine.shared
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let gains = engine.bands.map(\.gain)
+        let activeBandCount = gains.filter { abs($0) >= 0.01 }.count
+        let maximumGain = gains.max() ?? 0
+        let minimumGain = gains.min() ?? 0
+
+        return """
+        SystemEQ diagnostic report
+        Report format: 2
+        Privacy: This report contains only SystemEQ state and generic audio-device capabilities. It contains no audio, media metadata, device names, UIDs, file paths, or automatic upload.
+        Created: \(ISO8601DateFormatter().string(from: Date()))
+        App version: \(version)
+        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Launch at login: \(launchManager.isEnabled)
+        Startup mode: \(startupMode.rawValue)
+
+        --- EQ state ---
+        EQ enabled: \(engine.isEnabled)
+        Audio engine running: \(engine.isRunning)
+        Band mode: \(engine.bandMode.rawValue)
+        Active EQ bands: \(activeBandCount)/\(gains.count)
+        Minimum band gain: \(String(format: "%.1f", minimumGain)) dB
+        Maximum band gain: \(String(format: "%.1f", maximumGain)) dB
+        Preamp: \(engine.preampGain) dB
+        Output boost: \(engine.outputBoostGain) dB
+        Input peak: \(core.inputPeakLevel)
+        Output peak: \(core.outputPeakLevel)
+
+        --- Routing state ---
+        \(router.diagnosticSummary())
+
+        --- Core Audio state ---
+        \(core.diagnosticSummary())
+
+        --- Recent SystemEQ diagnostic events ---
+        \(DiagnosticEventStore.shared.reportText())
+        """
     }
 
     // MARK: - Links Section
@@ -590,30 +679,8 @@ struct SettingsView: View {
         }
     }
 
-    /// ... Helper methods stay the same ...
-    private func openAccessibilityAccessibilityPane() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func openInputMonitoringSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
-        } else if let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
-            NSWorkspace.shared.open(fallback)
-        }
-    }
-
     private func revealAppInFinder() {
         let appURL = Bundle.main.bundleURL
         NSWorkspace.shared.activateFileViewerSelecting([appURL])
-    }
-
-    private func requestAccessibilityTrustPrompt() {
-        let options: CFDictionary = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
     }
 }
