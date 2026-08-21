@@ -457,6 +457,12 @@ final class AudioEngineBandModeTests: XCTestCase {
         ))
     }
 
+    func testAppDeclaresSystemAudioCaptureUsageDescription() {
+        let description = Bundle.main.object(forInfoDictionaryKey: "NSAudioCaptureUsageDescription") as? String
+
+        XCTAssertFalse(description?.isEmpty ?? true)
+    }
+
     private func processTapFormat(sampleRate: Double, channels: UInt32) -> AudioStreamBasicDescription {
         AudioStreamBasicDescription(
             mSampleRate: sampleRate,
