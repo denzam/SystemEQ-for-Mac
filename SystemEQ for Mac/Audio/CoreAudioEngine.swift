@@ -1196,24 +1196,12 @@ public final class CoreAudioEngine: ObservableObject {
             t.schedule(deadline: .now() + 30.0, repeating: 30.0)
             t.setEventHandler { [weak self] in
                 guard let self else { return }
-                let maxNs = self.maxInputCallbackNanos
-                let sumNs = self.sumInputCallbackNanos
-                let count = self.countInputCallbacks
-                self.maxInputCallbackNanos = 0
-                self.sumInputCallbackNanos = 0
-                self.countInputCallbacks = 0
-                let avgNs = count > 0 ? sumNs / count : 0
-                let diag = self.ringBuffer.snapshotAndResetDiag()
-
-                let bufFrames = self.lastInputBufferFrames
-                let deadlineNs: UInt64 = bufFrames > 0
-                    ? UInt64(Double(bufFrames) / self.currentSampleRate * 1_000_000_000)
-                    : 0
-                let nearDeadline = deadlineNs > 0 && maxNs > deadlineNs / 2
-                if nearDeadline || diag.underruns > 0 || diag.overruns > 0 {
+                let health = self.snapshotAudioHealth(source: "periodic")
+                if health.isNotable {
                     dlog(
-                        "⚠️ Audio health: max=\(maxNs / 1000)µs avg=\(avgNs / 1000)µs " +
-                            "(deadline=\(deadlineNs / 1000)µs) under=\(diag.underruns) over=\(diag.overruns)",
+                        "⚠️ Audio health: max=\(health.maxNanos / 1000)µs avg=\(health.averageNanos / 1000)µs " +
+                            "(deadline=\(health.deadlineNanos / 1000)µs) " +
+                            "under=\(health.underruns) over=\(health.overruns)",
                         level: .warning,
                         category: .engine
                     )
@@ -1222,6 +1210,60 @@ public final class CoreAudioEngine: ObservableObject {
             t.resume()
             diagStatsTimer = t
         #endif
+    }
+
+    private func snapshotAudioHealth(source: String) -> (
+        underruns: Int32,
+        overruns: Int32,
+        fill: Int32,
+        maxNanos: UInt64,
+        averageNanos: UInt64,
+        deadlineNanos: UInt64,
+        isNotable: Bool
+    ) {
+        let diag = ringBuffer.snapshotAndResetDiag()
+        var maxNanos: UInt64 = 0
+        var averageNanos: UInt64 = 0
+        var deadlineNanos: UInt64 = 0
+
+        #if DEBUG
+            maxNanos = maxInputCallbackNanos
+            averageNanos = countInputCallbacks > 0 ? sumInputCallbackNanos / countInputCallbacks : 0
+            maxInputCallbackNanos = 0
+            sumInputCallbackNanos = 0
+            countInputCallbacks = 0
+            deadlineNanos = lastInputBufferFrames > 0
+                ? UInt64(Double(lastInputBufferFrames) / currentSampleRate * 1_000_000_000)
+                : 0
+        #endif
+
+        let isNotable = diag.underruns > 0 || diag.overruns > 0 ||
+            (deadlineNanos > 0 && maxNanos > deadlineNanos / 2)
+        if isNotable {
+            DiagnosticEventStore.shared.record(
+                "engine.audioHealth",
+                details: [
+                    "averageCallbackMicros": "\(averageNanos / 1000)",
+                    "bufferCapacityFrames": "\(diag.capacity)",
+                    "deadlineMicros": "\(deadlineNanos / 1000)",
+                    "fillFrames": "\(diag.fill)",
+                    "maxCallbackMicros": "\(maxNanos / 1000)",
+                    "overruns": "\(diag.overruns)",
+                    "source": source,
+                    "underruns": "\(diag.underruns)"
+                ]
+            )
+        }
+
+        return (
+            diag.underruns,
+            diag.overruns,
+            diag.fill,
+            maxNanos,
+            averageNanos,
+            deadlineNanos,
+            isNotable
+        )
     }
 
     private func stopDiagStatsTimer() {
@@ -1265,6 +1307,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     func diagnosticSummary() -> String {
         let pipeline = vdspFilter != nil ? "vDSP" : filterChain != nil ? "scalar" : "none"
+        let health = snapshotAudioHealth(source: "export")
         return """
         Setup complete: \(isSetupComplete)
         Engine running: \(isRunning)
@@ -1272,6 +1315,9 @@ public final class CoreAudioEngine: ObservableObject {
         Client sample rate: \(String(format: "%.0f", currentSampleRate)) Hz
         Channels: \(channelCount)
         Buffer capacity: \(allocatedFrameCapacity) frames
+        Ring-buffer fill: \(health.fill) frames
+        Underruns since last sample: \(health.underruns)
+        Overruns since last sample: \(health.overruns)
         """
     }
 

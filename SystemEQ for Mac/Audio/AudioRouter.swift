@@ -55,6 +55,47 @@ enum OutputVolumeTransfer {
     }
 }
 
+enum BlackHoleVolumeChangeAction {
+    case acceptObserved
+    case restoreExpected
+    case ignore
+}
+
+enum BlackHoleVolumeChangePolicy {
+    static let coalescingDelayNanoseconds: UInt64 = 1_000_000
+
+    static func action(for scopes: Set<AudioObjectPropertyScope>) -> BlackHoleVolumeChangeAction {
+        if scopes.contains(kAudioObjectPropertyScopeOutput) {
+            return .acceptObserved
+        }
+        if scopes.contains(kAudioObjectPropertyScopeInput) {
+            return .restoreExpected
+        }
+        return .ignore
+    }
+
+    nonisolated static func needsVolumeWrite(
+        from observed: OutputVolumeState?,
+        to expected: OutputVolumeState
+    ) -> Bool {
+        observed?.scalar != expected.scalar
+    }
+
+    nonisolated static func needsMuteWrite(
+        from observed: OutputVolumeState?,
+        to expected: OutputVolumeState
+    ) -> Bool {
+        guard let expectedMute = expected.isMuted else { return false }
+        return observed?.isMuted != expectedMute
+    }
+}
+
+private struct AudioPropertyListenerRegistration {
+    let deviceID: AudioDeviceID
+    let address: AudioObjectPropertyAddress
+    let block: AudioObjectPropertyListenerBlock
+}
+
 // MARK: - Audio Router
 
 public final class AudioRouter: ObservableObject {
@@ -76,6 +117,11 @@ public final class AudioRouter: ObservableObject {
     private var originalSystemOutputDevice: AudioDevice?
     private var deviceChangeDebounceTask: Task<Void, Never>?
     private var defaultOutputChangeTask: Task<Void, Never>?
+    private var blackHoleVolumeListeners: [AudioPropertyListenerRegistration] = []
+    private var blackHoleVolumeChangeTask: Task<Void, Never>?
+    private var pendingBlackHoleVolumeChangeScopes: Set<AudioObjectPropertyScope> = []
+    private var expectedBlackHoleOutputVolume: OutputVolumeState?
+    private var monitoredBlackHoleDeviceID: AudioDeviceID?
 
     /// UID of the real (non-BlackHole) system output, persisted so a crash that
     /// left the system on BlackHole can still be recovered on next launch.
@@ -534,7 +580,6 @@ public final class AudioRouter: ObservableObject {
         if preferredOutputUID == nil {
             preferredOutputUID = physicalOutput.uid
         }
-
         // ⚡ OPTIMIZATION: Skip full restart if engine is already running with same devices
         let engine = CoreAudioEngine.shared
         if !forceRestart,
@@ -547,12 +592,6 @@ public final class AudioRouter: ObservableObject {
         }
 
         saveCurrentSystemOutputDevice()
-
-        if let current = currentSystemOutputDevice(), current.id != blackHoleDevice.id {
-            transferOutputVolume(from: current, to: blackHoleDevice)
-        } else if let originalSystemOutputDevice {
-            transferOutputVolume(from: originalSystemOutputDevice, to: blackHoleDevice)
-        }
 
         dlog("EQ routing setup - CORE AUDIO APPROACH", level: .info, category: .routing)
         dlog(
@@ -567,6 +606,7 @@ public final class AudioRouter: ObservableObject {
         dlog("Configuring Core Audio Engine...", category: .routing)
 
         // Stop if already running
+        removeBlackHoleVolumeListeners()
         engine.stop()
 
         // Setup with new devices
@@ -582,6 +622,9 @@ public final class AudioRouter: ObservableObject {
             disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
             return false
         }
+
+        transferOutputVolume(from: physicalOutput, to: blackHoleDevice)
+        installBlackHoleVolumeListeners(deviceID: blackHoleDevice.id)
 
         DiagnosticEventStore.shared.record(
             "routing.enable.succeeded",
@@ -757,6 +800,7 @@ public final class AudioRouter: ObservableObject {
         // Drop any pending wake restart — routing is off on purpose now.
         wakeRestartTask?.cancel()
         wakeRestartTask = nil
+        removeBlackHoleVolumeListeners()
         wasRoutingBeforeSleep = false
         activeInputUID = nil
         activeOutputUID = nil
@@ -903,6 +947,25 @@ public final class AudioRouter: ObservableObject {
         return outputDevices.first(where: { $0.id == deviceID })
     }
 
+    private func currentSystemInputDevice() -> AudioDevice? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID: AudioDeviceID = 0
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        ) == noErr else { return nil }
+        return inputDevices.first(where: { $0.id == deviceID })
+    }
+
     func restoreOriginalSystemOutputDevice() {
         // Only attempt a device that is actually enumerated right now — trying
         // one that just vanished (e.g. the USB DAC we're disabling EQ because
@@ -986,6 +1049,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func diagnosticSummary() -> String {
+        let systemInput = currentSystemInputDevice()
         let systemOutput = currentSystemOutputDevice()
         let blackHole = blackHoleOutputDevice()
         let blackHoleVolume = blackHole.flatMap { Self.outputVolumeState(for: $0.id) }
@@ -993,6 +1057,7 @@ public final class AudioRouter: ObservableObject {
 
         return """
         Routing active: \(isRoutingActive)
+        System input kind: \(diagnosticDeviceKind(systemInput))
         System output kind: \(diagnosticDeviceKind(systemOutput))
         Selected output kind: \(diagnosticDeviceKind(selectedOutputDevice))
         BlackHole detected: \(blackHoleDetected)
@@ -1060,30 +1125,34 @@ public final class AudioRouter: ObservableObject {
 
     nonisolated private static func applyOutputVolumeState(
         _ state: OutputVolumeState,
+        replacing observed: OutputVolumeState? = nil,
         to deviceID: AudioDeviceID
     ) -> Bool {
-        var volumeAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyVolumeScalar,
-            mScope: kAudioObjectPropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var canSetVolume: DarwinBoolean = false
-        guard AudioObjectHasProperty(deviceID, &volumeAddress),
-              AudioObjectIsPropertySettable(deviceID, &volumeAddress, &canSetVolume) == noErr,
-              canSetVolume.boolValue else { return false }
+        if BlackHoleVolumeChangePolicy.needsVolumeWrite(from: observed, to: state) {
+            var volumeAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioObjectPropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var canSetVolume: DarwinBoolean = false
+            guard AudioObjectHasProperty(deviceID, &volumeAddress),
+                  AudioObjectIsPropertySettable(deviceID, &volumeAddress, &canSetVolume) == noErr,
+                  canSetVolume.boolValue else { return false }
 
-        var scalar = state.scalar
-        let volumeSize = UInt32(MemoryLayout<Float>.size)
-        guard AudioObjectSetPropertyData(
-            deviceID,
-            &volumeAddress,
-            0,
-            nil,
-            volumeSize,
-            &scalar
-        ) == noErr else { return false }
+            var scalar = state.scalar
+            let volumeSize = UInt32(MemoryLayout<Float>.size)
+            guard AudioObjectSetPropertyData(
+                deviceID,
+                &volumeAddress,
+                0,
+                nil,
+                volumeSize,
+                &scalar
+            ) == noErr else { return false }
+        }
 
-        guard let isMuted = state.isMuted else { return true }
+        guard BlackHoleVolumeChangePolicy.needsMuteWrite(from: observed, to: state),
+              let isMuted = state.isMuted else { return true }
         var muteAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyMute,
             mScope: kAudioObjectPropertyScopeOutput,
@@ -1105,6 +1174,99 @@ public final class AudioRouter: ObservableObject {
             &muteValue
         )
         return true
+    }
+
+    private func installBlackHoleVolumeListeners(deviceID: AudioDeviceID) {
+        removeBlackHoleVolumeListeners()
+        monitoredBlackHoleDeviceID = deviceID
+        expectedBlackHoleOutputVolume = Self.outputVolumeState(for: deviceID)
+
+        let selectors = [kAudioDevicePropertyVolumeScalar, kAudioDevicePropertyMute]
+        let scopes = [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput]
+
+        for selector in selectors {
+            for scope in scopes {
+                var address = AudioObjectPropertyAddress(
+                    mSelector: selector,
+                    mScope: scope,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+                guard AudioObjectHasProperty(deviceID, &address) else { continue }
+
+                let listener: AudioObjectPropertyListenerBlock = { _, _ in
+                    Task { @MainActor in
+                        AudioRouter.shared.handleBlackHoleVolumeChange(scope: scope)
+                    }
+                }
+                let status = AudioObjectAddPropertyListenerBlock(deviceID, &address, DispatchQueue.main, listener)
+                if status == noErr {
+                    blackHoleVolumeListeners.append(
+                        AudioPropertyListenerRegistration(deviceID: deviceID, address: address, block: listener)
+                    )
+                } else {
+                    dlog(
+                        "Could not monitor BlackHole volume property: \(status)",
+                        level: .warning,
+                        category: .routing
+                    )
+                }
+            }
+        }
+    }
+
+    private func removeBlackHoleVolumeListeners() {
+        blackHoleVolumeChangeTask?.cancel()
+        blackHoleVolumeChangeTask = nil
+        pendingBlackHoleVolumeChangeScopes.removeAll()
+        expectedBlackHoleOutputVolume = nil
+        monitoredBlackHoleDeviceID = nil
+
+        for registration in blackHoleVolumeListeners {
+            var address = registration.address
+            AudioObjectRemovePropertyListenerBlock(
+                registration.deviceID,
+                &address,
+                DispatchQueue.main,
+                registration.block
+            )
+        }
+        blackHoleVolumeListeners.removeAll()
+    }
+
+    @MainActor
+    private func handleBlackHoleVolumeChange(scope: AudioObjectPropertyScope) {
+        guard isRoutingOwned, monitoredBlackHoleDeviceID != nil else { return }
+        pendingBlackHoleVolumeChangeScopes.insert(scope)
+        blackHoleVolumeChangeTask?.cancel()
+        blackHoleVolumeChangeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: BlackHoleVolumeChangePolicy.coalescingDelayNanoseconds)
+            guard !Task.isCancelled,
+                  self.isRoutingOwned,
+                  let deviceID = self.monitoredBlackHoleDeviceID else { return }
+
+            let scopes = self.pendingBlackHoleVolumeChangeScopes
+            self.pendingBlackHoleVolumeChangeScopes.removeAll()
+
+            switch BlackHoleVolumeChangePolicy.action(for: scopes) {
+            case .acceptObserved:
+                self.expectedBlackHoleOutputVolume = Self.outputVolumeState(for: deviceID)
+            case .restoreExpected:
+                guard let expected = self.expectedBlackHoleOutputVolume,
+                      let observed = Self.outputVolumeState(for: deviceID),
+                      observed != expected else { return }
+                let restored = Self.applyOutputVolumeState(expected, replacing: observed, to: deviceID)
+                DiagnosticEventStore.shared.record(
+                    "routing.blackHoleInputVolumeOverride",
+                    details: [
+                        "observedScalar": String(format: "%.3f", observed.scalar),
+                        "restoredScalar": String(format: "%.3f", expected.scalar),
+                        "result": restored ? "success" : "failed"
+                    ]
+                )
+            case .ignore:
+                break
+            }
+        }
     }
 
     // MARK: - BlackHole Detection
@@ -1325,6 +1487,7 @@ public final class AudioRouter: ObservableObject {
 
         // Only the AudioUnits go down. The system default stays on BlackHole, so
         // nothing leaks out unprocessed and restoring is a plain restart.
+        removeBlackHoleVolumeListeners()
         CoreAudioEngine.shared.stop()
         dlog("Sleep — engine stopped, routing will be restored on wake", level: .info, category: .routing)
     }

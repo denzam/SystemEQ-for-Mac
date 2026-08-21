@@ -348,6 +348,40 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(writtenState, fallback)
     }
 
+    func testBlackHoleInputVolumeChangeRestoresExpectedOutput() {
+        guard case .restoreExpected = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeInput]
+        ) else {
+            return XCTFail("Input-only changes must restore the expected output volume")
+        }
+    }
+
+    func testBlackHoleOutputVolumeChangeAcceptsKeyboardAdjustment() {
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeOutput]
+        ) else {
+            return XCTFail("Output changes must become the new expected volume")
+        }
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput]
+        ) else {
+            return XCTFail("Output changes must win when both scopes are reported")
+        }
+    }
+
+    func testBlackHoleRecoveryWritesOnlyChangedProperties() {
+        guard let expected = OutputVolumeState(scalar: 1, isMuted: false),
+              let volumeOnlyChange = OutputVolumeState(scalar: 0.226, isMuted: false),
+              let muteOnlyChange = OutputVolumeState(scalar: 1, isMuted: true) else {
+            return XCTFail("Finite volume states must be valid")
+        }
+
+        XCTAssertTrue(BlackHoleVolumeChangePolicy.needsVolumeWrite(from: volumeOnlyChange, to: expected))
+        XCTAssertFalse(BlackHoleVolumeChangePolicy.needsMuteWrite(from: volumeOnlyChange, to: expected))
+        XCTAssertFalse(BlackHoleVolumeChangePolicy.needsVolumeWrite(from: muteOnlyChange, to: expected))
+        XCTAssertTrue(BlackHoleVolumeChangePolicy.needsMuteWrite(from: muteOnlyChange, to: expected))
+    }
+
     func testPeakMeterAndRoutingMeterDiscardNonFiniteValues() {
         XCTAssertEqual(PeakMeter.sanitizedPeak(.nan), 0)
         XCTAssertEqual(PeakMeter.sanitizedPeak(-0.25), 0)
