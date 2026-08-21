@@ -25,6 +25,13 @@ final class AudioEngineBandModeTests: XCTestCase {
 
     // MARK: - Same-turn mode switch + apply
 
+    func testAutoEQBandModeMatchesRestoredAudioEngineMode() {
+        XCTAssertEqual(AutoEQView.BandMode(audioEngineMode: .tenBand), .ten)
+        XCTAssertEqual(AutoEQView.BandMode(audioEngineMode: .thirtyOneBand), .thirtyOne)
+        XCTAssertEqual(AutoEQView.BandMode.ten.audioEngineMode, .tenBand)
+        XCTAssertEqual(AutoEQView.BandMode.thirtyOne.audioEngineMode, .thirtyOneBand)
+    }
+
     func testApplyEQValues_rightAfterSwitchTo31Band_appliesAll31() {
         let engine = AudioEngine.shared
         engine.bandMode = .tenBand

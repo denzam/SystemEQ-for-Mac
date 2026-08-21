@@ -26,6 +26,14 @@ struct AutoEQView: View {
         var id: String {
             rawValue
         }
+
+        init(audioEngineMode: EQBandMode) {
+            self = audioEngineMode == .tenBand ? .ten : .thirtyOne
+        }
+
+        var audioEngineMode: EQBandMode {
+            self == .ten ? .tenBand : .thirtyOneBand
+        }
     }
     private static let indexVersion = 5 // Increment when path logic changes
     private static let indexUpdateInterval: TimeInterval = 30 * 24 * 3600 // 30 днів (1 місяць)
@@ -319,34 +327,12 @@ struct AutoEQView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Picker(localization.localized(.autoEQBandMode), selection: $bandMode) {
+                Picker(localization.localized(.autoEQBandMode), selection: bandModeSelection) {
                     Text("10").tag(BandMode.ten)
                     Text("31").tag(BandMode.thirtyOne)
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
-                .onChange(of: bandMode) { _ in
-                    DispatchQueue.main.async {
-                        if bandMode == .ten, !parsed10.isEmpty {
-                            parsed = parsed10
-                            preampDB = preampDB10
-                        } else if bandMode == .thirtyOne, !parsed31.isEmpty {
-                            parsed = parsed31
-                            preampDB = preampDB31
-                        }
-                        mapped = mappedBands()
-                        applyEQDebounceTask?.cancel()
-                        applyEQDebounceTask = Task {
-                            try? await Task.sleep(nanoseconds: 100_000_000)
-                            guard !Task.isCancelled else { return }
-                            await MainActor.run {
-                                if !mapped.isEmpty, audioEngine.isEnabled {
-                                    applyToAudioEngine()
-                                }
-                            }
-                        }
-                    }
-                }
 
                 // MARK: - Favorites Section
 
@@ -526,6 +512,9 @@ struct AutoEQView: View {
                 }
             }
         }
+        .onReceive(audioEngine.$bandMode) { restoredMode in
+            syncBandModeFromAudioEngine(restoredMode)
+        }
         .onAppear {
             // Defer state changes to next run loop to avoid "Publishing changes from within view updates"
             DispatchQueue.main.async {
@@ -570,6 +559,53 @@ struct AutoEQView: View {
         }
         .sheet(isPresented: $showAutoEQSetup) {
             autoEQSetupDialog()
+        }
+    }
+
+    private var bandModeSelection: Binding<BandMode> {
+        Binding(
+            get: { bandMode },
+            set: { selectBandMode($0) }
+        )
+    }
+
+    private func selectBandMode(_ newMode: BandMode) {
+        guard newMode != bandMode else { return }
+        bandMode = newMode
+        if audioEngine.bandMode != newMode.audioEngineMode {
+            audioEngine.bandMode = newMode.audioEngineMode
+        }
+        refreshDisplayedBands(shouldApply: true)
+    }
+
+    private func syncBandModeFromAudioEngine(_ restoredMode: EQBandMode) {
+        let newMode = BandMode(audioEngineMode: restoredMode)
+        guard newMode != bandMode else { return }
+        bandMode = newMode
+        refreshDisplayedBands(shouldApply: false)
+    }
+
+    private func refreshDisplayedBands(shouldApply: Bool) {
+        DispatchQueue.main.async {
+            if bandMode == .ten, !parsed10.isEmpty {
+                parsed = parsed10
+                preampDB = preampDB10
+            } else if bandMode == .thirtyOne, !parsed31.isEmpty {
+                parsed = parsed31
+                preampDB = preampDB31
+            }
+            mapped = mappedBands()
+            guard shouldApply else { return }
+            applyEQDebounceTask?.cancel()
+            applyEQDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if !mapped.isEmpty, audioEngine.isEnabled {
+                        applyToAudioEngine()
+                    }
+                }
+            }
         }
     }
 
