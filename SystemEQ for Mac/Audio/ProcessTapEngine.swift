@@ -144,7 +144,7 @@ final class ProcessTapEngine {
                 kAudioSubTapUIDKey: description.uuid.uuidString,
                 kAudioSubTapDriftCompensationKey: true
             ]],
-            kAudioAggregateDeviceTapAutoStartKey: false
+            kAudioAggregateDeviceTapAutoStartKey: true
         ]
 
         var newAggregateID = AudioObjectID(kAudioObjectUnknown)
