@@ -11,7 +11,6 @@ import SwiftUI
 struct EqualizerView: View {
     @StateObject private var audioEngine = AudioEngine.shared
     @StateObject private var localization = LocalizationManager.shared
-    @ObservedObject private var peakMeter = CoreAudioEngine.shared.peakMeter
     @State private var isTogglingEQ = false
 
     var body: some View {
@@ -156,12 +155,22 @@ struct EqualizerView: View {
                 .font(AppTypography.bodySmall)
                 .foregroundColor(.secondary)
 
-            limiterIndicator
+            LimiterIndicatorView(
+                peakMeter: CoreAudioEngine.shared.peakMeter,
+                description: localization.localized(.limiterActivityDescription),
+                gainUnit: localization.localized(.dB)
+            )
         }
         .padding(AppSpacing.lg)
     }
+}
 
-    private var limiterIndicator: some View {
+private struct LimiterIndicatorView: View {
+    @ObservedObject var peakMeter: PeakMeter
+    let description: String
+    let gainUnit: String
+
+    var body: some View {
         let reduction = peakMeter.limiterGainReductionDB
         let state = LimiterIndicatorState.state(for: reduction)
         let color: Color = switch state {
@@ -178,13 +187,13 @@ struct EqualizerView: View {
                     .shadow(color: color.opacity(state == .normal ? 0.25 : 0.8), radius: 5)
                 Text("LIMIT")
                     .font(AppTypography.bodySmall)
-                Text("GR \(audioEngine.formatGain(reduction > 0 ? -reduction : 0))")
+                Text(String(format: "GR %+.1f %@", reduction > 0 ? -reduction : 0, gainUnit))
                     .font(AppTypography.mono)
                     .foregroundColor(state == .normal ? .secondary : color)
                 Spacer()
             }
 
-            Text(localization.localized(.limiterActivityDescription))
+            Text(description)
                 .font(AppTypography.bodySmall)
                 .foregroundColor(.secondary)
         }
