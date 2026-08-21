@@ -81,6 +81,66 @@ struct EQBand: Identifiable, Codable {
     }
 }
 
+enum FixedBandEQDefinition {
+    static func bands(mode: EQBandMode, gains: [Float]) -> [ParametricBand] {
+        switch mode {
+        case .tenBand:
+            zip(gains, AutoEQConstants.tenBandFrequencies).map { gain, frequency in
+                let type: FilterType
+                let q: Float
+                if frequency <= 63 {
+                    type = .lowShelf
+                    q = 0.9
+                } else if frequency >= 8000 {
+                    type = .highShelf
+                    q = 0.9
+                } else {
+                    type = .peak
+                    q = 1.4
+                }
+                return ParametricBand(
+                    frequency: Float(frequency),
+                    gain: gain,
+                    q: q,
+                    filterType: type
+                )
+            }
+        case .thirtyOneBand:
+            zip(gains, AutoEQConstants.thirtyOneCenters).map { gain, frequency in
+                ParametricBand(
+                    frequency: frequency,
+                    gain: gain,
+                    q: 2.0,
+                    filterType: .peak
+                )
+            }
+        }
+    }
+}
+
+enum FixedBandAutoPreamp {
+    static func recommendedGain(
+        mode: EQBandMode,
+        gains: [Float],
+        sampleRate: Float = Float(AppConstants.EQ.calculationSampleRate)
+    ) -> Float {
+        let bands = FixedBandEQDefinition.bands(mode: mode, gains: gains)
+        return -BiquadResponseCalculator.maximumCombinedGainDB(
+            bands: bands,
+            sampleRate: sampleRate
+        )
+    }
+}
+
+enum BassBoostCurve {
+    static func gain(at frequency: Double, amount: Double) -> Double {
+        guard frequency.isFinite, frequency > 0, amount.isFinite, amount > 0 else { return 0 }
+        let cutoffFrequency = 200.0
+        guard frequency > cutoffFrequency else { return amount }
+        return max(0, amount - log2(frequency / cutoffFrequency) * 12)
+    }
+}
+
 // MARK: - Audio Engine Facade
 
 public final class AudioEngine: ObservableObject {
@@ -327,6 +387,34 @@ public final class AudioEngine: ObservableObject {
         persistCurrentPlaybackState()
     }
 
+    @discardableResult
+    func restorePresetDefaults() -> Bool {
+        guard let preset = PresetPersistence.load(),
+              preset.gains.count == preset.mode.bandCount,
+              preset.gains.allSatisfy(\.isFinite),
+              preset.preamp.isFinite,
+              preset.bassBoost.isFinite else { return false }
+
+        let restoredGains = zip(preset.gains, preset.mode.frequencies).map { gain, frequency in
+            gain + Float(BassBoostCurve.gain(
+                at: Double(frequency),
+                amount: Double(preset.bassBoost)
+            ))
+        }
+        if bandMode != preset.mode {
+            bandMode = preset.mode
+        }
+        syncBandsToMode()
+        preampGain = Self.sanitizedPreamp(preset.preamp)
+        applyEQValues(restoredGains)
+        eqLog("Preset defaults restored")
+        return true
+    }
+
+    var hasPresetDefaults: Bool {
+        PresetPersistence.hasSavedPreset
+    }
+
     func applyEQValues(_ values: [Float]) {
         syncBandsToMode()
         guard values.count == bands.count else {
@@ -349,13 +437,12 @@ public final class AudioEngine: ObservableObject {
 
     /// Auto Preamp Logic
     func applyAutoPreamp() {
-        let maxPositiveGain = bands.map(\.gain).max() ?? 0.0
-        if maxPositiveGain > 0 {
-            setPreampGain(-maxPositiveGain)
-        } else {
-            setPreampGain(0.0)
-        }
+        setPreampGain(recommendedPreampGain())
         eqLog("Auto preamp applied: \(formatGain(preampGain))")
+    }
+
+    func recommendedPreampGain() -> Float {
+        FixedBandAutoPreamp.recommendedGain(mode: bandMode, gains: bands.map(\.gain))
     }
 
     private static func sanitizedPreamp(_ gain: Float) -> Float {

@@ -989,8 +989,8 @@ public final class CoreAudioEngine: ObservableObject {
         value.isFinite ? max(-20.0, min(20.0, value)) : 0.0
     }
 
-    nonisolated private static func sanitizedOutputBoost(_ value: Float) -> Float {
-        value.isFinite ? min(max(value, 0.0), 3.0) : 0.0
+    nonisolated static func sanitizedOutputBoost(_ value: Float) -> Float {
+        value.isFinite ? min(max(value, 0.0), OutputSafetyProcessor.maximumBoostDB) : 0.0
     }
 
     /// Apply fixed-band EQ (10 bands)
@@ -1002,35 +1002,7 @@ public final class CoreAudioEngine: ObservableObject {
         self.outputBoostGain = outputBoost
         self.eqGains = gains
 
-        // Convert to parametric bands
-        let frequencies = AutoEQConstants.tenBandFrequencies
-        var bands: [ParametricBand] = []
-
-        // zip: більше 10 gain-значень сюди приходити не повинно, але індексація
-        // frequencies[index] за таким масивом — це краш, а не деградація
-        for (gain, freq) in zip(gains, frequencies) {
-            let type: FilterType
-            let q: Float
-
-            if freq <= 63 {
-                type = .lowShelf
-                q = 0.9
-            } else if freq >= 8000 {
-                type = .highShelf
-                q = 0.9
-            } else {
-                type = .peak
-                q = 1.4
-            }
-
-            let band = ParametricBand(
-                frequency: Float(freq),
-                gain: gain,
-                q: q,
-                filterType: type
-            )
-            bands.append(band)
-        }
+        let bands = FixedBandEQDefinition.bands(mode: .tenBand, gains: gains)
 
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU)
         if useVDSPFilter {
@@ -1075,20 +1047,8 @@ public final class CoreAudioEngine: ObservableObject {
         self.preampGain = preamp
         self.outputBoostGain = outputBoost
 
-        var bands: [ParametricBand] = []
-        let centers = AutoEQConstants.thirtyOneCenters
-        let count = min(gains.count, centers.count)
-
-        // Create bands for all frequencies (vDSP filter will skip zero-gain automatically)
-        for i in 0..<count {
-            let band = ParametricBand(
-                frequency: centers[i],
-                gain: gains[i],
-                q: 2.0,
-                filterType: .peak
-            )
-            bands.append(band)
-        }
+        let bands = FixedBandEQDefinition.bands(mode: .thirtyOneBand, gains: gains)
+        let count = bands.count
 
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU even with 31 bands)
         if useVDSPFilter {
@@ -1103,18 +1063,7 @@ public final class CoreAudioEngine: ObservableObject {
             self.filterChain = nil // Clear old filter chain
         } else {
             // Fallback to standard filter chain (only non-zero bands)
-            var activeBands: [ParametricBand] = []
-            for i in 0..<count {
-                let g = gains[i]
-                if abs(g) > 0.5 {
-                    activeBands.append(ParametricBand(
-                        frequency: centers[i],
-                        gain: g,
-                        q: 2.0,
-                        filterType: .peak
-                    ))
-                }
-            }
+            let activeBands = bands.filter { abs($0.gain) > 0.5 }
 
             self.filterChain = BiquadFilterChain(filterCount: activeBands.count)
             self.filterChain?.preamp = preamp
@@ -1638,9 +1587,9 @@ public final class CoreAudioEngine: ObservableObject {
         if isEnabled {
             beginVDSPFilterRead()
             if let vdsp = currentVDSPFilter() {
-                vdsp.processStereo(left, right, frameCount: frameCount)
+                peakMeter.recordLimiterGain(vdsp.processStereo(left, right, frameCount: frameCount))
             } else if let filterChain {
-                filterChain.processStereoBuffers(left, right, frameCount: frameCount)
+                peakMeter.recordLimiterGain(filterChain.processStereoBuffers(left, right, frameCount: frameCount))
             }
             endVDSPFilterRead()
         }

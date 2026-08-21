@@ -319,7 +319,7 @@ public class BiquadFilterChain {
         }
 
         var result = output
-        withUnsafeMutablePointer(to: &result) { outputSafety.processMono($0, frameCount: 1) }
+        _ = withUnsafeMutablePointer(to: &result) { outputSafety.processMono($0, frameCount: 1) }
         return result
     }
 
@@ -340,11 +340,12 @@ public class BiquadFilterChain {
     }
 
     /// ⚡ OPTIMIZED: Process stereo buffers simultaneously (2x faster than separate calls)
+    @discardableResult
     public func processStereoBuffers(
         _ bufferL: UnsafeMutablePointer<Float>,
         _ bufferR: UnsafeMutablePointer<Float>,
         frameCount: Int
-    ) {
+    ) -> Float {
         // Apply preamp first (if needed)
         if preamp != 0.0 {
             let preampLinear = pow(10.0, preamp / 20.0)
@@ -357,6 +358,6 @@ public class BiquadFilterChain {
         for filter in filters {
             filter.processStereoBuffers(bufferL, bufferR, frameCount: frameCount)
         }
-        outputSafety.processStereo(bufferL, bufferR, frameCount: frameCount)
+        return outputSafety.processStereo(bufferL, bufferR, frameCount: frameCount)
     }
 }

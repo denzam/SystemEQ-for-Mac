@@ -104,10 +104,108 @@ final class AudioEngineBandModeTests: XCTestCase {
             disableRouting: { _ in }
         )
 
-        engine.setOutputBoostGain(10)
+        engine.setOutputBoostGain(20)
 
-        XCTAssertEqual(engine.outputBoostGain, 3)
-        XCTAssertEqual(defaults.float(forKey: "outputBoostGain"), 3)
+        XCTAssertEqual(engine.outputBoostGain, 12)
+        XCTAssertEqual(defaults.float(forKey: "outputBoostGain"), 12)
+    }
+
+    func testCoreAudioOutputBoostUsesSharedMaximum() {
+        XCTAssertEqual(CoreAudioEngine.sanitizedOutputBoost(12), 12)
+        XCTAssertEqual(CoreAudioEngine.sanitizedOutputBoost(20), OutputSafetyProcessor.maximumBoostDB)
+        XCTAssertEqual(CoreAudioEngine.sanitizedOutputBoost(.nan), 0)
+    }
+
+    func testAutoPreampUsesCombinedFilterResponse() {
+        var gains = [Float](repeating: 0, count: 10)
+        gains[5] = 6
+        gains[6] = 6
+
+        let recommended = FixedBandAutoPreamp.recommendedGain(mode: .tenBand, gains: gains)
+
+        XCTAssertLessThan(recommended, -6)
+        XCTAssertGreaterThan(recommended, -12)
+    }
+
+    func testAutoPreampLeavesFlatEQAtUnity() {
+        let recommended = FixedBandAutoPreamp.recommendedGain(
+            mode: .thirtyOneBand,
+            gains: [Float](repeating: 0, count: 31)
+        )
+
+        XCTAssertEqual(recommended, 0, accuracy: 0.0001)
+    }
+
+    func testManualPreampIsPersisted() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: { _ in true },
+            disableRouting: { _ in }
+        )
+
+        engine.setPreampGain(-7.5)
+
+        XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.preamp, -7.5)
+    }
+
+    func testRestorePresetDefaultsRestoresBandsBassBoostAndPreamp() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let previousDefaults = PresetPersistence.defaults
+        PresetPersistence.defaults = defaults
+        defer {
+            PresetPersistence.defaults = previousDefaults
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let presetGains = (0..<10).map { Float($0) - 5 }
+        PresetPersistence.save(mode: .tenBand, gains: presetGains, preamp: -4.5, bassBoost: 6)
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: { _ in true },
+            disableRouting: { _ in }
+        )
+        engine.bandMode = .thirtyOneBand
+        engine.syncBandsToMode()
+        engine.applyEQValues([Float](repeating: 12, count: 31))
+        engine.setPreampGain(8)
+
+        XCTAssertTrue(engine.restorePresetDefaults())
+
+        let expected = zip(presetGains, EQBandMode.tenBand.frequencies).map { gain, frequency in
+            gain + Float(BassBoostCurve.gain(at: Double(frequency), amount: 6))
+        }
+        XCTAssertEqual(engine.bandMode, .tenBand)
+        XCTAssertEqual(engine.bands.map(\.gain), expected)
+        XCTAssertEqual(engine.preampGain, -4.5)
+        XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.gains, expected)
+    }
+
+    func testRestorePresetDefaultsWithoutPresetLeavesCurrentValuesUntouched() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let previousDefaults = PresetPersistence.defaults
+        PresetPersistence.defaults = defaults
+        defer {
+            PresetPersistence.defaults = previousDefaults
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let engine = AudioEngine(
+            defaults: defaults,
+            enableRouting: { _ in true },
+            disableRouting: { _ in }
+        )
+        let customGains = (0..<10).map { Float($0) }
+        engine.applyEQValues(customGains)
+        engine.setPreampGain(3)
+
+        XCTAssertFalse(engine.restorePresetDefaults())
+        XCTAssertEqual(engine.bands.map(\.gain), customGains)
+        XCTAssertEqual(engine.preampGain, 3)
     }
 
     // MARK: - CoreAudioEngine guard rails
@@ -348,6 +446,49 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(writtenState, fallback)
     }
 
+    func testBlackHoleGainStagingUsesOneVolumeStage() throws {
+        let physical = AudioDeviceID(1)
+        let virtual = AudioDeviceID(2)
+        var states: [AudioDeviceID: OutputVolumeState] = try [
+            physical: XCTUnwrap(OutputVolumeState(scalar: 0.181, isMuted: false)),
+            virtual: XCTUnwrap(OutputVolumeState(scalar: 1, isMuted: false))
+        ]
+        let read: (AudioDeviceID) -> OutputVolumeState? = { states[$0] }
+        let write: (OutputVolumeState, AudioDeviceID) -> Bool = { state, deviceID in
+            states[deviceID] = state
+            return true
+        }
+
+        XCTAssertTrue(BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: physical,
+            virtualDevice: virtual,
+            read: read,
+            write: write
+        ))
+        XCTAssertEqual(try XCTUnwrap(states[virtual]).scalar, 0.181, accuracy: 0.0001)
+        XCTAssertTrue(BlackHoleGainStaging.setPhysicalOutputToUnity(
+            physical,
+            read: read,
+            write: write
+        ))
+        let physicalState = try XCTUnwrap(states[physical])
+        XCTAssertEqual(physicalState.scalar, 1)
+        XCTAssertEqual(physicalState.isMuted, false)
+    }
+
+    func testBlackHoleGainStagingRejectsUnverifiedPhysicalUnity() throws {
+        let physical = AudioDeviceID(1)
+        let state = try XCTUnwrap(OutputVolumeState(scalar: 0.181, isMuted: false))
+
+        let result = BlackHoleGainStaging.setPhysicalOutputToUnity(
+            physical,
+            read: { _ in state },
+            write: { _, _ in true }
+        )
+
+        XCTAssertFalse(result)
+    }
+
     func testBlackHoleInputVolumeChangeRestoresExpectedOutput() {
         guard case .restoreExpected = BlackHoleVolumeChangePolicy.action(
             for: [kAudioObjectPropertyScopeInput]
@@ -395,6 +536,13 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         XCTAssertTrue(smoothedPeak.isFinite)
         XCTAssertEqual(smoothedPeak, 0.25)
+    }
+
+    func testLimiterIndicatorUsesActualGainReductionThresholds() {
+        XCTAssertEqual(LimiterIndicatorState.state(for: 0), .normal)
+        XCTAssertEqual(LimiterIndicatorState.state(for: 0.1), .mild)
+        XCTAssertEqual(LimiterIndicatorState.state(for: 2.9), .mild)
+        XCTAssertEqual(LimiterIndicatorState.state(for: 3), .heavy)
     }
 
     func testRoutingMeterTreatsDecayedSilenceAsZero() {

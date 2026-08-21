@@ -13,6 +13,18 @@ import Accelerate
 import Combine
 import Foundation
 
+nonisolated enum LimiterIndicatorState: Equatable {
+    case normal
+    case mild
+    case heavy
+
+    static func state(for gainReductionDB: Float) -> Self {
+        if gainReductionDB >= 3 { return .heavy }
+        if gainReductionDB > 0.05 { return .mild }
+        return .normal
+    }
+}
+
 /// Real-time peak level meter for audio buffers
 /// Designed for use in audio render callbacks (lock-free, low overhead)
 public final class PeakMeter: ObservableObject {
@@ -20,6 +32,7 @@ public final class PeakMeter: ObservableObject {
 
     @Published public var inputPeakLevel: Float = 0.0
     @Published public var outputPeakLevel: Float = 0.0
+    @Published private(set) public var limiterGainReductionDB: Float = 0.0
 
     // MARK: - Real-Time Properties (Audio Thread)
 
@@ -27,6 +40,7 @@ public final class PeakMeter: ObservableObject {
     var rtInputPeak: Float = 0.0
     /// Current output peak (set from audio thread)
     var rtOutputPeak: Float = 0.0
+    private var rtMinimumLimiterGain: Float = 1.0
 
     /// Frame counter for throttled updates
     var updateCounter: Int = 0
@@ -48,6 +62,7 @@ public final class PeakMeter: ObservableObject {
     }()
 
     private var reportedNonFiniteOutputPeak = false
+    private var limiterClearWorkItem: DispatchWorkItem?
 
     deinit {
         pendingPublishFlag.deallocate()
@@ -108,6 +123,12 @@ public final class PeakMeter: ObservableObject {
     }
 
     @inline(__always)
+    func recordLimiterGain(_ gain: Float) {
+        guard gain.isFinite else { return }
+        rtMinimumLimiterGain = min(rtMinimumLimiterGain, min(max(gain, 0), 1))
+    }
+
+    @inline(__always)
     static func sanitizedPeak(_ peak: Float) -> Float {
         guard peak.isFinite else { return 0 }
         return max(peak, 0)
@@ -135,9 +156,13 @@ public final class PeakMeter: ObservableObject {
     func resetToZero() {
         rtInputPeak = 0.0
         rtOutputPeak = 0.0
+        rtMinimumLimiterGain = 1.0
         DispatchQueue.main.async { [weak self] in
+            self?.limiterClearWorkItem?.cancel()
+            self?.limiterClearWorkItem = nil
             self?.inputPeakLevel = 0.0
             self?.outputPeakLevel = 0.0
+            self?.limiterGainReductionDB = 0.0
         }
     }
 
@@ -150,10 +175,23 @@ public final class PeakMeter: ObservableObject {
         guard seq_atomic_flag_test_and_set(pendingPublishFlag) else { return }
         let inVal = rtInputPeak
         let outVal = rtOutputPeak
+        let limiterGain = rtMinimumLimiterGain
+        rtMinimumLimiterGain = 1.0
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.inputPeakLevel = inVal
             self.outputPeakLevel = outVal
+            if limiterGain < 0.999_9 {
+                let reduction = max(0, -20 * log10(max(limiterGain, 0.000_001)))
+                self.limiterGainReductionDB = reduction
+                self.limiterClearWorkItem?.cancel()
+                let clearWorkItem = DispatchWorkItem { [weak self] in
+                    self?.limiterGainReductionDB = 0.0
+                    self?.limiterClearWorkItem = nil
+                }
+                self.limiterClearWorkItem = clearWorkItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: clearWorkItem)
+            }
             if !self.reportedNonFiniteOutputPeak,
                seq_atomic_int32_load(self.nonFiniteOutputPeakCount) > 0 {
                 self.reportedNonFiniteOutputPeak = true

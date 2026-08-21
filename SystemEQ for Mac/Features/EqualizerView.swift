@@ -11,6 +11,7 @@ import SwiftUI
 struct EqualizerView: View {
     @StateObject private var audioEngine = AudioEngine.shared
     @StateObject private var localization = LocalizationManager.shared
+    @ObservedObject private var peakMeter = CoreAudioEngine.shared.peakMeter
     @State private var isTogglingEQ = false
 
     var body: some View {
@@ -85,15 +86,21 @@ struct EqualizerView: View {
     // MARK: - Footer
 
     private var footerSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
+        let recommendedPreamp = audioEngine.recommendedPreampGain()
+        return VStack(alignment: .leading, spacing: AppSpacing.md) {
             HStack(spacing: AppSpacing.lg) {
                 VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                    Text(localization.localized(.preamp))
-                        .font(AppTypography.bodySmall)
-                        .foregroundColor(.secondary)
-                    Text(audioEngine.formatGain(audioEngine.preampGain))
-                        .font(AppTypography.mono)
+                    HStack(spacing: AppSpacing.sm) {
+                        Text(localization.localized(.preamp))
+                            .font(AppTypography.bodySmall)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(audioEngine.formatGain(audioEngine.preampGain))
+                            .font(AppTypography.mono)
+                            .frame(width: 68, alignment: .trailing)
+                    }
                 }
+                .frame(maxWidth: 280)
                 .padding(AppSpacing.sm)
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(AppRadius.sm)
@@ -101,12 +108,13 @@ struct EqualizerView: View {
                 Spacer()
 
                 Button(action: {
-                    withAnimation(.spring(response: 0.3)) { audioEngine.resetAllBands() }
+                    withAnimation(.spring(response: 0.3)) { _ = audioEngine.restorePresetDefaults() }
                 }) {
                     Label(localization.localized(.reset), systemImage: "arrow.counterclockwise")
                         .font(AppTypography.body)
                 }
                 .buttonStyle(.bordered)
+                .disabled(!audioEngine.hasPresetDefaults)
 
                 Button(action: {
                     withAnimation(.spring(response: 0.3)) { audioEngine.applyAutoPreamp() }
@@ -115,6 +123,15 @@ struct EqualizerView: View {
                         .font(AppTypography.body)
                 }
                 .buttonStyle(.borderedProminent)
+            }
+
+            if audioEngine.preampGain > recommendedPreamp + 0.05 {
+                Text(String(
+                    format: localization.localized(.preampSafetyWarning),
+                    audioEngine.formatGain(recommendedPreamp)
+                ))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.orange)
             }
 
             HStack(spacing: AppSpacing.sm) {
@@ -131,13 +148,45 @@ struct EqualizerView: View {
                 )
                 Text(audioEngine.formatGain(audioEngine.outputBoostGain))
                     .font(AppTypography.mono)
+                    .foregroundColor(audioEngine.outputBoostGain > 3 ? .orange : .primary)
                     .frame(width: 68, alignment: .trailing)
             }
 
             Text(localization.localized(.outputBoostDescription))
                 .font(AppTypography.bodySmall)
                 .foregroundColor(.secondary)
+
+            limiterIndicator
         }
         .padding(AppSpacing.lg)
+    }
+
+    private var limiterIndicator: some View {
+        let reduction = peakMeter.limiterGainReductionDB
+        let state = LimiterIndicatorState.state(for: reduction)
+        let color: Color = switch state {
+        case .normal: .green
+        case .mild: .yellow
+        case .heavy: .red
+        }
+
+        return VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            HStack(spacing: AppSpacing.sm) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12, height: 12)
+                    .shadow(color: color.opacity(state == .normal ? 0.25 : 0.8), radius: 5)
+                Text("LIMIT")
+                    .font(AppTypography.bodySmall)
+                Text("GR \(audioEngine.formatGain(reduction > 0 ? -reduction : 0))")
+                    .font(AppTypography.mono)
+                    .foregroundColor(state == .normal ? .secondary : color)
+                Spacer()
+            }
+
+            Text(localization.localized(.limiterActivityDescription))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+        }
     }
 }

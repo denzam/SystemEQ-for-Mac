@@ -186,32 +186,94 @@ final class BiquadFilterTests: XCTestCase {
         var quietL = [Float](repeating: 0.25, count: 64)
         var quietR = [Float](repeating: 0.25, count: 64)
         let frameCount = quietL.count
+        var quietLimiterGain: Float = 0
         quietL.withUnsafeMutableBufferPointer { left in
             quietR.withUnsafeMutableBufferPointer { right in
                 guard let leftAddress = left.baseAddress,
                       let rightAddress = right.baseAddress else { return }
-                filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
+                quietLimiterGain = filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
             }
         }
 
         let boostedQuietSignal = Float(0.25 * pow(10.0, 3.0 / 20.0))
         XCTAssertEqual(quietL[0], boostedQuietSignal, accuracy: 0.0001)
         XCTAssertEqual(quietR[0], boostedQuietSignal, accuracy: 0.0001)
+        XCTAssertEqual(quietLimiterGain, 1)
 
         filter.configure(bands: [], preamp: 0, outputBoost: 3, sampleRate: 48000)
         var loudL = [Float](repeating: 0.9, count: 64)
         var loudR = [Float](repeating: 0.4, count: 64)
+        var loudLimiterGain: Float = 1
         loudL.withUnsafeMutableBufferPointer { left in
             loudR.withUnsafeMutableBufferPointer { right in
                 guard let leftAddress = left.baseAddress,
                       let rightAddress = right.baseAddress else { return }
-                filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
+                loudLimiterGain = filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
             }
         }
 
         XCTAssertLessThanOrEqual(abs(loudL[0]), 0.891_251)
         XCTAssertLessThanOrEqual(abs(loudR[0]), 0.891_251)
         XCTAssertEqual(loudL[0] / loudR[0], 0.9 / 0.4, accuracy: 0.0001)
+        XCTAssertLessThan(loudLimiterGain, 1)
+        XCTAssertGreaterThan(-20 * log10(loudLimiterGain), 3)
+    }
+
+    func testOutputBoostSupportsTwelveDBForQuietSignals() {
+        let filter = BiquadFilterVDSP()
+        filter.configure(bands: [], preamp: 0, outputBoost: 12, sampleRate: 48000)
+        var left = [Float](repeating: 0.1, count: 64)
+        var right = [Float](repeating: 0.1, count: 64)
+        let frameCount = left.count
+
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return }
+                filter.processStereo(leftAddress, rightAddress, frameCount: frameCount)
+            }
+        }
+
+        let expected = Float(0.1 * pow(10.0, 12.0 / 20.0))
+        XCTAssertEqual(left[0], expected, accuracy: 0.0001)
+        XCTAssertEqual(right[0], expected, accuracy: 0.0001)
+    }
+
+    func testSafetyAtZeroBoostPreservesUnityAndLimitsPositivePreamp() {
+        let passthrough = BiquadFilterVDSP()
+        passthrough.configure(bands: [], preamp: 0, outputBoost: 0, sampleRate: 48000)
+        var unityL = [Float](repeating: 1, count: 64)
+        var unityR = [Float](repeating: 0.5, count: 64)
+        let unityFrameCount = unityL.count
+
+        unityL.withUnsafeMutableBufferPointer { leftBuffer in
+            unityR.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return }
+                passthrough.processStereo(leftAddress, rightAddress, frameCount: unityFrameCount)
+            }
+        }
+
+        XCTAssertEqual(unityL[0], 1)
+        XCTAssertEqual(unityR[0], 0.5)
+
+        let protected = BiquadFilterVDSP()
+        protected.configure(bands: [], preamp: 6, outputBoost: 0, sampleRate: 48000)
+        var loudL = [Float](repeating: 0.75, count: 64)
+        var loudR = [Float](repeating: 0.375, count: 64)
+        let loudFrameCount = loudL.count
+
+        loudL.withUnsafeMutableBufferPointer { leftBuffer in
+            loudR.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return }
+                protected.processStereo(leftAddress, rightAddress, frameCount: loudFrameCount)
+            }
+        }
+
+        XCTAssertLessThanOrEqual(abs(loudL[0]), 1)
+        XCTAssertLessThanOrEqual(abs(loudR[0]), 1)
+        XCTAssertEqual(loudL[0] / loudR[0], 2, accuracy: 0.0001)
     }
 
     // MARK: - BiquadFilterChain Tests

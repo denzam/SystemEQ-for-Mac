@@ -19,9 +19,14 @@ struct FavoritePreset: Codable, Identifiable, Equatable {
 }
 
 struct AutoEQView: View {
-    enum BandMode: String, CaseIterable, Identifiable { case ten = "10", thirtyOne = "31"; var id: String {
-        rawValue
-    } }
+    enum BandMode: String, CaseIterable, Identifiable {
+        case ten = "10"
+        case thirtyOne = "31"
+
+        var id: String {
+            rawValue
+        }
+    }
     private static let indexVersion = 5 // Increment when path logic changes
     private static let indexUpdateInterval: TimeInterval = 30 * 24 * 3600 // 30 днів (1 місяць)
 
@@ -50,19 +55,7 @@ struct AutoEQView: View {
     /// Bass Boost low-shelf фільтр: піднімає тільки низькі частоти
     /// Частота зрізу: 200 Hz, slope: 12 dB/octave
     private func bassBoostForFrequency(_ freq: Double) -> Double {
-        guard bassBoost > 0 else { return 0 }
-        let cutoffFreq = 200.0 // Частота зрізу
-        let slope = 12.0 // Крутизна схилу dB/octave
-
-        if freq <= cutoffFreq {
-            // Нижче частоти зрізу - повний boost
-            return bassBoost
-        } else {
-            // Вище частоти зрізу - експоненційний спад
-            let octaves = log2(freq / cutoffFreq)
-            let attenuation = octaves * slope
-            return max(0, bassBoost - attenuation)
-        }
+        BassBoostCurve.gain(at: freq, amount: bassBoost)
     }
 
     @State private var parsed: [ParsedBand] = []
@@ -333,9 +326,7 @@ struct AutoEQView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
                 .onChange(of: bandMode) { _ in
-                    // Defer state changes to next run loop to avoid "Publishing changes from within view updates"
                     DispatchQueue.main.async {
-                        // Перемикаємось між кешованими даними
                         if bandMode == .ten, !parsed10.isEmpty {
                             parsed = parsed10
                             preampDB = preampDB10
@@ -343,8 +334,6 @@ struct AutoEQView: View {
                             parsed = parsed31
                             preampDB = preampDB31
                         }
-                        // Forces remap+apply for the new band mode even when parsed didn't change
-                        // (custom-imported parametric presets share parsed10 === parsed31).
                         mapped = mappedBands()
                         applyEQDebounceTask?.cancel()
                         applyEQDebounceTask = Task {

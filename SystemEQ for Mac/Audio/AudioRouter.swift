@@ -55,6 +55,43 @@ enum OutputVolumeTransfer {
     }
 }
 
+enum BlackHoleGainStaging {
+    private static let unityState = OutputVolumeState(scalar: 1, isMuted: false)
+
+    static func prepareVirtualOutput(
+        physicalDevice: AudioDeviceID,
+        virtualDevice: AudioDeviceID,
+        read: (AudioDeviceID) -> OutputVolumeState?,
+        write: (OutputVolumeState, AudioDeviceID) -> Bool
+    ) -> Bool {
+        guard physicalDevice != virtualDevice else { return false }
+        guard let expected = read(physicalDevice) ?? unityState else { return false }
+        guard write(expected, virtualDevice), let observed = read(virtualDevice) else { return false }
+        return matches(observed, expected: expected)
+    }
+
+    static func setPhysicalOutputToUnity(
+        _ deviceID: AudioDeviceID,
+        read: (AudioDeviceID) -> OutputVolumeState?,
+        write: (OutputVolumeState, AudioDeviceID) -> Bool
+    ) -> Bool {
+        guard let observed = read(deviceID) else { return true }
+        if isUnity(observed) { return true }
+        guard let unityState else { return false }
+        guard write(unityState, deviceID), let verified = read(deviceID) else { return false }
+        return isUnity(verified)
+    }
+
+    static func isUnity(_ state: OutputVolumeState) -> Bool {
+        state.scalar >= 0.999 && state.isMuted != true
+    }
+
+    private static func matches(_ observed: OutputVolumeState, expected: OutputVolumeState) -> Bool {
+        abs(observed.scalar - expected.scalar) <= 0.001 &&
+            (expected.isMuted == nil || observed.isMuted == expected.isMuted)
+    }
+}
+
 enum BlackHoleVolumeChangeAction {
     case acceptObserved
     case restoreExpected
@@ -699,6 +736,26 @@ public final class AudioRouter: ObservableObject {
         activeOutputUID = physicalOutput.uid
         saveCurrentSystemOutputDevice()
 
+        let virtualVolumeReady = BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: physicalOutput.id,
+            virtualDevice: blackHoleDevice.id,
+            read: Self.outputVolumeState,
+            write: { state, deviceID in
+                Self.applyOutputVolumeState(
+                    state,
+                    replacing: Self.outputVolumeState(for: deviceID),
+                    to: deviceID
+                )
+            }
+        )
+        guard virtualVolumeReady else {
+            DiagnosticEventStore.shared.record(
+                "routing.enable.failed",
+                details: ["backend": "blackHole", "reason": "virtualVolume"]
+            )
+            return false
+        }
+
         setAsDefaultOutputDevice(blackHoleDevice)
         removeBlackHoleVolumeListeners()
         let engine = CoreAudioEngine.shared
@@ -711,11 +768,39 @@ public final class AudioRouter: ObservableObject {
         guard engine.start() else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStart"])
             errorLog("Core Audio Engine failed to start; restoring system output", category: .routing)
+            activeBackend = .blackHole
             disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
             return false
         }
 
-        transferOutputVolume(from: physicalOutput, to: blackHoleDevice)
+        let physicalUnityReady = BlackHoleGainStaging.setPhysicalOutputToUnity(
+            physicalOutput.id,
+            read: Self.outputVolumeState,
+            write: { state, deviceID in
+                Self.applyOutputVolumeState(
+                    state,
+                    replacing: Self.outputVolumeState(for: deviceID),
+                    to: deviceID
+                )
+            }
+        )
+        DiagnosticEventStore.shared.record(
+            "routing.blackHoleGainStaging",
+            details: [
+                "physicalUnity": "\(physicalUnityReady)",
+                "virtualVolume": "\(virtualVolumeReady)"
+            ]
+        )
+        guard physicalUnityReady else {
+            DiagnosticEventStore.shared.record(
+                "routing.enable.failed",
+                details: ["backend": "blackHole", "reason": "physicalUnity"]
+            )
+            activeBackend = .blackHole
+            disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
+            return false
+        }
+
         installBlackHoleVolumeListeners(deviceID: blackHoleDevice.id)
         activeBackend = .blackHole
 
@@ -1136,15 +1221,26 @@ public final class AudioRouter: ObservableObject {
         }
     }
 
-    private func transferOutputVolume(from source: AudioDevice, to destination: AudioDevice) {
+    @discardableResult
+    private func transferOutputVolume(from source: AudioDevice, to destination: AudioDevice) -> Bool {
         let fallback = destination.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
-            ? OutputVolumeState(scalar: 1, isMuted: nil)
+            ? OutputVolumeState(scalar: 1, isMuted: false)
             : nil
         let sourceState = Self.outputVolumeState(for: source.id)
         let state = sourceState ?? fallback
-        let didTransfer = state.map {
-            Self.applyOutputVolumeState($0, to: destination.id)
-        } ?? false
+        let didTransfer = OutputVolumeTransfer.transfer(
+            from: source.id,
+            to: destination.id,
+            read: Self.outputVolumeState,
+            write: { state, deviceID in
+                Self.applyOutputVolumeState(
+                    state,
+                    replacing: Self.outputVolumeState(for: deviceID),
+                    to: deviceID
+                )
+            },
+            fallback: fallback
+        )
         var details = [
             "destinationKind": diagnosticDeviceKind(destination),
             "result": didTransfer ? "success" : "notApplied",
@@ -1163,6 +1259,7 @@ public final class AudioRouter: ObservableObject {
                 category: .routing
             )
         }
+        return didTransfer
     }
 
     func diagnosticSummary() -> String {

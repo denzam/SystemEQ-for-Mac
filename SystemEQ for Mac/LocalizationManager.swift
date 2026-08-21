@@ -143,8 +143,10 @@ public enum LocalizedString: String, CaseIterable {
     case reset
     case autoPreamp
     case preamp
+    case preampSafetyWarning
     case outputBoost
     case outputBoostDescription
+    case limiterActivityDescription
     case bands10
     case bands31
     case testTone1k
@@ -1241,19 +1243,29 @@ private enum LocalizationData {
                     .ukrainian: "Нормалізувати"
                 ],
                 .preamp: [
-                    .english: "Preamp",
-                    .italian: "Preamp",
-                    .ukrainian: "Підсилювач"
+                    .english: "Preset headroom",
+                    .italian: "Margine del preset",
+                    .ukrainian: "Запас пресету"
+                ],
+                .preampSafetyWarning: [
+                    .english: "Recommended safe headroom: %@. Higher levels can compress transients; watch the LIMIT indicator.",
+                    .italian: "Margine sicuro consigliato: %@. Livelli più alti possono comprimere i transienti; controlla LIMIT.",
+                    .ukrainian: "Рекомендований безпечний запас: %@. Вищий рівень може стискати транзієнти; стежте за LIMIT."
                 ],
                 .outputBoost: [
-                    .english: "Output Boost",
-                    .italian: "Boost di uscita",
-                    .ukrainian: "Підсилення виходу"
+                    .english: "Gain",
+                    .italian: "Guadagno",
+                    .ukrainian: "Підсилення"
                 ],
                 .outputBoostDescription: [
-                    .english: "Up to +3 dB. A linked limiter prevents digital clipping.",
-                    .italian: "Fino a +3 dB. Un limiter stereo previene il clipping digitale.",
-                    .ukrainian: "До +3 дБ. Зв’язаний стереолімітер запобігає цифровому кліпінгу."
+                    .english: "Adds loudness after EQ, up to +12 dB. On loud material, extra gain can compress dynamics instead of making it louder.",
+                    .italian: "Aggiunge volume dopo l'EQ, fino a +12 dB. Su materiale già forte, il guadagno extra può comprimere la dinamica invece di aumentare il volume.",
+                    .ukrainian: "Додає гучність після EQ, до +12 дБ. На вже гучному матеріалі додаткове підсилення може стискати динаміку замість збільшення гучності."
+                ],
+                .limiterActivityDescription: [
+                    .english: "Green: no reduction. Yellow: up to 3 dB. Red: more than 3 dB of real gain reduction.",
+                    .italian: "Verde: nessuna riduzione. Giallo: fino a 3 dB. Rosso: oltre 3 dB di riduzione reale.",
+                    .ukrainian: "Зелений: без зменшення. Жовтий: до 3 дБ. Червоний: понад 3 дБ фактичного зменшення."
                 ],
                 .bands10: [
                     .english: "10 Bands",
