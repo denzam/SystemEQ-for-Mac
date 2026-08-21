@@ -63,6 +63,11 @@ public enum LocalizedString: String, CaseIterable {
     case language
     case languageDesc
     case general
+    case audioBackend
+    case audioBackendDesc
+    case audioBackendAutomatic
+    case audioBackendNative
+    case audioBackendBlackHole
     case launchAtLogin
     case showMenuBarIcon
     case hideDockIcon
@@ -863,6 +868,31 @@ private enum LocalizationData {
                     .english: "General",
                     .italian: "Generale",
                     .ukrainian: "Загальне"
+                ],
+                .audioBackend: [
+                    .english: "Audio Engine",
+                    .italian: "Motore audio",
+                    .ukrainian: "Аудіорушій"
+                ],
+                .audioBackendDesc: [
+                    .english: "Automatic uses the native macOS engine when available and keeps BlackHole as a fallback.",
+                    .italian: "Automatico usa il motore nativo di macOS quando disponibile e mantiene BlackHole come alternativa.",
+                    .ukrainian: "Автоматичний режим використовує нативний рушій macOS, а BlackHole лишає як резервний."
+                ],
+                .audioBackendAutomatic: [
+                    .english: "Automatic",
+                    .italian: "Automatico",
+                    .ukrainian: "Автоматично"
+                ],
+                .audioBackendNative: [
+                    .english: "Native (Process Tap)",
+                    .italian: "Nativo (Process Tap)",
+                    .ukrainian: "Нативний (Process Tap)"
+                ],
+                .audioBackendBlackHole: [
+                    .english: "BlackHole",
+                    .italian: "BlackHole",
+                    .ukrainian: "BlackHole"
                 ],
                 .launchAtLogin: [
                     .english: "Launch at Login",

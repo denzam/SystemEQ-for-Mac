@@ -209,7 +209,7 @@ struct RoutingView: View {
                             .font(AppTypography.body)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!audioRouter.blackHoleDetected)
+                    .disabled(!audioRouter.canEnableRouting)
 
                     Button(action: {
                         Self.setEQEnabled(false, engine: audioEngine)

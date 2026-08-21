@@ -243,6 +243,10 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    func reapplyCurrentFilters() {
+        syncToCoreAudioEngineImmediate()
+    }
+
     // MARK: - Control Methods
 
     /// `persistState: false` — для стартового відновлення: провал автостарту

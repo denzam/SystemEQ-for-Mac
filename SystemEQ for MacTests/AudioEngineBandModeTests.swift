@@ -414,4 +414,60 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertFalse(store.reportText().contains("routing.enable.request"))
         XCTAssertTrue(store.reportText().contains("requestedScalar=1.000"))
     }
+
+    func testProcessTapInputSelectsUniqueStereoTapStream() {
+        let tap = processTapFormat(sampleRate: 48000, channels: 2)
+        let mono = processTapFormat(sampleRate: 48000, channels: 1)
+
+        let selection = ProcessTapInputSelection.select(
+            tapFormat: tap,
+            aggregateFormats: [mono, tap],
+            aggregateChannelCounts: [1, 2],
+            aggregateStartingChannels: [1, 2],
+            physicalInputChannelCount: 1
+        )
+
+        XCTAssertEqual(selection, ProcessTapInputSelection(bufferIndex: 1))
+    }
+
+    func testProcessTapInputUsesChannelBoundaryForAmbiguousDeviceInput() {
+        let tap = processTapFormat(sampleRate: 48000, channels: 2)
+
+        let selection = ProcessTapInputSelection.select(
+            tapFormat: tap,
+            aggregateFormats: [tap, tap],
+            aggregateChannelCounts: [2, 2],
+            aggregateStartingChannels: [1, 3],
+            physicalInputChannelCount: 2
+        )
+
+        XCTAssertEqual(selection, ProcessTapInputSelection(bufferIndex: 1))
+    }
+
+    func testProcessTapInputRejectsNonFloatTapFormat() {
+        var tap = processTapFormat(sampleRate: 48000, channels: 2)
+        tap.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked
+
+        XCTAssertNil(ProcessTapInputSelection.select(
+            tapFormat: tap,
+            aggregateFormats: [tap],
+            aggregateChannelCounts: [2],
+            aggregateStartingChannels: [1],
+            physicalInputChannelCount: 0
+        ))
+    }
+
+    private func processTapFormat(sampleRate: Double, channels: UInt32) -> AudioStreamBasicDescription {
+        AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: channels * 4,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: channels * 4,
+            mChannelsPerFrame: channels,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+    }
 }

@@ -1581,6 +1581,89 @@ public final class CoreAudioEngine: ObservableObject {
         self.filterChain = nil
         dlog("🏠 Room correction filters cleared", category: .engine)
     }
+
+    func prepareProcessTap(
+        sampleRate: Double,
+        outputDeviceID: AudioDeviceID,
+        bufferFrames: UInt32
+    ) {
+        currentSampleRate = sampleRate
+        channelCount = 2
+        inputDeviceID = 0
+        self.outputDeviceID = outputDeviceID
+        allocatedFrameCapacity = min(max(bufferFrames, 1), 4096)
+        isSetupComplete = true
+    }
+
+    func markProcessTapStarted() {
+        isRunning = true
+        DiagnosticEventStore.shared.record("engine.start.succeeded", details: ["backend": "native"])
+    }
+
+    @inline(__always)
+    func generateProcessTapTestToneIfNeeded(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frameCount: Int
+    ) {
+        guard testToneEnabled else { return }
+        let twoPi = Float.pi * 2
+        let increment = twoPi * testToneFrequency / Float(currentSampleRate)
+        var phase = testTonePhase
+        for index in 0..<frameCount {
+            left[index] = sinf(phase) * 0.2
+            phase += increment
+            if phase > twoPi { phase -= twoPi }
+        }
+        memcpy(right, left, frameCount * MemoryLayout<Float>.size)
+        testTonePhase = phase
+    }
+
+    @inline(__always)
+    func processStereoInPlace(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frameCount: Int
+    ) {
+        let meterTick = peakMeter.shouldSample(frameCount: frameCount)
+        if meterTick {
+            peakMeter.sampleInput(
+                bufferL: left,
+                bufferR: right,
+                frameCount: frameCount,
+                channelCount: 2
+            )
+        }
+
+        if isEnabled {
+            beginVDSPFilterRead()
+            if let vdsp = currentVDSPFilter() {
+                vdsp.processStereo(left, right, frameCount: frameCount)
+            } else if let filterChain {
+                filterChain.processStereoBuffers(left, right, frameCount: frameCount)
+            }
+            endVDSPFilterRead()
+        }
+
+        if meterTick {
+            peakMeter.sampleOutput(
+                bufferL: left,
+                bufferR: right,
+                frameCount: frameCount,
+                channelCount: 2
+            )
+        }
+
+        visualizerCounter += frameCount
+        if visualizerCounter >= visualizerInterval {
+            visualizerCounter = 0
+            beginVisualizerCallbackRead()
+            if let box = currentVisualizerCallback() {
+                box.callback(left, right, frameCount)
+            }
+            endVisualizerCallbackRead()
+        }
+    }
 }
 
 // MARK: - Render Callback
@@ -1727,70 +1810,19 @@ private func inputCaptureCallbackFunction(
             return status
         }
     }
-    // ⚡ Metering tick is decided once per callback so the input level is taken
-    // before EQ and the output level after it, from the same buffer.
-    let meterTick = engine.peakMeter.shouldSample(frameCount: frames)
-    if meterTick, let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-        let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
-        engine.peakMeter.sampleInput(
-            bufferL: inL,
-            bufferR: inR,
-            frameCount: frames,
-            channelCount: engine.channelCount
-        )
-    }
-
-    // ⚡ Lock-free filter read: single atomic pointer load, no retain/release.
-    if engine.isEnabled, engine.channelCount >= 1, let lPtr = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-        engine.beginVDSPFilterRead()
-        if let vdsp = engine.currentVDSPFilter() {
-            if engine.channelCount > 1, let rPtr = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
-                vdsp.processStereo(lPtr, rPtr, frameCount: frames)
-            } else {
-                vdsp.processStereo(lPtr, lPtr, frameCount: frames)
-            }
-        } else if let fc = engine.filterChain {
-            if engine.channelCount > 1, let rPtr = inABL[1].mData?.assumingMemoryBound(to: Float.self) {
-                fc.processStereoBuffers(lPtr, rPtr, frameCount: frames)
-            } else {
-                fc.processBuffer(lPtr, frameCount: frames)
-            }
+    if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
+        let inR = engine.channelCount > 1
+            ? inABL[1].mData?.assumingMemoryBound(to: Float.self)
+            : inL
+        if let inR {
+            engine.processStereoInPlace(left: inL, right: inR, frameCount: frames)
         }
-        engine.endVDSPFilterRead()
-        // Nil filter = bypass.
     }
 
     // Write to ring buffer (deinterleaved) — delegated to SPSCRingBuffer
     if let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
         let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
         engine.ringBuffer.write(inL: inL, inR: inR, frameCount: frames)
-    }
-    // ⚡ OPTIMIZED: Update peak meters — delegated to PeakMeter
-    if meterTick, let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-        let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : nil
-        engine.peakMeter.sampleOutput(
-            bufferL: inL,
-            bufferR: inR,
-            frameCount: frames,
-            channelCount: engine.channelCount
-        )
-    }
-
-    // ⚡ OPTIMIZED: Send audio data to visualizer less frequently to reduce CPU overhead
-    engine.visualizerCounter += frames
-    if engine.visualizerCounter >= engine.visualizerInterval {
-        engine.visualizerCounter = 0
-
-        // ⚡ Lock-free callback read: single atomic pointer load, no retain/release.
-        engine.beginVisualizerCallbackRead()
-        if let box = engine.currentVisualizerCallback(),
-           let inL = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
-            let inR = engine.channelCount > 1 ? inABL[1].mData?.assumingMemoryBound(to: Float.self) : inL
-            if let rightPtr = inR {
-                box.callback(inL, rightPtr, frames)
-            }
-        }
-        engine.endVisualizerCallbackRead()
     }
     #if DEBUG
         let nanos = machNanosSince(diagStart)
