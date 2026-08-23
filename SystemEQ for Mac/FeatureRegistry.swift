@@ -12,7 +12,6 @@ import Foundation
 import SwiftUI
 
 enum FeatureID: String, CaseIterable, Identifiable {
-    case equalizer
     case calibration
     case subjectiveRoomTuning // Renamed from roomCalibration - subjective room tuning
     case resonanceFinder // New - Sine Sweep tool for finding resonances

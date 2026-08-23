@@ -57,7 +57,6 @@ class WindowTitleManager {
     private func getKeyForWindowId(_ id: String) -> LocalizedString? {
         switch id {
         case "main": .mainWindowTitle
-        case FeatureID.equalizer.rawValue: .equalizer
         case FeatureID.calibration.rawValue: .calibration
         case FeatureID.subjectiveRoomTuning.rawValue: .subjectiveRoomTuning
         case FeatureID.resonanceFinder.rawValue: .resonanceFinder

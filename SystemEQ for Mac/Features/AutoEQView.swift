@@ -18,6 +18,43 @@ struct FavoritePreset: Codable, Identifiable, Equatable {
     var preamp: Double?
 }
 
+struct LimiterIndicatorView: View {
+    @ObservedObject var peakMeter: PeakMeter
+    let description: String
+    let gainUnit: String
+
+    var body: some View {
+        let reduction = peakMeter.limiterGainReductionDB
+        let state = LimiterIndicatorState.state(for: reduction)
+        let color: Color = switch state {
+        case .normal: .green
+        case .mild: .yellow
+        case .heavy: .red
+        }
+
+        return VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            HStack(spacing: AppSpacing.sm) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12, height: 12)
+                    .shadow(color: color.opacity(state == .normal ? 0.25 : 0.8), radius: 5)
+                Text("LIMIT")
+                    .font(AppTypography.bodySmall)
+                Text(String(format: "GR %+.1f %@", reduction > 0 ? -reduction : 0, gainUnit))
+                    .font(AppTypography.mono)
+                    .foregroundColor(state == .normal ? .secondary : color)
+                Spacer()
+            }
+
+            if !description.isEmpty {
+                Text(description)
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+}
+
 private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
     VStack(alignment: .leading, spacing: AppSpacing.md) {
         content()

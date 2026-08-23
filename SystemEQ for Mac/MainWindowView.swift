@@ -73,7 +73,6 @@ struct MainWindowView: View {
 
     private func iconForFeature(_ featureId: FeatureID) -> String {
         switch featureId {
-        case .equalizer: "slider.horizontal.3"
         case .calibration: "waveform.path"
         case .subjectiveRoomTuning: "ear.and.waveform"
         case .resonanceFinder: "waveform.path.ecg"
@@ -87,7 +86,6 @@ struct MainWindowView: View {
 
     private func subtitleForFeature(_ featureId: FeatureID) -> String {
         switch featureId {
-        case .equalizer: localizationManager.localized(.featureEqualizerSubtitle)
         case .calibration: localizationManager.localized(.featureCalibrationSubtitle)
         case .subjectiveRoomTuning: localizationManager.localized(.subjectiveRoomTuningDesc)
         case .resonanceFinder: localizationManager.localized(.resonanceFinderSubtitle)
@@ -101,8 +99,6 @@ struct MainWindowView: View {
 
     private func localizedTitle(for featureId: FeatureID) -> String {
         switch featureId {
-        case .equalizer:
-            localizationManager.localized(.equalizer)
         case .calibration:
             localizationManager.localized(.calibration)
         case .subjectiveRoomTuning:

@@ -206,17 +206,6 @@ struct SystemEQ_for_MacApp: App {
         .windowStyle(.titleBar)
         .windowResizability(.contentSize)
 
-        Window("Equalizer", id: FeatureID.equalizer.rawValue) {
-            EqualizerView()
-                .environmentObject(localizationManager)
-                .environmentObject(audioEngine)
-                .background(WindowAccessor(id: FeatureID.equalizer.rawValue, localizationKey: .equalizerTitle))
-                .frame(width: 900, height: 650)
-                .dynamicWindowTitle(id: FeatureID.equalizer.rawValue, key: .equalizerTitle)
-        }
-        .windowStyle(.titleBar)
-        .windowResizability(.contentSize)
-
         Window("Calibration", id: FeatureID.calibration.rawValue) {
             CalibrationView()
                 .environmentObject(localizationManager)

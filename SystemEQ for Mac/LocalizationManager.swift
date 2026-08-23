@@ -42,7 +42,6 @@ public enum LocalizedString: String, CaseIterable {
     // Main Window
     case mainWindowTitle
     case mainSubtitle
-    case equalizer
     case calibration
     case autoeqPresets
     case personalized
@@ -51,7 +50,6 @@ public enum LocalizedString: String, CaseIterable {
     case visualizer
 
     // Feature Subtitles
-    case featureEqualizerSubtitle
     case featureCalibrationSubtitle
     case featureAutoEQSubtitle
     case featureRoutingSubtitle
@@ -147,7 +145,6 @@ public enum LocalizedString: String, CaseIterable {
     case overallStatus
 
     // Equalizer
-    case equalizerTitle
     case eqShort
     case bandMode
     case reset
@@ -794,11 +791,6 @@ private enum LocalizationData {
                     .italian: "Equalizzatore Audio Professionale",
                     .ukrainian: "Професійний Аудіо Еквалайзер"
                 ],
-                .equalizer: [
-                    .english: "Equalizer",
-                    .italian: "Equalizzatore",
-                    .ukrainian: "Еквалайзер"
-                ],
                 .calibration: [
                     .english: "Calibration",
                     .italian: "Calibrazione",
@@ -831,11 +823,6 @@ private enum LocalizationData {
                 ],
 
                 // Feature Subtitles
-                .featureEqualizerSubtitle: [
-                    .english: "10 or 31 band EQ",
-                    .italian: "EQ a 10 o 31 bande",
-                    .ukrainian: "Еквалайзер на 10 або 31 смугу"
-                ],
                 .featureCalibrationSubtitle: [
                     .english: "Room & headphone calibration",
                     .italian: "Calibrazione stanza & cuffie",
@@ -1279,11 +1266,6 @@ private enum LocalizationData {
                 ],
 
                 // Equalizer
-                .equalizerTitle: [
-                    .english: "Equalizer",
-                    .italian: "Equalizzatore",
-                    .ukrainian: "Еквалайзер"
-                ],
                 .eqShort: [
                     .english: "EQ",
                     .italian: "EQ",

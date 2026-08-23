@@ -182,12 +182,6 @@ struct WelcomeStepView: View {
 
             VStack(alignment: .leading, spacing: 16) {
                 FeatureRow(
-                    icon: "slider.horizontal.3",
-                    title: localization.localized(.equalizer),
-                    description: localization.localized(.featureEqualizerSubtitle)
-                )
-
-                FeatureRow(
                     icon: "waveform.path.ecg",
                     title: localization.localized(.autoeqPresets),
                     description: localization.localized(.featureAutoEQSubtitle)
@@ -651,12 +645,6 @@ struct CompleteStepView: View {
                 .padding(.vertical)
 
             VStack(alignment: .leading, spacing: 16) {
-                NextStepRow(
-                    icon: "slider.horizontal.3",
-                    title: localization.localized(.equalizer),
-                    description: "Open the " + localization.localized(.equalizer) + " window to customize your sound"
-                )
-
                 NextStepRow(
                     icon: "waveform.path.ecg",
                     title: localization.localized(.autoEQImport),
