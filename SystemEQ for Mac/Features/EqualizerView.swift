@@ -165,7 +165,7 @@ struct EqualizerView: View {
     }
 }
 
-private struct LimiterIndicatorView: View {
+struct LimiterIndicatorView: View {
     @ObservedObject var peakMeter: PeakMeter
     let description: String
     let gainUnit: String
@@ -193,9 +193,11 @@ private struct LimiterIndicatorView: View {
                 Spacer()
             }
 
-            Text(description)
-                .font(AppTypography.bodySmall)
-                .foregroundColor(.secondary)
+            if !description.isEmpty {
+                Text(description)
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

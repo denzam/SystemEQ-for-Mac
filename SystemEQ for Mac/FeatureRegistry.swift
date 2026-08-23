@@ -35,7 +35,6 @@ struct Feature: Identifiable {
 
 final class FeatureRegistry: ObservableObject {
     @Published var features: [Feature] = [
-        Feature(id: .equalizer, title: "Equalizer", enabled: true, order: 1),
         Feature(id: .calibration, title: "Calibration", enabled: true, order: 2),
         Feature(id: .subjectiveRoomTuning, title: "Subjective Room Tuning", enabled: true, order: 3),
         Feature(id: .resonanceFinder, title: "Resonance Finder", enabled: true, order: 4),
