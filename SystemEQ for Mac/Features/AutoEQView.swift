@@ -18,6 +18,20 @@ struct FavoritePreset: Codable, Identifiable, Equatable {
     var preamp: Double?
 }
 
+private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
+    VStack(alignment: .leading, spacing: AppSpacing.md) {
+        content()
+    }
+    .padding(AppSpacing.lg)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(NSColor.controlBackgroundColor).opacity(0.42))
+    .overlay {
+        RoundedRectangle(cornerRadius: AppRadius.lg)
+            .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+    }
+    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+}
+
 struct AutoEQView: View {
     enum BandMode: String, CaseIterable, Identifiable {
         case ten = "10"
@@ -45,6 +59,7 @@ struct AutoEQView: View {
     // MARK: - Audio Engine (ObservableObject для реактивності)
 
     @StateObject private var audioEngine = AudioEngine.shared
+    @State private var isTogglingEQ = false
 
     // MARK: - Active Preset Tracking
 
@@ -215,276 +230,20 @@ struct AutoEQView: View {
             subtitle: .featureAutoEQSubtitle,
             windowSize: .large
         ) {
-            VStack(alignment: .leading, spacing: 12) {
-                // MARK: - Active Preset Info
-
-                if let presetName = activePresetName {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .imageScale(.small)
-                        Text(presetName)
-                            .font(AppTypography.bodySmall)
-                            .foregroundStyle(.secondary)
-                            .tooltip(presetName)
-                        if let source = activePresetSource {
-                            Text("•")
-                                .font(AppTypography.bodySmall)
-                                .foregroundStyle(.secondary)
-                            Text(source)
-                                .font(AppTypography.bodySmall)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let target = activePresetTarget {
-                            Text("•")
-                                .font(AppTypography.bodySmall)
-                                .foregroundStyle(.secondary)
-                            Text(target)
-                                .font(AppTypography.bodySmall)
-                                .foregroundStyle(.blue)
-                                .fontWeight(.medium)
-                        }
-                    }
-                    .padding(.bottom, 8)
-                }
-
-                // MARK: - Search Section
-
-                Grid(alignment: .top, horizontalSpacing: 8, verticalSpacing: 6) {
-                    GridRow {
-                        Text(localization.localized(.autoEQTypeModelName))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                        TextField(localization.localized(.searchHeadphonesModel), text: $searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 220)
-                            .disableAutocorrection(true)
-                        Button(localization.localized(.autoEQQuickImport)) {
-                            importFromDatabase(searchText)
-                        }
-                        .disabled(searchText.isEmpty)
-                        .help(localization.localized(.quickImportHelp))
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            if isSearching { ProgressView().controlSize(.small) }
-                            if isBuildingIndex {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Button(action: { Task { await buildOrUpdateIndex() } }) {
-                                    Image(systemName: "arrow.clockwise").imageScale(.medium)
-                                }
-                            }
-                            if let s = indexStatus {
-                                Text(s)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .font(AppTypography.bodySmall)
-                                    .tooltip(s)
-                            }
-                        }
-                    }
-                    GridRow {
-                        Color.clear.frame(height: 0)
-                        Color.clear.frame(height: 0)
-                        HStack(spacing: 8) {
-                            Button {
-                                importPresetFromFile()
-                            } label: {
-                                Label(localization.localized(.autoEQImportFile), systemImage: "doc.badge.plus")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .help(localization.localized(.autoEQImportFileHelp))
-
-                            if !rawText.isEmpty, activePresetSource == "Custom" {
-                                Button {
-                                    toggleCurrentCustomFavorite()
-                                } label: {
-                                    Image(systemName: isCurrentCustomFavorite ? "star.fill" : "star")
-                                        .foregroundColor(isCurrentCustomFavorite ? .yellow : .secondary)
-                                }
-                                .buttonStyle(.bordered)
-                                .help(isCurrentCustomFavorite
-                                    ? localization.localized(.removeFromFavorites)
-                                    : localization.localized(.autoEQSaveToFavorites))
-                            }
-
-                            if !favorites.isEmpty {
-                                Button {
-                                    showFavorites.toggle()
-                                } label: {
-                                    Label("\(favorites.count)", systemImage: "bookmark.fill")
-                                }
-                                .buttonStyle(.bordered)
-                                .help(localization.localized(.autoEQShowSaved))
-                            }
-                        }
-                        Color.clear.frame(height: 0)
-                    }
-                }
-                if let e = searchError {
-                    Text(e)
-                        .font(AppTypography.bodySmall)
-                        .foregroundStyle(.secondary)
-                }
-
-                Picker(localization.localized(.autoEQBandMode), selection: bandModeSelection) {
-                    Text("10").tag(BandMode.ten)
-                    Text("31").tag(BandMode.thirtyOne)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 200)
-
-                // MARK: - Favorites Section
-
-                if !favorites.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(localization.localized(.autoEQFavoritesTitle))
-                                .font(AppTypography.heading2)
-                            Spacer()
-                        }
-
-                        if showFavorites {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(favorites) { fav in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text(fav.name)
-                                                    .font(AppTypography.bodySmall)
-                                                    .fontWeight(.medium)
-                                                    .lineLimit(1)
-                                                    .tooltip(fav.name)
-                                                Spacer()
-                                                Button(action: { removeFavorite(fav) }) {
-                                                    Image(systemName: "xmark.circle.fill")
-                                                        .foregroundColor(.secondary)
-                                                        .imageScale(.small)
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                            if let source = fav.source {
-                                                Text(source)
-                                                    .font(AppTypography.labelSmall)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            Button(localization.localized(.autoEQLoad)) {
-                                                Task { await loadFavorite(fav) }
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .controlSize(.small)
-                                        }
-                                        .padding(AppSpacing.sm)
-                                        .background(Color.secondary.opacity(0.1))
-                                        .cornerRadius(AppRadius.md)
-                                        .frame(width: 150)
-                                    }
-                                }
-                            }
-                            .frame(height: 100)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                // MARK: - Search Results
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                activePresetSection
+                presetLibrarySection
 
                 if !normalizedQuery.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if candidates.isEmpty, isSearching {
-                            ProgressView()
-                        } else if candidates.isEmpty {
-                            EmptyView()
-                        } else {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(candidates) { c in
-                                        HStack {
-                                            Text(c.display).lineLimit(1).tooltip(c.display)
-                                            Spacer()
-                                            Button(action: { toggleFavoriteForCandidate(c) }) {
-                                                Image(systemName: isFavorite(c) ? "star.fill" : "star")
-                                                    .foregroundColor(isFavorite(c) ? .yellow : .secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .help(isFavorite(c) ? localization
-                                                .localized(.removeFromFavorites) : localization
-                                                .localized(.addToFavorites))
-                                            Button(localization.localized(.autoEQImport)) {
-                                                Task { await importCandidate(c) }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(maxHeight: 280)
-                        }
-                    }
+                    searchResultsSection
                 }
 
                 if !parsed.isEmpty {
-                    Text(localization.localized(.autoEQMappedPreviewTitle))
-                        .font(AppTypography.heading2)
-                    Text(showingBandLabel)
-                        .foregroundStyle(.secondary)
-
-                    EQGraphView(
-                        bands: mappedAsEQBands,
-                        gainBinding: { id in mappedGainBinding(id: id) }
-                    )
-                    .frame(height: 300)
-                    if let p = preampDB {
-                        Text(String(format: "%@: %+.1f dB", localization.localized(.autoEQPreamp), p))
-                            .font(AppTypography.mono)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                    }
-
-                    // Apply and Bypass Buttons
-                    HStack(spacing: 12) {
-                        Button(localization.localized(.autoEQApplyToEQ)) {
-                            applyToAudioEngine()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(mapped.isEmpty)
-
-                        Button(audioEngine.isEnabled ? localization.localized(.autoEQBypass) : localization
-                            .localized(.autoEQEnable)) {
-                                toggleBypass()
-                            }
-                            .buttonStyle(.bordered)
-                            .foregroundColor(audioEngine.isEnabled ? .orange : .green)
-
-                        if !mapped.isEmpty {
-                            Text(String(
-                                format: localization.localized(.applyBandsCount),
-                                mapped.count,
-                                audioEngine.isEnabled ? localization.localized(.autoEQEQOn) : localization
-                                    .localized(.autoEQEQOff)
-                            ))
-                            .font(AppTypography.bodySmall)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 8)
+                    mappedPreviewSection
                 }
 
-                VStack(alignment: .leading) {
-                    Text("\(localization.localized(.autoEQBassBoost)): \(String(format: "%.1f", bassBoost)) dB")
-                    Slider(value: $bassBoost, in: 0...6, step: 0.5)
-                        .onChange(of: bassBoost) { _ in
-                            // ✅ Debounce: Apply bass boost changes after 50ms
-                            applyEQDebounceTask?.cancel()
-                            applyEQDebounceTask = Task {
-                                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-                                guard !Task.isCancelled else { return }
-                                await MainActor.run {
-                                    applyToAudioEngine()
-                                }
-                            }
-                        }
-                }
-
+                eqControlsSection
+                bassBoostSection
                 Spacer()
             }
         }
@@ -560,6 +319,450 @@ struct AutoEQView: View {
         .sheet(isPresented: $showAutoEQSetup) {
             autoEQSetupDialog()
         }
+    }
+
+    @ViewBuilder private var activePresetSection: some View {
+        if let presetName = activePresetName {
+            autoEQPanel {
+                HStack(spacing: AppSpacing.md) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .imageScale(.medium)
+
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        Text(presetName)
+                            .font(AppTypography.heading3)
+                            .lineLimit(1)
+                            .tooltip(presetName)
+
+                        HStack(spacing: AppSpacing.xs) {
+                            if let source = activePresetSource {
+                                Text(source)
+                            }
+                            if let target = activePresetTarget {
+                                Text("•")
+                                Text(target)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .font(AppTypography.bodySmall)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if canToggleCurrentFavorite {
+                        Button {
+                            toggleCurrentFavorite()
+                        } label: {
+                            Image(systemName: isCurrentPresetFavorite ? "star.fill" : "star")
+                                .foregroundStyle(isCurrentPresetFavorite ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(isCurrentPresetFavorite
+                            ? localization.localized(.removeFromFavorites)
+                            : localization.localized(.autoEQSaveToFavorites))
+                    }
+                }
+            }
+        }
+    }
+
+    private var presetLibrarySection: some View {
+        autoEQPanel {
+            sectionHeader(
+                title: localization.localized(.autoeqPresets),
+                systemImage: "headphones",
+                help: "\(localization.localized(.quickImportHelp))\n\n\(localization.localized(.autoEQImportFileHelp))"
+            )
+
+            HStack(spacing: AppSpacing.sm) {
+                TextField(localization.localized(.searchHeadphonesModel), text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: .infinity)
+                    .disableAutocorrection(true)
+
+                Button(localization.localized(.autoEQQuickImport)) {
+                    importFromDatabase(searchText)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(searchText.isEmpty)
+                .help(localization.localized(.quickImportHelp))
+
+                if isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            HStack(spacing: AppSpacing.md) {
+                Button {
+                    importPresetFromFile()
+                } label: {
+                    Label(localization.localized(.autoEQImportFile), systemImage: "doc.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .help(localization.localized(.autoEQImportFileHelp))
+
+                favoritesLink
+
+                Spacer()
+
+                HStack(spacing: AppSpacing.sm) {
+                    if isBuildingIndex {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button {
+                            Task { await buildOrUpdateIndex() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    if let s = indexStatus {
+                        Text(s)
+                            .font(AppTypography.bodySmall)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .tooltip(s)
+                    }
+                }
+            }
+
+            if let e = searchError {
+                Text(e)
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var searchResultsSection: some View {
+        if candidates.isEmpty, isSearching {
+            ProgressView()
+                .frame(maxWidth: .infinity, alignment: .center)
+        } else if !candidates.isEmpty {
+            autoEQPanel {
+                sectionHeader(
+                    title: localization.localized(.autoEQTypeModelName),
+                    systemImage: "magnifyingglass"
+                )
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        ForEach(candidates) { c in
+                            HStack(spacing: AppSpacing.sm) {
+                                Text(c.display)
+                                    .lineLimit(1)
+                                    .tooltip(c.display)
+
+                                Spacer(minLength: AppSpacing.sm)
+
+                                Button {
+                                    toggleFavoriteForCandidate(c)
+                                } label: {
+                                    Image(systemName: isFavorite(c) ? "star.fill" : "star")
+                                        .foregroundStyle(isFavorite(c) ? .yellow : .secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help(isFavorite(c)
+                                    ? localization.localized(.removeFromFavorites)
+                                    : localization.localized(.addToFavorites))
+
+                                Button(localization.localized(.autoEQImport)) {
+                                    Task { await importCandidate(c) }
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(.vertical, AppSpacing.xs)
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+            }
+        }
+    }
+
+    private var mappedPreviewSection: some View {
+        autoEQPanel {
+            sectionHeader(
+                title: localization.localized(.autoEQMappedPreviewTitle),
+                systemImage: "waveform.path.ecg"
+            )
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(showingBandLabel)
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if let p = preampDB {
+                    Text(String(format: "%@: %+.1f dB", localization.localized(.autoEQPreamp), p))
+                        .font(AppTypography.mono)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            EQGraphView(
+                bands: mappedAsEQBands,
+                gainBinding: { id in mappedGainBinding(id: id) }
+            )
+            .frame(height: 300)
+
+            HStack(spacing: AppSpacing.md) {
+                Button(localization.localized(.autoEQApplyToEQ)) {
+                    applyToAudioEngine()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(mapped.isEmpty)
+
+                if !mapped.isEmpty {
+                    Text(String(
+                        format: localization.localized(.applyBandsCount),
+                        mapped.count,
+                        audioEngine.isEnabled ? localization.localized(.autoEQEQOn) : localization
+                            .localized(.autoEQEQOff)
+                    ))
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+        }
+    }
+
+    private func sectionHeader(title: String, systemImage: String, help: String? = nil) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            Text(title)
+                .font(AppTypography.heading2)
+
+            if let help {
+                InfoPopoverButton {
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        Text(title)
+                            .font(.headline)
+                        Text(help)
+                            .font(AppTypography.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private var eqControlsSection: some View {
+        let recommendedPreamp = audioEngine.recommendedPreampGain()
+
+        return autoEQPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                sectionHeader(
+                    title: localization.localized(.eqShort),
+                    systemImage: "slider.horizontal.3",
+                    help: "\(localization.localized(.outputBoostDescription))\n\n\(localization.localized(.limiterActivityDescription))"
+                )
+
+                HStack {
+                    Picker(localization.localized(.autoEQBandMode), selection: bandModeSelection) {
+                        Text("10").tag(BandMode.ten)
+                        Text("31").tag(BandMode.thirtyOne)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 240)
+
+                    Spacer()
+
+                    Toggle(isOn: Binding(
+                        get: { audioEngine.isEnabled },
+                        set: { newValue in
+                            guard !isTogglingEQ else { return }
+                            isTogglingEQ = true
+                            audioEngine.setEnabled(newValue)
+                            isTogglingEQ = false
+                        }
+                    )) {
+                        Text(localization.localized(.eqShort))
+                            .font(AppTypography.heading3)
+                    }
+                    .toggleStyle(.switch)
+                }
+
+                HStack(spacing: AppSpacing.md) {
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { _ = audioEngine.restorePresetDefaults() }
+                    } label: {
+                        Label(localization.localized(.reset), systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!audioEngine.hasPresetDefaults)
+
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { audioEngine.applyAutoPreamp() }
+                    } label: {
+                        Label(localization.localized(.autoPreamp), systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: AppSpacing.xxs) {
+                        Text(localization.localized(.preamp))
+                            .font(AppTypography.labelSmall)
+                            .foregroundStyle(.secondary)
+                        Text(audioEngine.formatGain(audioEngine.preampGain))
+                            .font(AppTypography.mono)
+                    }
+                }
+
+                if audioEngine.preampGain > recommendedPreamp + 0.05 {
+                    Text(String(
+                        format: localization.localized(.preampSafetyWarning),
+                        audioEngine.formatGain(recommendedPreamp)
+                    ))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.orange)
+                }
+
+                HStack(spacing: AppSpacing.sm) {
+                    Text(localization.localized(.outputBoost))
+                        .font(AppTypography.bodySmall)
+                        .foregroundColor(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { Double(audioEngine.outputBoostGain) },
+                            set: { audioEngine.setOutputBoostGain(Float($0)) }
+                        ),
+                        in: 0...Double(OutputSafetyProcessor.maximumBoostDB),
+                        step: 0.5
+                    )
+                    Text(audioEngine.formatGain(audioEngine.outputBoostGain))
+                        .font(AppTypography.mono)
+                        .foregroundColor(audioEngine.outputBoostGain > 3 ? .orange : .primary)
+                        .frame(width: 68, alignment: .trailing)
+                }
+
+                LimiterIndicatorView(
+                    peakMeter: CoreAudioEngine.shared.peakMeter,
+                    description: "",
+                    gainUnit: localization.localized(.dB)
+                )
+            }
+        }
+    }
+
+    private var bassBoostSection: some View {
+        autoEQPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                HStack {
+                    sectionHeader(
+                        title: localization.localized(.autoEQBassBoost),
+                        systemImage: "speaker.wave.2.fill"
+                    )
+
+                    Spacer()
+
+                    Text(String(format: "%.1f dB", bassBoost))
+                        .font(AppTypography.mono)
+                }
+
+                Slider(value: $bassBoost, in: 0...6, step: 0.5)
+                    .onChange(of: bassBoost) { _ in
+                        applyEQDebounceTask?.cancel()
+                        applyEQDebounceTask = Task {
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                applyToAudioEngine()
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    private var favoritesLink: some View {
+        Button {
+            showFavorites.toggle()
+        } label: {
+            Label(
+                "\(localization.localized(.autoEQFavoritesLink)) (\(favorites.count))",
+                systemImage: "star.fill"
+            )
+            .foregroundStyle(.blue)
+        }
+        .buttonStyle(.link)
+        .popover(isPresented: $showFavorites, arrowEdge: .top) {
+            favoritesPopover
+        }
+    }
+
+    private var favoritesPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(localization.localized(.autoEQFavoritesTitle))
+                .font(AppTypography.heading2)
+
+            if favorites.isEmpty {
+                Text(localization.localized(.autoEQFavoritesEmpty))
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(favorites) { favorite in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.yellow)
+                                    .imageScale(.small)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(favorite.name)
+                                        .font(AppTypography.bodySmall)
+                                        .fontWeight(.medium)
+                                        .lineLimit(2)
+                                        .tooltip(favorite.name)
+                                    if let source = favorite.source {
+                                        Text(source)
+                                            .font(AppTypography.labelSmall)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Button(localization.localized(.autoEQLoad)) {
+                                        showFavorites = false
+                                        Task { await loadFavorite(favorite) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
+                                Spacer(minLength: 4)
+                                Button {
+                                    removeFavorite(favorite)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help(localization.localized(.removeFromFavorites))
+                            }
+                            .padding(AppSpacing.sm)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(AppRadius.md)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(AppSpacing.md)
+        .frame(width: 360, height: 280)
     }
 
     private var bandModeSelection: Binding<BandMode> {
@@ -1090,7 +1293,7 @@ struct AutoEQView: View {
     }
 
     private var showingBandLabel: String {
-        bandMode == .ten ? "Showing 10-band" : "Showing 31-band"
+        bandMode == .ten ? localization.localized(.bands10) : localization.localized(.bands31)
     }
 
     private func sanitize(_ s: String) -> String {
@@ -1687,10 +1890,6 @@ struct AutoEQView: View {
     }
 
     // MARK: - Apply to AudioEngine
-
-    private func toggleBypass() {
-        audioEngine.setEnabled(!audioEngine.isEnabled)
-    }
 
     private func applyToAudioEngine() {
         guard !mapped.isEmpty else {
@@ -2421,6 +2620,38 @@ struct AutoEQView: View {
     private var isCurrentCustomFavorite: Bool {
         guard let name = activePresetName, !rawText.isEmpty else { return false }
         return favorites.contains { $0.rawText != nil && $0.name == name }
+    }
+
+    private var canToggleCurrentFavorite: Bool {
+        activePresetPath != nil || (activePresetSource == "Custom" && !rawText.isEmpty)
+    }
+
+    private var isCurrentPresetFavorite: Bool {
+        if let path = activePresetPath {
+            return favorites.contains { $0.path == path }
+        }
+        return isCurrentCustomFavorite
+    }
+
+    private func toggleCurrentFavorite() {
+        if let path = activePresetPath, let name = activePresetName {
+            if let index = favorites.firstIndex(where: { $0.path == path }) {
+                favorites.remove(at: index)
+            } else {
+                favorites.append(FavoritePreset(
+                    id: UUID().uuidString,
+                    name: name,
+                    source: activePresetSource,
+                    target: activePresetTarget,
+                    path: path,
+                    timestamp: Date()
+                ))
+            }
+            saveFavoritesToStorage()
+            return
+        }
+
+        toggleCurrentCustomFavorite()
     }
 
     /// Додати/прибрати поточний імпортований custom-пресет в обране
