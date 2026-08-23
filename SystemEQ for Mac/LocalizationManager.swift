@@ -63,6 +63,15 @@ public enum LocalizedString: String, CaseIterable {
     case language
     case languageDesc
     case general
+    case appUpdates
+    case appUpdatesDesc
+    case appCurrentVersion
+    case checkAppUpdates
+    case appUpdateChecking
+    case appUpToDate
+    case appUpdateAvailable
+    case appUpdateOpenRelease
+    case appUpdateCheckFailed
     case audioBackend
     case audioBackendDesc
     case audioBackendAutomatic
@@ -139,6 +148,7 @@ public enum LocalizedString: String, CaseIterable {
 
     // Equalizer
     case equalizerTitle
+    case eqShort
     case bandMode
     case reset
     case autoPreamp
@@ -658,6 +668,8 @@ public enum LocalizedString: String, CaseIterable {
     // AutoEQView - Additional hardcoded strings
     case autoEQTypeModelName
     case autoEQFavoritesTitle
+    case autoEQFavoritesLink
+    case autoEQFavoritesEmpty
     case autoEQMappedPreviewTitle
     case autoEQSetupTitle
     case autoEQSetupDesc1
@@ -870,6 +882,51 @@ private enum LocalizationData {
                     .english: "General",
                     .italian: "Generale",
                     .ukrainian: "Загальне"
+                ],
+                .appUpdates: [
+                    .english: "App Updates",
+                    .italian: "Aggiornamenti app",
+                    .ukrainian: "Оновлення програми"
+                ],
+                .appUpdatesDesc: [
+                    .english: "Check GitHub for a newer version of SystemEQ.",
+                    .italian: "Controlla su GitHub se è disponibile una nuova versione di SystemEQ.",
+                    .ukrainian: "Перевірити на GitHub, чи доступна нова версія SystemEQ."
+                ],
+                .appCurrentVersion: [
+                    .english: "Current version: %@",
+                    .italian: "Versione attuale: %@",
+                    .ukrainian: "Поточна версія: %@"
+                ],
+                .checkAppUpdates: [
+                    .english: "Check for App Updates",
+                    .italian: "Verifica aggiornamenti app",
+                    .ukrainian: "Перевірити оновлення програми"
+                ],
+                .appUpdateChecking: [
+                    .english: "Checking for updates…",
+                    .italian: "Verifica aggiornamenti…",
+                    .ukrainian: "Перевірка оновлень…"
+                ],
+                .appUpToDate: [
+                    .english: "SystemEQ %@ is up to date",
+                    .italian: "SystemEQ %@ è aggiornato",
+                    .ukrainian: "SystemEQ %@ уже оновлено"
+                ],
+                .appUpdateAvailable: [
+                    .english: "SystemEQ %@ is available",
+                    .italian: "SystemEQ %@ è disponibile",
+                    .ukrainian: "Доступна версія SystemEQ %@"
+                ],
+                .appUpdateOpenRelease: [
+                    .english: "Open GitHub Release",
+                    .italian: "Apri release GitHub",
+                    .ukrainian: "Відкрити реліз на GitHub"
+                ],
+                .appUpdateCheckFailed: [
+                    .english: "Could not check for app updates",
+                    .italian: "Impossibile verificare gli aggiornamenti dell'app",
+                    .ukrainian: "Не вдалося перевірити оновлення програми"
                 ],
                 .audioBackend: [
                     .english: "Audio Engine",
@@ -1226,6 +1283,11 @@ private enum LocalizationData {
                     .english: "Equalizer",
                     .italian: "Equalizzatore",
                     .ukrainian: "Еквалайзер"
+                ],
+                .eqShort: [
+                    .english: "EQ",
+                    .italian: "EQ",
+                    .ukrainian: "EQ"
                 ],
                 .bandMode: [
                     .english: "Mode",
@@ -3502,6 +3564,16 @@ private enum LocalizationData {
                     .english: "⭐ Favorites",
                     .italian: "⭐ Preferiti",
                     .ukrainian: "⭐ Обрані"
+                ],
+                .autoEQFavoritesLink: [
+                    .english: "Favorites",
+                    .italian: "Preferiti",
+                    .ukrainian: "Обрані"
+                ],
+                .autoEQFavoritesEmpty: [
+                    .english: "You have no saved presets yet.",
+                    .italian: "Non hai ancora preset salvati.",
+                    .ukrainian: "У вас ще немає збережених пресетів."
                 ],
                 .autoEQMappedPreviewTitle: [
                     .english: "Mapped Preview",

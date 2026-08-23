@@ -6,6 +6,7 @@ struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
     @StateObject private var launchManager = LaunchAtLoginManager()
     @StateObject private var audioRouter = AudioRouter.shared
+    @StateObject private var appUpdateChecker = AppUpdateChecker()
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("hideDockIcon") private var hideDockIcon = false
     @AppStorage(DevicePresetManager.autoSwitchKey) private var autoSwitchPresetPerDevice = false
@@ -40,6 +41,8 @@ struct SettingsView: View {
 
                 // General Section
                 generalSection
+
+                appUpdateSection
 
                 // EQ Database Section
                 databaseSection
@@ -354,6 +357,95 @@ struct SettingsView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    private var appUpdateSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(localization.localized(.appUpdates))
+                .font(AppTypography.heading2)
+                .padding(.horizontal, 4)
+
+            Text(localization.localized(.appUpdatesDesc))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 24))
+                        .foregroundColor(.blue)
+                        .frame(width: 32)
+
+                    Text(String(
+                        format: localization.localized(.appCurrentVersion),
+                        AppUpdateChecker.currentVersion
+                    ))
+                    .font(AppTypography.body)
+
+                    Spacer()
+                }
+
+                appUpdateStatus
+
+                Button {
+                    Task { await appUpdateChecker.checkForUpdates() }
+                } label: {
+                    Label(
+                        localization.localized(.checkAppUpdates),
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appUpdateChecker.state == .checking)
+            }
+            .padding()
+            .background(Color(NSColor.textBackgroundColor).opacity(0.05))
+            .cornerRadius(8)
+        }
+        .padding(AppSpacing.xl)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    @ViewBuilder private var appUpdateStatus: some View {
+        switch appUpdateChecker.state {
+        case .idle:
+            EmptyView()
+        case .checking:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(localization.localized(.appUpdateChecking))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+            }
+        case let .upToDate(version):
+            Text(String(format: localization.localized(.appUpToDate), version))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.green)
+        case let .updateAvailable(_, release):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(format: localization.localized(.appUpdateAvailable), release.version))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.orange)
+
+                Button {
+                    NSWorkspace.shared.open(release.url)
+                } label: {
+                    Label(
+                        localization.localized(.appUpdateOpenRelease),
+                        systemImage: "arrow.up.right.square"
+                    )
+                }
+                .buttonStyle(.bordered)
+            }
+        case let .failed(message):
+            Text(message)
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+        }
     }
 
     // MARK: - Database Section
