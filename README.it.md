@@ -22,9 +22,9 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 | :---: | :---: | :---: | :---: |
 | [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibrazione](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizzatore](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
 
-| Regolazione Soggettiva Stanza | Trova Risonanze |
-| :---: | :---: |
-| [![Regolazione ambiente](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Ricerca risonanze](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) |
+| Regolazione Soggettiva Stanza | Trova Risonanze | Preset per uscita |
+| :---: | :---: | :---: |
+| [![Regolazione ambiente](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Ricerca risonanze](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Impostazioni](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
 
 ## ✨ Funzionalità
 

@@ -22,9 +22,9 @@
 | :---: | :---: | :---: | :---: |
 | [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Калібрація](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Візуалізатор](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
 
-| Суб’єктивне налаштування кімнати | Пошук резонансів |
-| :---: | :---: |
-| [![Налаштування кімнати](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Пошук резонансів](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) |
+| Суб’єктивне налаштування кімнати | Пошук резонансів | Пресети для кожного виводу |
+| :---: | :---: | :---: |
+| [![Налаштування кімнати](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Пошук резонансів](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Налаштування](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
 
 ## ✨ Можливості
 

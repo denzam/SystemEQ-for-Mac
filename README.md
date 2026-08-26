@@ -23,9 +23,9 @@ no telemetry.
 | :---: | :---: | :---: | :---: |
 | [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibration](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizer](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
 
-| Subjective Room Tuning | Resonance Finder |
-| :---: | :---: |
-| [![Room Tuning](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Resonance Finder](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) |
+| Subjective Room Tuning | Resonance Finder | Device-Aware Presets |
+| :---: | :---: | :---: |
+| [![Room Tuning](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Resonance Finder](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Settings](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
 
 ## ✨ Features
 
