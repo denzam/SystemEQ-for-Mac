@@ -4,6 +4,30 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-08-26
+
+Native system-audio capture, unified EQ controls, and safer output switching.
+
+### Added
+- A native Process Tap routing backend on macOS 14.4 and later; Automatic mode prefers it and falls back to BlackHole when unavailable
+- A manual update checker in Settings that opens the latest GitHub release when a newer version is available
+- A live limiter gain-reduction indicator for evaluating output gain without guessing when dynamics are being compressed
+
+### Changed
+- Output gain now supports up to +12 dB, with linked-stereo limiting at boosted levels and safety limiting for positive preamp gain
+- Auto preamp uses the combined filter response instead of only the largest individual band gain
+- EQ controls are consolidated in the AutoEQ window; manual band editing remains available without loading a preset
+- AutoEQ favorites use a compact browser while keeping existing saved favorites compatible
+
+### Fixed
+- BlackHole routing uses a single effective volume stage, recovers unexpected virtual-device volume changes, and avoids quiet physical output after routing starts
+- Audio routing no longer interrupts system streams while the native Process Tap starts
+- Restored the selected 10/31-band mode correctly when the app launches
+- Outputs without an assigned preset now receive a flat EQ with 0 dB preamp instead of keeping the previous device's curve
+- Per-output presets are reapplied even when two devices use the same base preset with different settings; invalid saved mappings fall back to flat EQ
+- Automatic native-to-BlackHole fallback no longer shows a stale manual-setup warning
+- Restored manual EQ band editing after removing the redundant standalone Equalizer window
+
 ## [1.3.0] — 2026-08-16
 
 Audio reliability, safer output control, and privacy-safe diagnostics.
@@ -191,6 +215,9 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.4.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.0
+[1.3.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.3.0
+[1.2.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.2.0
 [1.1.2]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.2
 [1.1.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.1
 [1.1.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.1.0
