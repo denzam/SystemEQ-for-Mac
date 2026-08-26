@@ -63,13 +63,26 @@ final class DevicePresetManager {
     // MARK: - Switching
 
     private func outputChanged(to uid: String) {
+        outputChanged(to: uid, engine: .shared)
+    }
+
+    func outputChanged(to uid: String, engine: AudioEngine) {
         guard Self.defaults.bool(forKey: Self.autoSwitchKey) else { return }
-        guard let record = loadMap()[uid], let mode = EQBandMode(rawValue: record.mode) else { return }
+        guard let record = loadMap()[uid] else {
+            applyFlat(to: engine, outputUID: uid)
+            return
+        }
+        guard let mode = EQBandMode(rawValue: record.mode),
+              record.appliedGains.count == mode.bandCount,
+              record.cleanGains.count == mode.bandCount,
+              record.appliedGains.allSatisfy(\.isFinite),
+              record.cleanGains.allSatisfy(\.isFinite),
+              record.preamp.isFinite,
+              record.bassBoost.isFinite else {
+            applyFlat(to: engine, outputUID: uid)
+            return
+        }
 
-        // Пресет цього виводу вже активний — нічого не міняємо
-        if record.descriptorJSON == Self.defaults.string(forKey: "lastAppliedPresetJSON") { return }
-
-        let engine = AudioEngine.shared
         engine.bandMode = mode
         engine.applyEQValues(record.appliedGains)
         engine.setPreampGain(record.preamp)
@@ -84,6 +97,16 @@ final class DevicePresetManager {
         Self.defaults.set(record.descriptorJSON, forKey: "lastAppliedPresetJSON")
 
         dlog("Device preset applied for output \(uid)", level: .info, category: .preset)
+    }
+
+    private func applyFlat(to engine: AudioEngine, outputUID: String) {
+        let mode = engine.bandMode
+        let gains = [Float](repeating: 0, count: mode.bandCount)
+        engine.applyEQValues(gains)
+        engine.setPreampGain(0)
+        PresetPersistence.save(mode: mode, gains: gains, preamp: 0, bassBoost: 0)
+        Self.defaults.removeObject(forKey: "lastAppliedPresetJSON")
+        dlog("Flat EQ applied for unmapped output \(outputUID)", level: .info, category: .preset)
     }
 
     // MARK: - Storage
