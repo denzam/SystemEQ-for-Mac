@@ -52,13 +52,12 @@ struct MainWindowView: View {
                     }
                 }
                 .padding(AppSpacing.lg)
-
-                Spacer()
             }
             // Welcome Wizard is handled by sheet presentation now
         }
-        .frame(width: 380, height: 750)
-        .frame(maxWidth: 380, maxHeight: 750)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 380)
+        .frame(maxWidth: 380)
         .background(.clear)
         .shadow(color: .black.opacity(0.2), radius: 24, x: 0, y: 8)
         .blurOnLanguageChange()
