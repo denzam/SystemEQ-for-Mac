@@ -55,6 +55,12 @@ enum OutputVolumeTransfer {
     }
 }
 
+enum DefaultOutputVerificationPolicy {
+    nonisolated static func shouldVerify(requestGeneration: UInt64, currentGeneration: UInt64) -> Bool {
+        requestGeneration == currentGeneration
+    }
+}
+
 enum BlackHoleGainStaging {
     private static let unityState = OutputVolumeState(scalar: 1, isMuted: false)
 
@@ -159,6 +165,7 @@ public final class AudioRouter: ObservableObject {
     private var originalSystemOutputDevice: AudioDevice?
     private var deviceChangeDebounceTask: Task<Void, Never>?
     private var defaultOutputChangeTask: Task<Void, Never>?
+    private var defaultOutputRequestGeneration: UInt64 = 0
     private var blackHoleVolumeListeners: [AudioPropertyListenerRegistration] = []
     private var blackHoleVolumeChangeTask: Task<Void, Never>?
     private var pendingBlackHoleVolumeChangeScopes: Set<AudioObjectPropertyScope> = []
@@ -1026,6 +1033,8 @@ public final class AudioRouter: ObservableObject {
     }
 
     func setAsDefaultOutputDevice(_ device: AudioDevice) {
+        defaultOutputRequestGeneration &+= 1
+        let requestGeneration = defaultOutputRequestGeneration
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -1052,7 +1061,12 @@ public final class AudioRouter: ObservableObject {
             dlog("Set default output to: \(device.name)", category: .routing)
 
             // Verify the change actually happened
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self,
+                      DefaultOutputVerificationPolicy.shouldVerify(
+                          requestGeneration: requestGeneration,
+                          currentGeneration: self.defaultOutputRequestGeneration
+                      ) else { return }
                 var checkAddress = AudioObjectPropertyAddress(
                     mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                     mScope: kAudioObjectPropertyScopeGlobal,

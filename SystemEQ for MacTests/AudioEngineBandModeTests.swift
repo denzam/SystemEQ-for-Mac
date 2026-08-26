@@ -453,6 +453,17 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(writtenState, fallback)
     }
 
+    func testNewDefaultOutputRequestInvalidatesPreviousVerification() {
+        XCTAssertFalse(DefaultOutputVerificationPolicy.shouldVerify(
+            requestGeneration: 1,
+            currentGeneration: 2
+        ))
+        XCTAssertTrue(DefaultOutputVerificationPolicy.shouldVerify(
+            requestGeneration: 2,
+            currentGeneration: 2
+        ))
+    }
+
     func testBlackHoleGainStagingUsesOneVolumeStage() throws {
         let physical = AudioDeviceID(1)
         let virtual = AudioDeviceID(2)
