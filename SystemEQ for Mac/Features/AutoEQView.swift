@@ -277,6 +277,8 @@ struct AutoEQView: View {
 
                 if !parsed.isEmpty {
                     mappedPreviewSection
+                } else {
+                    manualEQGraphSection
                 }
 
                 eqControlsSection
@@ -571,6 +573,26 @@ struct AutoEQView: View {
                 Spacer()
             }
         }
+    }
+
+    private var manualEQGraphSection: some View {
+        autoEQPanel {
+            EQGraphView(
+                bands: audioEngine.bands,
+                gainBinding: { id in manualBandGainBinding(id: id) }
+            )
+            .frame(height: 300)
+        }
+    }
+
+    private func manualBandGainBinding(id: Int) -> Binding<Float> {
+        Binding(
+            get: {
+                guard id < audioEngine.bands.count else { return 0 }
+                return audioEngine.bands[id].gain
+            },
+            set: { audioEngine.updateBandGain(bandId: id, gain: $0) }
+        )
     }
 
     private func sectionHeader(title: String, systemImage: String, help: String? = nil) -> some View {
