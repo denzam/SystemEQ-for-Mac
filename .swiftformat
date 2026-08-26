@@ -41,7 +41,7 @@
 --ranges spaced
 --semicolons inline
 --header ignore
---modifierorder nonisolated,override,private,fileprivate,internal,public,open,final,static,class,required,convenience,lazy,dynamic,mutating,nonmutating,weak,unowned
+--modifierorder nonisolated,override,public,open,private,fileprivate,internal,setteracl,final,static,class,required,convenience,lazy,dynamic,mutating,nonmutating,weak,unowned
 
 # Enabled rules (default + some extras)
 --enable isEmpty

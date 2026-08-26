@@ -32,7 +32,7 @@ public final class PeakMeter: ObservableObject {
 
     @Published public var inputPeakLevel: Float = 0.0
     @Published public var outputPeakLevel: Float = 0.0
-    @Published private(set) public var limiterGainReductionDB: Float = 0.0
+    @Published public private(set) var limiterGainReductionDB: Float = 0.0
 
     // MARK: - Real-Time Properties (Audio Thread)
 
