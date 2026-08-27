@@ -15,17 +15,17 @@ no telemetry.
 
 > 🇬🇧 English | 🇺🇦 [Українська](README.ua.md) | 🇮🇹 [Italiano](README.it.md)
 
-![SystemEQ for Mac — main window](Docs/screenshots/01-main.png)
+![SystemEQ for Mac — main window](Docs/screenshots/01-main.jpeg)
 
 ## 📸 Screenshots
 
-| Parametric EQ | AutoEQ Database | Calibration | Visualizer |
+| Main Menu | AutoEQ Database | Calibration | Visualizer |
 | :---: | :---: | :---: | :---: |
-| [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibration](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizer](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
+| [![Main menu](Docs/screenshots/01-main.jpeg)](Docs/screenshots/01-main.jpeg) | [![AutoEQ](Docs/screenshots/07-autoeq-library.png)](Docs/screenshots/07-autoeq-library.png) | [![Calibration](Docs/screenshots/02-calibration-mode.png)](Docs/screenshots/02-calibration-mode.png) | [![Visualizer](Docs/screenshots/15-visualizer-active.jpeg)](Docs/screenshots/15-visualizer-active.jpeg) |
 
 | Subjective Room Tuning | Resonance Finder | Device-Aware Presets |
 | :---: | :---: | :---: |
-| [![Room Tuning](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Resonance Finder](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Settings](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
+| [![Room Tuning](Docs/screenshots/04-room-tuning.png)](Docs/screenshots/04-room-tuning.png) | [![Resonance Finder](Docs/screenshots/05-resonance-sweep.png)](Docs/screenshots/05-resonance-sweep.png) | [![Settings](Docs/screenshots/10-settings-language.jpeg)](Docs/screenshots/10-settings-language.jpeg) |
 
 ## ✨ Features
 

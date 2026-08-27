@@ -14,17 +14,17 @@
 
 > 🇺🇦 Українська | 🇬🇧 [English](README.md) | 🇮🇹 [Italiano](README.it.md)
 
-![SystemEQ for Mac — головне вікно](Docs/screenshots/01-main.png)
+![SystemEQ for Mac — головне вікно](Docs/screenshots/01-main.jpeg)
 
 ## 📸 Скріншоти
 
-| Параметричний EQ | База AutoEQ | Калібрація | Візуалізатор |
+| Головне меню | База AutoEQ | Калібрація | Візуалізатор |
 | :---: | :---: | :---: | :---: |
-| [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Калібрація](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Візуалізатор](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
+| [![Головне меню](Docs/screenshots/01-main.jpeg)](Docs/screenshots/01-main.jpeg) | [![AutoEQ](Docs/screenshots/07-autoeq-library.png)](Docs/screenshots/07-autoeq-library.png) | [![Калібрація](Docs/screenshots/02-calibration-mode.png)](Docs/screenshots/02-calibration-mode.png) | [![Візуалізатор](Docs/screenshots/15-visualizer-active.jpeg)](Docs/screenshots/15-visualizer-active.jpeg) |
 
 | Суб’єктивне налаштування кімнати | Пошук резонансів | Пресети для кожного виводу |
 | :---: | :---: | :---: |
-| [![Налаштування кімнати](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Пошук резонансів](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Налаштування](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
+| [![Налаштування кімнати](Docs/screenshots/04-room-tuning.png)](Docs/screenshots/04-room-tuning.png) | [![Пошук резонансів](Docs/screenshots/05-resonance-sweep.png)](Docs/screenshots/05-resonance-sweep.png) | [![Налаштування](Docs/screenshots/10-settings-language.jpeg)](Docs/screenshots/10-settings-language.jpeg) |
 
 ## ✨ Можливості
 

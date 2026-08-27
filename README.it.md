@@ -14,17 +14,17 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 
 > 🇮🇹 Italiano | 🇬🇧 [English](README.md) | 🇺🇦 [Українська](README.ua.md)
 
-![SystemEQ for Mac — finestra principale](Docs/screenshots/01-main.png)
+![SystemEQ for Mac — finestra principale](Docs/screenshots/01-main.jpeg)
 
 ## 📸 Schermate
 
-| EQ parametrico | Database AutoEQ | Calibrazione | Visualizzatore |
+| Menu principale | Database AutoEQ | Calibrazione | Visualizzatore |
 | :---: | :---: | :---: | :---: |
-| [![EQ](Docs/screenshots/03-eq-31.png)](Docs/screenshots/03-eq-31.png) | [![AutoEQ](Docs/screenshots/07-autoeq.png)](Docs/screenshots/07-autoeq.png) | [![Calibrazione](Docs/screenshots/04-calibration.png)](Docs/screenshots/04-calibration.png) | [![Visualizzatore](Docs/screenshots/10-visualizer.png)](Docs/screenshots/10-visualizer.png) |
+| [![Menu principale](Docs/screenshots/01-main.jpeg)](Docs/screenshots/01-main.jpeg) | [![AutoEQ](Docs/screenshots/07-autoeq-library.png)](Docs/screenshots/07-autoeq-library.png) | [![Calibrazione](Docs/screenshots/02-calibration-mode.png)](Docs/screenshots/02-calibration-mode.png) | [![Visualizzatore](Docs/screenshots/15-visualizer-active.jpeg)](Docs/screenshots/15-visualizer-active.jpeg) |
 
 | Regolazione Soggettiva Stanza | Trova Risonanze | Preset per uscita |
 | :---: | :---: | :---: |
-| [![Regolazione ambiente](Docs/screenshots/05-room-tuning.png)](Docs/screenshots/05-room-tuning.png) | [![Ricerca risonanze](Docs/screenshots/06-resonance.png)](Docs/screenshots/06-resonance.png) | [![Impostazioni](Docs/screenshots/09-settings.jpeg)](Docs/screenshots/09-settings.jpeg) |
+| [![Regolazione ambiente](Docs/screenshots/04-room-tuning.png)](Docs/screenshots/04-room-tuning.png) | [![Ricerca risonanze](Docs/screenshots/05-resonance-sweep.png)](Docs/screenshots/05-resonance-sweep.png) | [![Impostazioni](Docs/screenshots/10-settings-language.jpeg)](Docs/screenshots/10-settings-language.jpeg) |
 
 ## ✨ Funzionalità
 
