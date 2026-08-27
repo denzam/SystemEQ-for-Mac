@@ -585,13 +585,15 @@
   .flow-diagram strong { color: var(--accent); }
   .flow-diagram .arrow { color: var(--text-mute); margin: 0 8px; }
 
-  /* === Gallery === */
-  .gallery {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-  }
-  .shot {
+  .gallery-carousel { background: linear-gradient(180deg, var(--bg-card) 0%, rgba(19,19,22,0.5) 100%); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(14px, 2vw, 24px); }
+  .gallery-tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+  .gallery-tab, .carousel-control { appearance: none; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--text-dim); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; min-height: 38px; padding: 8px 14px; transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease; white-space: nowrap; }
+  .gallery-tab:hover, .gallery-tab[aria-selected="true"], .carousel-control:hover:not(:disabled) { background: rgba(0,122,255,0.16); border-color: rgba(0,122,255,0.62); color: var(--text); }
+  .gallery-tab:focus-visible, .carousel-control:focus-visible, .carousel-slide:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .carousel-frame { align-items: center; display: grid; gap: 12px; grid-template-columns: auto minmax(0, 1fr) auto; margin-top: 12px; }
+  .carousel-control { align-items: center; display: inline-flex; font-size: 24px; justify-content: center; padding: 0; width: 42px; }
+  .carousel-control:disabled { cursor: default; opacity: 0.38; }
+  .carousel-slide {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -599,16 +601,16 @@
     cursor: pointer;
     transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease;
     position: relative;
+    width: 100%; padding: 0; color: inherit; text-align: left;
   }
-  .shot:hover, .shot:focus-visible {
+  .carousel-slide:hover, .carousel-slide:focus-visible {
     transform: translateY(-4px);
     border-color: var(--border-strong);
     box-shadow: 0 16px 40px rgba(0,0,0,0.5);
-    outline: 3px solid transparent;
   }
-  .shot:focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 16px 40px rgba(0,0,0,0.5); }
-  .shot img, .shot video {
-    aspect-ratio: 4/3;
+  .carousel-slide:focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 16px 40px rgba(0,0,0,0.5); }
+  .carousel-slide img, .carousel-slide video {
+    aspect-ratio: 16/10;
     object-fit: cover;
     object-position: top;
     background: #000;
@@ -641,6 +643,7 @@
     border-radius: 50%;
     animation: pulse 1.5s ease-in-out infinite;
   }
+  .carousel-status { color: var(--text-mute); font-size: 12px; margin: 14px 0 0; text-align: center; }
 
   /* === Lightbox === */
   .lightbox {
@@ -933,7 +936,9 @@
     .step-num { width: 28px; height: 28px; margin-bottom: 10px; }
     .flow-diagram { font-size: 11px; padding: 14px; margin-top: 18px; }
 
-    .gallery { gap: 10px; }
+    .gallery-carousel { padding: 12px; }
+    .carousel-frame { gap: 8px; grid-template-columns: 38px minmax(0, 1fr) 38px; }
+    .carousel-control { min-height: 38px; width: 38px; }
     .shot-label { padding: 10px 14px; font-size: 12px; }
 
     .install-grid { gap: 10px; }
@@ -1109,19 +1114,40 @@
   <div class="container">
     <div class="section-label reveal" data-i18n="gallery.label">Gallery</div>
     <h2 class="section-title reveal" data-i18n="gallery.title">See it in action.</h2>
-    <p class="section-sub reveal" data-i18n="gallery.sub">Tap any tile to enlarge. The visualizer plays with sound when expanded.</p>
-    <div class="gallery">
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Main menu" onclick="openLightbox('screenshots/01-main.png')"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.main">Main menu</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="10-band equalizer" onclick="openLightbox('screenshots/02-eq-10.png')"><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.eq10">10-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="31-band equalizer" onclick="openLightbox('screenshots/03-eq-31.png')"><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.eq31">31-band equalizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Equal loudness calibration" onclick="openLightbox('screenshots/04-calibration.png')"><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.calibration">Equal loudness calibration</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Subjective room tuning" onclick="openLightbox('screenshots/05-room-tuning.png')"><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.roomTuning">Subjective room tuning</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Resonance finder" onclick="openLightbox('screenshots/06-resonance.png')"><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.resonance">Resonance finder</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="AutoEQ preset library" onclick="openLightbox('screenshots/07-autoeq.png')"><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.autoeq">AutoEQ preset library</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Audio routing" onclick="openLightbox('screenshots/08-routing.png')"><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.routing">Audio routing</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Settings, device-aware presets and updates" onclick="openLightbox('screenshots/09-settings.jpeg')"><img src="screenshots/09-settings.jpeg" alt="Settings, device-aware presets and updates" loading="lazy" decoding="async" /><div class="shot-label" data-i18n-html="shot.settings">Settings, device-aware presets &amp; updates</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="MilkDrop visualizer menu" onclick="openLightbox('screenshots/10-visualizer.png')"><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><div class="shot-label" data-i18n="shot.visualizerMenu">MilkDrop visualizer</div></div>
-      <div class="shot reveal" tabindex="0" role="button" aria-label="Visualizer in action — tap for sound" onclick="openVideo('screenshots/10-visualizer.mov')"><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><div class="shot-label"><span data-i18n="shot.visualizerLive">Visualizer in action</span> <span class="live" data-i18n="shot.liveTag">LIVE · tap for sound</span></div></div>
+    <p class="section-sub reveal" data-i18n="gallery.sub">Choose a section, then browse its screenshots. Select an image to enlarge it.</p>
+    <div class="gallery-carousel reveal" data-gallery-carousel>
+      <div class="gallery-tabs" role="tablist" data-i18n-aria="gallery.tabsLabel" aria-label="Screenshot sections">
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-main" aria-controls="gallery-panel" aria-selected="true" tabindex="0" data-gallery-tab="main" data-i18n="gallery.tab.main">Overview</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-eq" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="eq" data-i18n="gallery.tab.eq">Equalizer</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-calibration" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="calibration" data-i18n="gallery.tab.calibration">Calibration</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-room" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="room" data-i18n="gallery.tab.room">Room Tuning</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-resonance" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="resonance" data-i18n="gallery.tab.resonance">Resonance Finder</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-autoeq" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="autoeq" data-i18n="gallery.tab.autoeq">AutoEQ</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-routing" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="routing" data-i18n="gallery.tab.routing">Routing</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-settings" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="settings" data-i18n="gallery.tab.settings">Settings</button>
+        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-visualizer" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="visualizer" data-i18n="gallery.tab.visualizer">Visualizer</button>
+      </div>
+      <div class="carousel-frame" id="gallery-panel" role="tabpanel" aria-labelledby="gallery-tab-main">
+        <button class="carousel-control" type="button" data-gallery-prev data-i18n-aria="gallery.previous" aria-label="Previous screenshot">‹</button>
+        <div>
+          <button class="carousel-slide" type="button" data-gallery-slide="main" data-gallery-image="screenshots/01-main.png"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.main">Main menu</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="eq" data-gallery-image="screenshots/02-eq-10.png" hidden><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.eq10">10-band equalizer</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="eq" data-gallery-image="screenshots/03-eq-31.png" hidden><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.eq31">31-band equalizer</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/04-calibration.png" hidden><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibration">Equal loudness calibration</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/04-calibration-reference.png" hidden><img src="screenshots/04-calibration-reference.png" alt="Calibration reference level" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibrationReference">Reference level</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="room" data-gallery-image="screenshots/05-room-tuning.png" hidden><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.roomTuning">Subjective room tuning</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="room" data-gallery-image="screenshots/05-room-tuning-manual.png" hidden><img src="screenshots/05-room-tuning-manual.png" alt="Manual room frequency test" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.roomTuningManual">Manual frequency test</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="resonance" data-gallery-image="screenshots/06-resonance.png" hidden><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.resonance">Resonance finder</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="autoeq" data-gallery-image="screenshots/07-autoeq.png" hidden><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.autoeq">AutoEQ preset library</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="routing" data-gallery-image="screenshots/08-routing.png" hidden><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.routing">Audio routing</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/09-settings.jpeg" hidden><img src="screenshots/09-settings.jpeg" alt="Settings, device-aware presets and updates" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settings">Settings, device-aware presets &amp; updates</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/09-settings-device-presets.jpeg" hidden><img src="screenshots/09-settings-device-presets.jpeg" alt="Device-aware presets and updates" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsDevicePresets">Device-aware presets and updates</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-image="screenshots/10-visualizer.png" hidden><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.visualizerMenu">MilkDrop visualizer</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-video="screenshots/10-visualizer.mov" hidden><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><span class="shot-label"><span data-i18n="shot.visualizerLive">Visualizer in action</span> <span class="live" data-i18n="shot.liveTag">LIVE · tap for sound</span></span></button>
+        </div>
+        <button class="carousel-control" type="button" data-gallery-next data-i18n-aria="gallery.next" aria-label="Next screenshot">›</button>
+      </div>
+      <p class="carousel-status" data-gallery-status aria-live="polite"></p>
     </div>
   </div>
 </section>
@@ -1299,16 +1325,32 @@
       "how.diagOutput": "Output device",
       "gallery.label": "Gallery",
       "gallery.title": "See it in action.",
-      "gallery.sub": "Tap any tile to enlarge. The visualizer plays with sound when expanded.",
+      "gallery.sub": "Choose a section, then browse its screenshots. Select an image to enlarge it.",
+      "gallery.tabsLabel": "Screenshot sections",
+      "gallery.tab.main": "Overview",
+      "gallery.tab.eq": "Equalizer",
+      "gallery.tab.calibration": "Calibration",
+      "gallery.tab.room": "Room Tuning",
+      "gallery.tab.resonance": "Resonance Finder",
+      "gallery.tab.autoeq": "AutoEQ",
+      "gallery.tab.routing": "Routing",
+      "gallery.tab.settings": "Settings",
+      "gallery.tab.visualizer": "Visualizer",
+      "gallery.previous": "Previous screenshot",
+      "gallery.next": "Next screenshot",
+      "gallery.position": "Screenshot {current} of {total}",
       "shot.main": "Main menu",
       "shot.eq10": "10-band equalizer",
       "shot.eq31": "31-band equalizer",
       "shot.calibration": "Equal loudness calibration",
+      "shot.calibrationReference": "Reference level",
       "shot.roomTuning": "Subjective room tuning",
+      "shot.roomTuningManual": "Manual frequency test",
       "shot.resonance": "Resonance finder",
       "shot.autoeq": "AutoEQ preset library",
       "shot.routing": "Audio routing",
       "shot.settings": "Settings, device-aware presets &amp; updates",
+      "shot.settingsDevicePresets": "Device-aware presets and updates",
       "shot.visualizerMenu": "MilkDrop visualizer",
       "shot.visualizerLive": "Visualizer in action",
       "shot.liveTag": "LIVE · tap for sound",
@@ -1428,16 +1470,32 @@
       "how.diagOutput": "Dispositivo di uscita",
       "gallery.label": "Galleria",
       "gallery.title": "Guardalo in azione.",
-      "gallery.sub": "Tocca una qualsiasi anteprima per ingrandirla. Il visualizzatore riproduce l'audio quando è espanso.",
+      "gallery.sub": "Scegli una sezione, quindi sfoglia i suoi screenshot. Seleziona un'immagine per ingrandirla.",
+      "gallery.tabsLabel": "Sezioni degli screenshot",
+      "gallery.tab.main": "Panoramica",
+      "gallery.tab.eq": "Equalizzatore",
+      "gallery.tab.calibration": "Calibrazione",
+      "gallery.tab.room": "Taratura stanza",
+      "gallery.tab.resonance": "Ricerca risonanze",
+      "gallery.tab.autoeq": "AutoEQ",
+      "gallery.tab.routing": "Instradamento",
+      "gallery.tab.settings": "Impostazioni",
+      "gallery.tab.visualizer": "Visualizzatore",
+      "gallery.previous": "Screenshot precedente",
+      "gallery.next": "Screenshot successivo",
+      "gallery.position": "Screenshot {current} di {total}",
       "shot.main": "Menu principale",
       "shot.eq10": "Equalizzatore a 10 bande",
       "shot.eq31": "Equalizzatore a 31 bande",
       "shot.calibration": "Calibrazione equal loudness",
+      "shot.calibrationReference": "Livello di riferimento",
       "shot.roomTuning": "Taratura soggettiva della stanza",
+      "shot.roomTuningManual": "Test manuale delle frequenze",
       "shot.resonance": "Ricerca risonanze",
       "shot.autoeq": "Libreria preset AutoEQ",
       "shot.routing": "Instradamento audio",
       "shot.settings": "Impostazioni, preset per uscita e aggiornamenti",
+      "shot.settingsDevicePresets": "Preset per uscita e aggiornamenti",
       "shot.visualizerMenu": "Visualizzatore MilkDrop",
       "shot.visualizerLive": "Visualizzatore in azione",
       "shot.liveTag": "LIVE · tocca per l'audio",
@@ -1557,16 +1615,32 @@
       "how.diagOutput": "Пристрій виводу",
       "gallery.label": "Галерея",
       "gallery.title": "Подивіться в дії.",
-      "gallery.sub": "Торкніться будь-якої плитки, щоб збільшити. Візуалізатор відтворюється зі звуком у розгорнутому вигляді.",
+      "gallery.sub": "Оберіть розділ і перегляньте його скріншоти. Натисніть зображення, щоб збільшити його.",
+      "gallery.tabsLabel": "Розділи скріншотів",
+      "gallery.tab.main": "Огляд",
+      "gallery.tab.eq": "Еквалайзер",
+      "gallery.tab.calibration": "Калібрування",
+      "gallery.tab.room": "Налаштування кімнати",
+      "gallery.tab.resonance": "Пошук резонансів",
+      "gallery.tab.autoeq": "AutoEQ",
+      "gallery.tab.routing": "Маршрутизація",
+      "gallery.tab.settings": "Налаштування",
+      "gallery.tab.visualizer": "Візуалізатор",
+      "gallery.previous": "Попередній скріншот",
+      "gallery.next": "Наступний скріншот",
+      "gallery.position": "Скріншот {current} з {total}",
       "shot.main": "Головне меню",
       "shot.eq10": "10-смуговий еквалайзер",
       "shot.eq31": "31-смуговий еквалайзер",
       "shot.calibration": "Калібрування рівної гучності",
+      "shot.calibrationReference": "Рівень відліку",
       "shot.roomTuning": "Суб'єктивне налаштування кімнати",
+      "shot.roomTuningManual": "Ручна перевірка частот",
       "shot.resonance": "Пошук резонансів",
       "shot.autoeq": "Бібліотека пресетів AutoEQ",
       "shot.routing": "Маршрутизація звуку",
       "shot.settings": "Налаштування, пресети для виводів та оновлення",
+      "shot.settingsDevicePresets": "Пресети для виводів та оновлення",
       "shot.visualizerMenu": "Візуалізатор MilkDrop",
       "shot.visualizerLive": "Візуалізатор у дії",
       "shot.liveTag": "НАЖИВО · торкніться для звуку",
@@ -1653,12 +1727,17 @@
       const v = dict[el.getAttribute("data-i18n-html")];
       if (v != null) el.innerHTML = v;
     });
+    document.querySelectorAll("[data-i18n-aria]").forEach(el => {
+      const v = dict[el.getAttribute("data-i18n-aria")];
+      if (v != null) el.setAttribute("aria-label", v);
+    });
     document.getElementById("langFlag").textContent = LANG_META[lang].flag;
     document.getElementById("langLabel").textContent = LANG_META[lang].label;
     document.querySelectorAll(".lang-menu button").forEach(b => {
       b.classList.toggle("active", b.dataset.lang === lang);
     });
     try { localStorage.setItem("seq-lang", lang); } catch (e) {}
+    document.dispatchEvent(new CustomEvent('seq-language-changed'));
   }
 
   (function initLang() {
@@ -1786,6 +1865,68 @@
       });
     });
   }
+
+  (function initGalleryCarousel() {
+    const root = document.querySelector('[data-gallery-carousel]');
+    if (!root) return;
+    const tabs = Array.from(root.querySelectorAll('[data-gallery-tab]'));
+    const slides = Array.from(root.querySelectorAll('[data-gallery-slide]'));
+    const panel = root.querySelector('#gallery-panel');
+    const prev = root.querySelector('[data-gallery-prev]');
+    const next = root.querySelector('[data-gallery-next]');
+    const status = root.querySelector('[data-gallery-status]');
+    let group = 'main';
+    let position = 0;
+
+    const slidesFor = () => slides.filter(slide => slide.dataset.gallerySlide === group);
+    const update = () => {
+      const groupSlides = slidesFor();
+      position = Math.max(0, Math.min(position, groupSlides.length - 1));
+      slides.forEach(slide => { slide.hidden = true; });
+      const activeSlide = groupSlides[position];
+      activeSlide.hidden = false;
+      tabs.forEach(tab => {
+        const active = tab.dataset.galleryTab === group;
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        tab.tabIndex = active ? 0 : -1;
+        if (active) panel.setAttribute('aria-labelledby', tab.id);
+      });
+      prev.disabled = position === 0;
+      next.disabled = position === groupSlides.length - 1;
+      const lang = document.documentElement.lang || 'en';
+      const template = (I18N[lang] && I18N[lang]['gallery.position']) || 'Screenshot {current} of {total}';
+      status.textContent = template.replace('{current}', position + 1).replace('{total}', groupSlides.length);
+    };
+
+    const selectGroup = (nextGroup, focus) => {
+      group = nextGroup;
+      position = 0;
+      update();
+      if (focus) tabs.find(tab => tab.dataset.galleryTab === group).focus();
+    };
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectGroup(tab.dataset.galleryTab, false));
+      tab.addEventListener('keydown', (event) => {
+        let targetIndex = index;
+        if (event.key === 'ArrowRight') targetIndex = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') targetIndex = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') targetIndex = 0;
+        else if (event.key === 'End') targetIndex = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        selectGroup(tabs[targetIndex].dataset.galleryTab, true);
+      });
+    });
+    prev.addEventListener('click', () => { position -= 1; update(); });
+    next.addEventListener('click', () => { position += 1; update(); });
+    slides.forEach(slide => slide.addEventListener('click', () => {
+      if (slide.dataset.galleryVideo) openVideo(slide.dataset.galleryVideo);
+      else openLightbox(slide.dataset.galleryImage);
+    }));
+    document.addEventListener('seq-language-changed', update);
+    update();
+  })();
 
   // Lightbox
   function openLightbox(src) {
