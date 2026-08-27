@@ -989,7 +989,7 @@
   "description": "Free, open-source system-wide parametric audio equalizer for macOS. AutoEQ presets, calibration tools, room tuning, MilkDrop visualizer. Powered by BlackHole.",
   "url": "https://denzam.github.io/SystemEQ-for-Mac/",
   "downloadUrl": "https://github.com/denzam/SystemEQ-for-Mac/releases/latest",
-  "softwareVersion": "1.2.0",
+  "softwareVersion": "1.4.0",
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
   "image": "https://denzam.github.io/SystemEQ-for-Mac/og-image.png",
   "author": {
@@ -1211,26 +1211,18 @@
     <div class="section-label reveal" data-i18n="changelog.label">Changelog</div>
     <h2 class="section-title reveal" data-i18n="changelog.title">Actively maintained.</h2>
     <p class="section-sub reveal" data-i18n="changelog.sub">Recent releases — see the full history on GitHub.</p>
-    <div class="changelog reveal">
+    <div class="changelog reveal" id="recentReleases">
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.4.0</h4><span class="cl-date">2026-08-26</span></div>
+        <p data-i18n="changelog.v140">Native system-audio capture, safer output switching, and unified EQ controls.</p>
+      </div>
+      <div class="cl-item">
+        <div class="cl-ver"><h4>v1.3.0</h4><span class="cl-date">2026-08-16</span></div>
+        <p data-i18n="changelog.v130">Audio reliability, safer output control, and privacy-safe diagnostics.</p>
+      </div>
       <div class="cl-item">
         <div class="cl-ver"><h4>v1.2.0</h4><span class="cl-date">2026-08-09</span></div>
         <p data-i18n="changelog.v120">Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.</p>
-      </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.0.7</h4><span class="cl-date">2026-05-30</span></div>
-        <p data-i18n="changelog.v107">AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.</p>
-      </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.0.6</h4><span class="cl-date">2026-05-16</span></div>
-        <p data-i18n="changelog.v106">Fixed a language-save race in LocalizationManager that could persist a stale value.</p>
-      </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.0.5</h4><span class="cl-date">2026-05-16</span></div>
-        <p data-i18n="changelog.v105">Resolved a main-thread hang when switching language after using the visualizer, plus an AutoEQ label rendering regression.</p>
-      </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.0.0</h4><span class="cl-date">2026-05-10</span></div>
-        <p data-i18n="changelog.v100">First public release — 10/31-band EQ, 8,850+ AutoEQ presets, calibration, BlackHole integration and the MilkDrop visualizer.</p>
       </div>
     </div>
     <a class="changelog-link reveal" href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/CHANGELOG.md" data-i18n="changelog.link">View full changelog →</a>
@@ -1416,6 +1408,8 @@
       "changelog.label": "Changelog",
       "changelog.title": "Actively maintained.",
       "changelog.sub": "Recent releases — see the full history on GitHub.",
+      "changelog.v140": "Native system-audio capture, safer output switching, and unified EQ controls.",
+      "changelog.v130": "Audio reliability, safer output control, and privacy-safe diagnostics.",
       "changelog.v120": "Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.",
       "changelog.v107": "AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.",
       "changelog.v106": "Fixed a language-save race in LocalizationManager that could persist a stale value.",
@@ -1567,6 +1561,8 @@
       "changelog.label": "Changelog",
       "changelog.title": "Mantenuto attivamente.",
       "changelog.sub": "Versioni recenti — la cronologia completa è su GitHub.",
+      "changelog.v140": "Cattura audio di sistema nativa, commutazione dell'uscita più sicura e controlli EQ unificati.",
+      "changelog.v130": "Audio più affidabile, controllo dell'uscita più sicuro e diagnostica rispettosa della privacy.",
       "changelog.v120": "Preset automatici per uscita, Nascondi icona dal Dock, avvio al login funzionante e ripristino di avvio/preset più affidabile.",
       "changelog.v107": "Importazione AutoEQ <code>.txt</code> (4 formati rilevati automaticamente) e correzioni di localizzazione live per la finestra AutoEQ.",
       "changelog.v106": "Corretta una race nel salvataggio della lingua in LocalizationManager che poteva persistere un valore obsoleto.",
@@ -1718,6 +1714,8 @@
       "changelog.label": "Список змін",
       "changelog.title": "Активно підтримується.",
       "changelog.sub": "Останні випуски — повну історію дивіться на GitHub.",
+      "changelog.v140": "Нативне захоплення системного звуку, безпечніше перемикання виводу та об'єднані контролери EQ.",
+      "changelog.v130": "Надійніший звук, безпечніший контроль виводу й приватна діагностика.",
       "changelog.v120": "Авто-пресети для кожного виводу, приховування іконки з Dock, робочий запуск при вході та надійніше відновлення стану й пресетів.",
       "changelog.v107": "Імпорт AutoEQ <code>.txt</code> (4 формати з автовизначенням) та виправлення живої локалізації вікна AutoEQ.",
       "changelog.v106": "Виправлено гонитву збереження мови в LocalizationManager, яка могла зберегти застаріле значення.",
@@ -2048,13 +2046,47 @@
     })
     .catch(() => {});
 
-  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases/latest')
+  const releaseSummary = body => {
+    const section = body.match(/^### What['’]s new\s*$([\s\S]*)/im)?.[1];
+    const whatsNew = section ? section.split(/^### |^---/m)[0] : body;
+    const highlights = [...whatsNew.matchAll(/^-\s+(.+)$/gm)]
+      .slice(0, 2)
+      .map(match => match[1]
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/[`*_]/g, ''));
+    return highlights.join(' · ') || 'Release notes available on GitHub.';
+  };
+
+  const renderRecentReleases = releases => {
+    const container = document.getElementById('recentReleases');
+    if (!container) return;
+    container.replaceChildren(...releases.map(release => {
+      const item = document.createElement('div');
+      item.className = 'cl-item';
+      const version = document.createElement('div');
+      version.className = 'cl-ver';
+      const tag = document.createElement('h4');
+      tag.textContent = release.tag_name;
+      const date = document.createElement('span');
+      date.className = 'cl-date';
+      date.textContent = release.published_at.slice(0, 10);
+      const summary = document.createElement('p');
+      summary.textContent = releaseSummary(release.body || '');
+      version.append(tag, date);
+      item.append(version, summary);
+      return item;
+    }));
+  };
+
+  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases?per_page=3')
     .then(r => r.ok ? r.json() : Promise.reject())
-    .then(d => {
-      if (d.tag_name) {
-        document.getElementById('heroVersionTag').textContent = d.tag_name;
+    .then(releases => {
+      const latest = releases[0];
+      if (latest?.tag_name) {
+        document.getElementById('heroVersionTag').textContent = latest.tag_name;
         document.getElementById('heroVersion').hidden = false;
       }
+      renderRecentReleases(releases);
     })
     .catch(() => {});
 </script>
