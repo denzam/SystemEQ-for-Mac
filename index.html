@@ -610,9 +610,8 @@
   }
   .carousel-slide:focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 16px 40px rgba(0,0,0,0.5); }
   .carousel-slide img, .carousel-slide video {
-    aspect-ratio: 16/10;
-    object-fit: cover;
-    object-position: top;
+    max-height: min(70vh, 720px);
+    object-fit: contain;
     background: #000;
     width: 100%;
     display: block;
@@ -1067,7 +1066,7 @@
     </div>
     <div class="hero-preview reveal reveal-delay-3">
       <div class="parallax" data-speed="0.08">
-        <img src="screenshots/01-main.png" alt="SystemEQ for Mac main menu" width="900" height="1400" fetchpriority="high" decoding="async" />
+        <img src="screenshots/01-main.jpeg" alt="SystemEQ for Mac main menu" width="838" height="1380" fetchpriority="high" decoding="async" />
       </div>
     </div>
   </div>
@@ -1118,7 +1117,6 @@
     <div class="gallery-carousel reveal" data-gallery-carousel>
       <div class="gallery-tabs" role="tablist" data-i18n-aria="gallery.tabsLabel" aria-label="Screenshot sections">
         <button class="gallery-tab" type="button" role="tab" id="gallery-tab-main" aria-controls="gallery-panel" aria-selected="true" tabindex="0" data-gallery-tab="main" data-i18n="gallery.tab.main">Overview</button>
-        <button class="gallery-tab" type="button" role="tab" id="gallery-tab-eq" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="eq" data-i18n="gallery.tab.eq">Equalizer</button>
         <button class="gallery-tab" type="button" role="tab" id="gallery-tab-calibration" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="calibration" data-i18n="gallery.tab.calibration">Calibration</button>
         <button class="gallery-tab" type="button" role="tab" id="gallery-tab-room" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="room" data-i18n="gallery.tab.room">Room Tuning</button>
         <button class="gallery-tab" type="button" role="tab" id="gallery-tab-resonance" aria-controls="gallery-panel" aria-selected="false" tabindex="-1" data-gallery-tab="resonance" data-i18n="gallery.tab.resonance">Resonance Finder</button>
@@ -1130,20 +1128,21 @@
       <div class="carousel-frame" id="gallery-panel" role="tabpanel" aria-labelledby="gallery-tab-main">
         <button class="carousel-control" type="button" data-gallery-prev data-i18n-aria="gallery.previous" aria-label="Previous screenshot">‹</button>
         <div>
-          <button class="carousel-slide" type="button" data-gallery-slide="main" data-gallery-image="screenshots/01-main.png"><img src="screenshots/01-main.png" alt="Main menu" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.main">Main menu</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="eq" data-gallery-image="screenshots/02-eq-10.png" hidden><img src="screenshots/02-eq-10.png" alt="10-band equalizer" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.eq10">10-band equalizer</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="eq" data-gallery-image="screenshots/03-eq-31.png" hidden><img src="screenshots/03-eq-31.png" alt="31-band equalizer" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.eq31">31-band equalizer</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/04-calibration.png" hidden><img src="screenshots/04-calibration.png" alt="Equal loudness calibration" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibration">Equal loudness calibration</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/04-calibration-reference.png" hidden><img src="screenshots/04-calibration-reference.png" alt="Calibration reference level" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibrationReference">Reference level</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="room" data-gallery-image="screenshots/05-room-tuning.png" hidden><img src="screenshots/05-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.roomTuning">Subjective room tuning</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="room" data-gallery-image="screenshots/05-room-tuning-manual.png" hidden><img src="screenshots/05-room-tuning-manual.png" alt="Manual room frequency test" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.roomTuningManual">Manual frequency test</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="resonance" data-gallery-image="screenshots/06-resonance.png" hidden><img src="screenshots/06-resonance.png" alt="Resonance finder" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.resonance">Resonance finder</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="autoeq" data-gallery-image="screenshots/07-autoeq.png" hidden><img src="screenshots/07-autoeq.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.autoeq">AutoEQ preset library</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="routing" data-gallery-image="screenshots/08-routing.png" hidden><img src="screenshots/08-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.routing">Audio routing</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/09-settings.jpeg" hidden><img src="screenshots/09-settings.jpeg" alt="Settings, device-aware presets and updates" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settings">Settings, device-aware presets &amp; updates</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/09-settings-device-presets.jpeg" hidden><img src="screenshots/09-settings-device-presets.jpeg" alt="Device-aware presets and updates" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsDevicePresets">Device-aware presets and updates</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-image="screenshots/10-visualizer.png" hidden><img src="screenshots/10-visualizer.png" alt="MilkDrop visualizer menu" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.visualizerMenu">MilkDrop visualizer</span></button>
-          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-video="screenshots/10-visualizer.mov" hidden><video src="screenshots/10-visualizer.mov" autoplay loop muted playsinline preload="metadata" poster="screenshots/10-visualizer.png"></video><span class="shot-label"><span data-i18n="shot.visualizerLive">Visualizer in action</span> <span class="live" data-i18n="shot.liveTag">LIVE · tap for sound</span></span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="main" data-gallery-image="screenshots/01-main.jpeg"><img src="screenshots/01-main.jpeg" alt="Main menu" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.main">Main menu</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/02-calibration-mode.png" hidden><img src="screenshots/02-calibration-mode.png" alt="Calibration mode" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibration">Equal loudness calibration</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="calibration" data-gallery-image="screenshots/03-calibration-reference.png" hidden><img src="screenshots/03-calibration-reference.png" alt="Calibration reference level" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.calibrationReference">Reference level</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="room" data-gallery-image="screenshots/04-room-tuning.png" hidden><img src="screenshots/04-room-tuning.png" alt="Subjective room tuning" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.roomTuning">Subjective room tuning</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="resonance" data-gallery-image="screenshots/05-resonance-sweep.png" hidden><img src="screenshots/05-resonance-sweep.png" alt="Resonance sweep" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.resonance">Resonance finder</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="resonance" data-gallery-image="screenshots/06-resonance-manual.png" hidden><img src="screenshots/06-resonance-manual.png" alt="Manual resonance test" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.resonanceManual">Manual frequency test</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="autoeq" data-gallery-image="screenshots/07-autoeq-library.png" hidden><img src="screenshots/07-autoeq-library.png" alt="AutoEQ preset library" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.autoeq">AutoEQ preset library</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="autoeq" data-gallery-image="screenshots/08-autoeq-eq.png" hidden><img src="screenshots/08-autoeq-eq.png" alt="AutoEQ equalizer settings" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.autoeqSettings">EQ settings</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="routing" data-gallery-image="screenshots/09-routing.png" hidden><img src="screenshots/09-routing.png" alt="Audio routing" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.routing">Audio routing</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/10-settings-language.jpeg" hidden><img src="screenshots/10-settings-language.jpeg" alt="Language and appearance settings" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsLanguage">Language &amp; appearance</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/11-settings-startup.jpeg" hidden><img src="screenshots/11-settings-startup.jpeg" alt="Startup settings" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsStartup">Startup &amp; audio engine</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/12-settings-general.jpeg" hidden><img src="screenshots/12-settings-general.jpeg" alt="General settings" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsGeneral">General &amp; updates</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="settings" data-gallery-image="screenshots/13-settings-diagnostics.jpeg" hidden><img src="screenshots/13-settings-diagnostics.jpeg" alt="Diagnostics settings" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.settingsDiagnostics">Diagnostics</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-image="screenshots/14-visualizer-launch.png" hidden><img src="screenshots/14-visualizer-launch.png" alt="Visualizer launch screen" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.visualizerMenu">MilkDrop visualizer</span></button>
+          <button class="carousel-slide" type="button" data-gallery-slide="visualizer" data-gallery-image="screenshots/15-visualizer-active.jpeg" hidden><img src="screenshots/15-visualizer-active.jpeg" alt="Visualizer in action" loading="lazy" decoding="async" /><span class="shot-label" data-i18n="shot.visualizerLive">Visualizer in action</span></button>
         </div>
         <button class="carousel-control" type="button" data-gallery-next data-i18n-aria="gallery.next" aria-label="Next screenshot">›</button>
       </div>
@@ -1347,10 +1346,16 @@
       "shot.roomTuning": "Subjective room tuning",
       "shot.roomTuningManual": "Manual frequency test",
       "shot.resonance": "Resonance finder",
+      "shot.resonanceManual": "Manual frequency test",
       "shot.autoeq": "AutoEQ preset library",
+      "shot.autoeqSettings": "EQ settings",
       "shot.routing": "Audio routing",
       "shot.settings": "Settings, device-aware presets &amp; updates",
       "shot.settingsDevicePresets": "Device-aware presets and updates",
+      "shot.settingsLanguage": "Language & appearance",
+      "shot.settingsStartup": "Startup & audio engine",
+      "shot.settingsGeneral": "General & updates",
+      "shot.settingsDiagnostics": "Diagnostics",
       "shot.visualizerMenu": "MilkDrop visualizer",
       "shot.visualizerLive": "Visualizer in action",
       "shot.liveTag": "LIVE · tap for sound",
@@ -1492,10 +1497,16 @@
       "shot.roomTuning": "Taratura soggettiva della stanza",
       "shot.roomTuningManual": "Test manuale delle frequenze",
       "shot.resonance": "Ricerca risonanze",
+      "shot.resonanceManual": "Test manuale delle frequenze",
       "shot.autoeq": "Libreria preset AutoEQ",
+      "shot.autoeqSettings": "Impostazioni EQ",
       "shot.routing": "Instradamento audio",
       "shot.settings": "Impostazioni, preset per uscita e aggiornamenti",
       "shot.settingsDevicePresets": "Preset per uscita e aggiornamenti",
+      "shot.settingsLanguage": "Lingua e aspetto",
+      "shot.settingsStartup": "Avvio e motore audio",
+      "shot.settingsGeneral": "Generali e aggiornamenti",
+      "shot.settingsDiagnostics": "Diagnostica",
       "shot.visualizerMenu": "Visualizzatore MilkDrop",
       "shot.visualizerLive": "Visualizzatore in azione",
       "shot.liveTag": "LIVE · tocca per l'audio",
@@ -1637,10 +1648,16 @@
       "shot.roomTuning": "Суб'єктивне налаштування кімнати",
       "shot.roomTuningManual": "Ручна перевірка частот",
       "shot.resonance": "Пошук резонансів",
+      "shot.resonanceManual": "Ручна перевірка частот",
       "shot.autoeq": "Бібліотека пресетів AutoEQ",
+      "shot.autoeqSettings": "Налаштування EQ",
       "shot.routing": "Маршрутизація звуку",
       "shot.settings": "Налаштування, пресети для виводів та оновлення",
       "shot.settingsDevicePresets": "Пресети для виводів та оновлення",
+      "shot.settingsLanguage": "Мова й вигляд",
+      "shot.settingsStartup": "Запуск і аудіодвигун",
+      "shot.settingsGeneral": "Загальні та оновлення",
+      "shot.settingsDiagnostics": "Діагностика",
       "shot.visualizerMenu": "Візуалізатор MilkDrop",
       "shot.visualizerLive": "Візуалізатор у дії",
       "shot.liveTag": "НАЖИВО · торкніться для звуку",
