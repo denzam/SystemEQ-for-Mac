@@ -4,6 +4,16 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-08-28
+
+Small UI polish and documentation aligned with the native audio route.
+
+### Fixed
+- Main window height now follows its content, removing unused space below the feature list
+
+### Changed
+- Installation and setup guidance now describes Automatic native routing on macOS 14.4+ and BlackHole as its fallback
+
 ## [1.4.0] — 2026-08-26
 
 Native system-audio capture, unified EQ controls, and safer output switching.
@@ -215,6 +225,7 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.4.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.1
 [1.4.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.0
 [1.3.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.3.0
 [1.2.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.2.0
