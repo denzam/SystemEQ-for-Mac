@@ -37,7 +37,7 @@ no telemetry.
 - **Calibration Module** — Hearing test + custom profiles + A/B comparison
 - **Subjective Room Tuning** — Tune your room response by ear
 - **Resonance Finder** — Sine sweep to identify boomy or ringing frequencies
-- **BlackHole Integration** — System-wide audio routing with automated Setup Assistant
+- **Native System Audio Capture** — Process Tap on macOS 14.4+; BlackHole remains an automatic fallback
 - **Preset Management** — Save, load, and organize your EQ settings
 - **Auto-Switch Preset per Output** — Optionally re-apply the saved preset when you change physical output devices
 - **Launch at Login** — Optional macOS login item
@@ -64,7 +64,7 @@ no telemetry.
 
 - macOS 13.0 (Ventura) or later
 - Apple Silicon or Intel Mac
-- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (free virtual audio driver)
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (optional fallback for macOS 13–14.3 or manual BlackHole mode)
 - 4GB RAM (8GB recommended)
 
 ### Installation
@@ -97,7 +97,7 @@ The app remains ad-hoc signed and is not notarized.
      ```bash
      xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
      ```
-4. Follow the **Setup Assistant** to install BlackHole
+4. On macOS 14.4+, leave Audio Backend set to **Automatic**. Install BlackHole only if SystemEQ offers the fallback or you select BlackHole mode yourself.
 
 > The app is **ad-hoc signed** (free, self-signed) — not notarized with an
 > Apple Developer ID. Gatekeeper therefore shows a warning on first launch.
@@ -115,16 +115,16 @@ open "SystemEQ for Mac.xcodeproj"
 
 ### Setup Guide
 
-1. **Install BlackHole** (automated via Setup Assistant):
-   - Download from [BlackHole website](https://existential.audio/blackhole/)
-   - Install 2-channel version
-   - Restart SystemEQ after installation
+1. **Use Automatic routing** (recommended on macOS 14.4+):
+   - Open SystemEQ → Settings → Audio Backend
+   - Leave it set to **Automatic**
+   - Select your speakers or headphones in Routing, then click **Enable EQ**
+   - SystemEQ captures audio natively; do not change the macOS system output
 
-2. **Configure Audio Routing**:
-   - Open SystemEQ → Routing tab
-   - Select BlackHole as input, your speakers/headphones as output
-   - Set System Output to BlackHole in macOS Sound Settings
-   - Click **Enable EQ** and keep SystemEQ running
+2. **Use BlackHole only when needed** (macOS 13–14.3, fallback, or manual selection):
+   - Install [BlackHole 2ch](https://existential.audio/blackhole/) and restart SystemEQ
+   - In Routing, select BlackHole as input and your speakers/headphones as output
+   - Set **BlackHole 2ch** as the macOS System Output, then click **Enable EQ**
 
 3. **Apply EQ Preset**:
    - AutoEQ tab → Search your headphone model
@@ -134,18 +134,12 @@ open "SystemEQ for Mac.xcodeproj"
 ## 🛠️ Architecture
 
 ```text
-System Output → BlackHole 2ch
-                     ↓
-              CoreAudioEngine (input)
-                     ↓
-           vDSP Biquad EQ Processing
-                     ↓
-              CoreAudioEngine (output)
-                     ↓
-         Physical Speakers/Headphones
+macOS 14.4+: System Audio → Process Tap → vDSP Biquad EQ → Physical Output
+
+Fallback:     System Audio → BlackHole 2ch → vDSP Biquad EQ → Physical Output
 ```
 
-**No Multi-Output Device needed.** CoreAudioEngine bridges BlackHole and your physical output directly.
+**No Multi-Output Device is needed.** Automatic routing uses the native macOS engine when available; BlackHole is retained for compatibility and fallback.
 
 ### Technical Details
 
@@ -282,6 +276,8 @@ xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
 Installing through Homebrew avoids this — the Cask clears the flag for you.
 
 ### No sound after setup
+
+On macOS 14.4+, first choose **Automatic** in Settings → Audio Backend and enable EQ again. The system output should stay on your physical device. If Automatic falls back or cannot start, install BlackHole and follow the BlackHole setup below.
 
 In **Routing**, select BlackHole as input and your speakers or headphones as
 output. Set **BlackHole 2ch** as the macOS System Output, click **Enable EQ**,

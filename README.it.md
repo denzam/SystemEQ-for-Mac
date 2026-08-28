@@ -36,7 +36,7 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 - **Modulo di calibrazione** — Test dell'udito + profili personalizzati + confronto A/B
 - **Regolazione Soggettiva Stanza** — Regola la risposta della stanza a orecchio
 - **Trova Risonanze** — Sweep sinusoidale per trovare frequenze rimbombanti o squillanti
-- **Integrazione BlackHole** — Routing audio di sistema con Setup Assistant automatico
+- **Cattura audio di sistema nativa** — Process Tap su macOS 14.4+; BlackHole resta il fallback automatico
 - **Gestione preset** — Salva, carica e organizza le impostazioni EQ
 - **Cambio preset automatico per uscita** — Facoltativamente riapplica il preset salvato quando cambi uscita fisica
 - **Avvia al login** — Login Item opzionale di macOS
@@ -63,7 +63,7 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 
 - macOS 13.0 (Ventura) o successivo
 - Apple Silicon o Mac Intel
-- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (driver audio virtuale gratuito)
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (fallback opzionale per macOS 13–14.3 o per la modalità BlackHole manuale)
 - 4 GB RAM (8 GB consigliati)
 
 ### Installazione
@@ -96,7 +96,7 @@ L'app resta firmata ad-hoc e non è notarizzata.
      ```bash
      xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
      ```
-4. Segui il **Setup Assistant** per installare BlackHole
+4. Su macOS 14.4+, lascia **Audio Backend** su **Automatico**. Installa BlackHole solo se SystemEQ propone il fallback o se selezioni manualmente la modalità BlackHole.
 
 > L'app è **firmata ad-hoc** (gratis, autofirmata) — non notarizzata con un
 > Apple Developer ID. Per questo Gatekeeper mostra un avviso al primo avvio.
@@ -115,16 +115,16 @@ open "SystemEQ for Mac.xcodeproj"
 
 ### Guida alla configurazione
 
-1. **Installa BlackHole** (automatico tramite Setup Assistant):
-   - Scarica dal [sito BlackHole](https://existential.audio/blackhole/)
-   - Installa la versione a 2 canali
-   - Riavvia SystemEQ dopo l'installazione
+1. **Usa il routing automatico** (consigliato su macOS 14.4+):
+   - Apri SystemEQ → Settings → Audio Backend
+   - Lascialo su **Automatico**
+   - Seleziona cuffie o altoparlanti in Routing, quindi fai clic su **Abilita EQ**
+   - SystemEQ cattura l'audio in modo nativo; non modificare l'uscita di sistema macOS
 
-2. **Configura il routing audio**:
-   - Apri SystemEQ → scheda Routing
-   - Seleziona BlackHole come ingresso, le tue cuffie/altoparlanti come uscita
-   - Imposta l'uscita di sistema su BlackHole nelle Impostazioni audio di macOS
-   - Fai clic su **Abilita EQ** e mantieni SystemEQ in esecuzione
+2. **Usa BlackHole solo quando serve** (macOS 13–14.3, fallback o selezione manuale):
+   - Installa [BlackHole 2ch](https://existential.audio/blackhole/) e riavvia SystemEQ
+   - In Routing, seleziona BlackHole come ingresso e cuffie/altoparlanti come uscita
+   - Imposta **BlackHole 2ch** come uscita di sistema macOS, quindi fai clic su **Abilita EQ**
 
 3. **Applica un preset EQ**:
    - Scheda AutoEQ → cerca il modello delle tue cuffie
@@ -134,18 +134,12 @@ open "SystemEQ for Mac.xcodeproj"
 ## 🛠️ Architettura
 
 ```text
-Uscita di sistema → BlackHole 2ch
-                         ↓
-                 CoreAudioEngine (input)
-                         ↓
-              Elaborazione EQ Biquad vDSP
-                         ↓
-                 CoreAudioEngine (output)
-                         ↓
-             Cuffie/Altoparlanti fisici
+macOS 14.4+: Audio di sistema → Process Tap → EQ Biquad vDSP → Uscita fisica
+
+Fallback:     Audio di sistema → BlackHole 2ch → EQ Biquad vDSP → Uscita fisica
 ```
 
-**Nessun Multi-Output Device necessario.** CoreAudioEngine fa da ponte tra BlackHole e l'uscita fisica.
+**Nessun Multi-Output Device necessario.** La modalità automatica usa il motore nativo di macOS quando disponibile; BlackHole resta per compatibilità e fallback.
 
 ### Dettagli tecnici
 
@@ -283,6 +277,8 @@ xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
 Installando tramite Homebrew questo passaggio non serve: il Cask rimuove il flag.
 
 ### Nessun suono dopo la configurazione
+
+Su macOS 14.4+, seleziona prima **Automatico** in Settings → Audio Backend e riabilita l'EQ. L'uscita di sistema deve restare sul dispositivo fisico. Se Automatico passa al fallback o non si avvia, installa BlackHole e segui le istruzioni sottostanti.
 
 In **Routing**, seleziona BlackHole come ingresso e cuffie o altoparlanti come
 uscita. Imposta **BlackHole 2ch** come uscita di sistema macOS, fai clic su
