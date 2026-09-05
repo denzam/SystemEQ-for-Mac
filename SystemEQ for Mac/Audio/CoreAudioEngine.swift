@@ -20,7 +20,11 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - Published Properties
 
     @Published public var isRunning: Bool = false
-    @Published public var isEnabled: Bool = true
+    @Published public var isEnabled: Bool = true {
+        didSet {
+            seq_atomic_int32_store_release(isEnabledAtomic, isEnabled ? 1 : 0)
+        }
+    }
 
     /// Peak meter (extracted for modularity)
     let peakMeter = PeakMeter()
@@ -47,6 +51,11 @@ public final class CoreAudioEngine: ObservableObject {
 
     private var originalDeviceSampleRates: [String: Double] = [:]
     private let originalDeviceSampleRatesKey = "originalDeviceSampleRates"
+    private let isEnabledAtomic: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(pointer, 1)
+        return pointer
+    }()
 
     /// Public read-only accessors for device IDs (used by AudioRouter to skip redundant restarts)
     public var currentInputDeviceID: AudioDeviceID {
@@ -225,9 +234,20 @@ public final class CoreAudioEngine: ObservableObject {
         1024 // ⚡ Update visualizer every ~21ms (48kHz) - halved frequency to reduce CPU
 
     // Test tone
-    fileprivate var testToneEnabled: Bool = false
-    fileprivate var testTonePhase: Float = 0.0
-    fileprivate var testToneFrequency: Float = 440.0
+    fileprivate let testToneEnabledAtomic: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(pointer, 0)
+        return pointer
+    }()
+    fileprivate let testToneCommandAtomic: UnsafeMutablePointer<SEQAtomicInt64> = {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
+        seq_atomic_int64_init(pointer, Int64(Float(440).bitPattern))
+        return pointer
+    }()
+    fileprivate var blackHoleTestTonePhase: Float = 0
+    fileprivate var blackHoleTestToneResetGeneration: UInt32 = 0
+    private var processTapTestTonePhase: Float = 0
+    private var processTapTestToneResetGeneration: UInt32 = 0
     fileprivate var didLogInputInfo: Bool = false
     fileprivate var didLogToneWrite: Bool = false
     fileprivate var diagEvery: UInt64 = 480_000 // ⚡ OPTIMIZED: Log every ~10 seconds (48x less CPU overhead)
@@ -454,6 +474,9 @@ public final class CoreAudioEngine: ObservableObject {
         _vdspFilterReaders.deallocate()
         _visualizerCallbackAtomic.deallocate()
         _visualizerCallbackReaders.deallocate()
+        isEnabledAtomic.deallocate()
+        testToneEnabledAtomic.deallocate()
+        testToneCommandAtomic.deallocate()
     }
 
     // MARK: - Setup
@@ -1225,8 +1248,8 @@ public final class CoreAudioEngine: ObservableObject {
     public func stop() {
         let wasRunning = isRunning
         // Stop test tone if running
-        if testToneEnabled {
-            testToneEnabled = false
+        if seq_atomic_int32_load(testToneEnabledAtomic) != 0 {
+            seq_atomic_int32_store_release(testToneEnabledAtomic, 0)
             dlog("🔕 Test tone auto-stopped (engine stopping)", category: .engine)
         }
 
@@ -1479,14 +1502,16 @@ public final class CoreAudioEngine: ObservableObject {
             return
         }
 
-        testToneFrequency = freq
-        testTonePhase = 0.0
-        testToneEnabled = true
+        let previousCommand = UInt64(bitPattern: seq_atomic_int64_load_relaxed(testToneCommandAtomic))
+        let resetGeneration = UInt32(truncatingIfNeeded: previousCommand >> 32) &+ 1
+        let command = UInt64(resetGeneration) << 32 | UInt64(freq.bitPattern)
+        seq_atomic_int64_store_release(testToneCommandAtomic, Int64(bitPattern: command))
+        seq_atomic_int32_store_release(testToneEnabledAtomic, 1)
         dlog("🔔 Test tone enabled: \(freq) Hz", category: .engine)
     }
 
     public func stopTestTone() {
-        testToneEnabled = false
+        seq_atomic_int32_store_release(testToneEnabledAtomic, 0)
         dlog("🔕 Test tone disabled", category: .engine)
     }
 
@@ -1555,17 +1580,24 @@ public final class CoreAudioEngine: ObservableObject {
         right: UnsafeMutablePointer<Float>,
         frameCount: Int
     ) {
-        guard testToneEnabled else { return }
+        guard seq_atomic_int32_load(testToneEnabledAtomic) != 0 else { return }
+        let command = UInt64(bitPattern: seq_atomic_int64_load_acquire(testToneCommandAtomic))
+        let resetGeneration = UInt32(truncatingIfNeeded: command >> 32)
+        if processTapTestToneResetGeneration != resetGeneration {
+            processTapTestTonePhase = 0
+            processTapTestToneResetGeneration = resetGeneration
+        }
+        let frequency = Float(bitPattern: UInt32(truncatingIfNeeded: command))
         let twoPi = Float.pi * 2
-        let increment = twoPi * testToneFrequency / Float(currentSampleRate)
-        var phase = testTonePhase
+        let increment = twoPi * frequency / Float(currentSampleRate)
+        var phase = processTapTestTonePhase
         for index in 0..<frameCount {
             left[index] = sinf(phase) * 0.2
             phase += increment
             if phase > twoPi { phase -= twoPi }
         }
         memcpy(right, left, frameCount * MemoryLayout<Float>.size)
-        testTonePhase = phase
+        processTapTestTonePhase = phase
     }
 
     @inline(__always)
@@ -1584,7 +1616,7 @@ public final class CoreAudioEngine: ObservableObject {
             )
         }
 
-        if isEnabled {
+        if seq_atomic_int32_load(isEnabledAtomic) != 0 {
             beginVDSPFilterRead()
             if let vdsp = currentVDSPFilter() {
                 peakMeter.recordLimiterGain(vdsp.processStereo(left, right, frameCount: frameCount))
@@ -1736,11 +1768,17 @@ private func inputCaptureCallbackFunction(
     }
 
     // If test tone enabled, synthesize into inABL and bypass AudioUnitRender
-    if engine.testToneEnabled {
+    if seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0 {
         let sr = Float(engine.currentSampleRate)
         let twoPi = Float.pi * 2.0
-        let freq = engine.testToneFrequency
-        var phase = engine.testTonePhase
+        let command = UInt64(bitPattern: seq_atomic_int64_load_acquire(engine.testToneCommandAtomic))
+        let resetGeneration = UInt32(truncatingIfNeeded: command >> 32)
+        if engine.blackHoleTestToneResetGeneration != resetGeneration {
+            engine.blackHoleTestTonePhase = 0
+            engine.blackHoleTestToneResetGeneration = resetGeneration
+        }
+        let freq = Float(bitPattern: UInt32(truncatingIfNeeded: command))
+        var phase = engine.blackHoleTestTonePhase
         let inc = twoPi * freq / sr
         if let lPtr = inABL[0].mData?.assumingMemoryBound(to: Float.self) {
             for i in 0..<frames {
@@ -1750,7 +1788,7 @@ private func inputCaptureCallbackFunction(
                 memcpy(rPtr, lPtr, frames * MemoryLayout<Float>.size)
             }
         }
-        engine.testTonePhase = phase
+        engine.blackHoleTestTonePhase = phase
     } else {
         // Pull from virtual audio input into inABL
         var ts = tsIn // safe to pass input timeline timestamp

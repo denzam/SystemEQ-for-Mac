@@ -30,6 +30,9 @@ static inline void seq_atomic_int32_init(SEQAtomicInt32 *a, int32_t v) {
 static inline int32_t seq_atomic_int32_load(const SEQAtomicInt32 *a) {
     return atomic_load_explicit(&a->value, memory_order_acquire);
 }
+static inline void seq_atomic_int32_store_release(SEQAtomicInt32 *a, int32_t v) {
+    atomic_store_explicit(&a->value, v, memory_order_release);
+}
 static inline int32_t seq_atomic_int32_fetch_add(SEQAtomicInt32 *a, int32_t delta) {
     return atomic_fetch_add_explicit(&a->value, delta, memory_order_acq_rel);
 }

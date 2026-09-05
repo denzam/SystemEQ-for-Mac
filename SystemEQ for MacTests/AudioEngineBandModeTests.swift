@@ -101,6 +101,56 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(right[0], Float(0.25 * pow(10.0, 6.0 / 20.0)), accuracy: 0.0001)
     }
 
+    func testCoreAudioRenderBypassFollowsEnabledState() {
+        let audioEngine = AudioEngine.shared
+        let coreEngine = CoreAudioEngine.shared
+        audioEngine.bandMode = .tenBand
+        audioEngine.syncBandsToMode()
+        audioEngine.resetAllBands()
+        audioEngine.setOutputBoostGain(0)
+        audioEngine.setPreampGain(6)
+        defer {
+            coreEngine.setEnabled(false)
+            audioEngine.setPreampGain(0)
+        }
+
+        var left = [Float](repeating: 0.25, count: 64)
+        var right = [Float](repeating: 0.25, count: 64)
+
+        coreEngine.setEnabled(false)
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return XCTFail("Missing test buffers") }
+                coreEngine.processStereoInPlace(
+                    left: leftAddress,
+                    right: rightAddress,
+                    frameCount: leftBuffer.count
+                )
+            }
+        }
+        XCTAssertEqual(left, [Float](repeating: 0.25, count: 64))
+        XCTAssertEqual(right, [Float](repeating: 0.25, count: 64))
+
+        coreEngine.setEnabled(true)
+        left = [Float](repeating: 0.25, count: 64)
+        right = [Float](repeating: 0.25, count: 64)
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return XCTFail("Missing test buffers") }
+                coreEngine.processStereoInPlace(
+                    left: leftAddress,
+                    right: rightAddress,
+                    frameCount: leftBuffer.count
+                )
+            }
+        }
+        let expected = Float(0.25 * pow(10.0, 6.0 / 20.0))
+        XCTAssertEqual(left[0], expected, accuracy: 0.0001)
+        XCTAssertEqual(right[0], expected, accuracy: 0.0001)
+    }
+
     func testOutputBoostIsClampedAndPersisted() throws {
         let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -462,6 +512,118 @@ final class AudioEngineBandModeTests: XCTestCase {
             requestGeneration: 2,
             currentGeneration: 2
         ))
+    }
+
+    func testFailedNativeStartRestoresPreviousPhysicalOutputOnly() {
+        let previous = AudioDevice(
+            id: 1,
+            name: "Built-in Output",
+            uid: "previous",
+            isInput: false,
+            isOutput: true
+        )
+        let attempted = AudioDevice(
+            id: 2,
+            name: "USB Output",
+            uid: "attempted",
+            isInput: false,
+            isOutput: true
+        )
+        let blackHole = AudioDevice(
+            id: 3,
+            name: "BlackHole 2ch",
+            uid: "blackhole",
+            isInput: true,
+            isOutput: true
+        )
+
+        let physicalRecovery = NativeRoutingFailureRecoveryPolicy.recovery(
+            previous: previous,
+            attempted: attempted,
+            previousWasVirtual: false
+        )
+        guard case let .restore(device) = physicalRecovery else {
+            return XCTFail("Expected previous physical output to be restored")
+        }
+        XCTAssertEqual(device.id, previous.id)
+        XCTAssertEqual(device.uid, previous.uid)
+
+        let unchangedRecovery = NativeRoutingFailureRecoveryPolicy.recovery(
+            previous: attempted,
+            attempted: attempted,
+            previousWasVirtual: false
+        )
+        guard case .none = unchangedRecovery else {
+            return XCTFail("Expected no restore when output did not change")
+        }
+
+        let virtualRecovery = NativeRoutingFailureRecoveryPolicy.recovery(
+            previous: blackHole,
+            attempted: attempted,
+            previousWasVirtual: true
+        )
+        guard case .recoverPhysicalOutput = virtualRecovery else {
+            return XCTFail("Expected physical-output recovery from BlackHole")
+        }
+    }
+
+    func testProcessTapTestToneRestartResetsPhaseAndStopBypassesGeneration() {
+        let engine = CoreAudioEngine.shared
+        engine.stop()
+        engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 1, bufferFrames: 64)
+        engine.markProcessTapStarted()
+        defer { engine.stop() }
+
+        var left = [Float](repeating: -1, count: 64)
+        var right = [Float](repeating: -1, count: 64)
+
+        engine.startTestTone(440)
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return XCTFail("Missing test buffers") }
+                engine.generateProcessTapTestToneIfNeeded(
+                    left: leftAddress,
+                    right: rightAddress,
+                    frameCount: leftBuffer.count
+                )
+            }
+        }
+        let sampleAt440Hz = left[1]
+        XCTAssertEqual(left[0], 0, accuracy: 0.000_001)
+        XCTAssertEqual(left, right)
+
+        engine.startTestTone(880)
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return XCTFail("Missing test buffers") }
+                engine.generateProcessTapTestToneIfNeeded(
+                    left: leftAddress,
+                    right: rightAddress,
+                    frameCount: leftBuffer.count
+                )
+            }
+        }
+        XCTAssertEqual(left[0], 0, accuracy: 0.000_001)
+        XCTAssertGreaterThan(abs(left[1]), abs(sampleAt440Hz))
+
+        engine.stopTestTone()
+        left = [Float](repeating: 0.25, count: 64)
+        right = [Float](repeating: -0.25, count: 64)
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                guard let leftAddress = leftBuffer.baseAddress,
+                      let rightAddress = rightBuffer.baseAddress else { return XCTFail("Missing test buffers") }
+                engine.generateProcessTapTestToneIfNeeded(
+                    left: leftAddress,
+                    right: rightAddress,
+                    frameCount: leftBuffer.count
+                )
+            }
+        }
+        XCTAssertEqual(left, [Float](repeating: 0.25, count: 64))
+        XCTAssertEqual(right, [Float](repeating: -0.25, count: 64))
     }
 
     func testBlackHoleGainStagingUsesOneVolumeStage() throws {

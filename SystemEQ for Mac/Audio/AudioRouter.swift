@@ -61,6 +61,25 @@ enum DefaultOutputVerificationPolicy {
     }
 }
 
+enum NativeRoutingFailureRecovery {
+    case none
+    case restore(AudioDevice)
+    case recoverPhysicalOutput
+}
+
+enum NativeRoutingFailureRecoveryPolicy {
+    nonisolated static func recovery(
+        previous: AudioDevice?,
+        attempted: AudioDevice,
+        previousWasVirtual: Bool
+    ) -> NativeRoutingFailureRecovery {
+        guard let previous else { return .none }
+        if previousWasVirtual { return .recoverPhysicalOutput }
+        guard previous.id != attempted.id else { return .none }
+        return .restore(previous)
+    }
+}
+
 enum BlackHoleGainStaging {
     private static let unityState = OutputVolumeState(scalar: 1, isMuted: false)
 
@@ -684,6 +703,7 @@ public final class AudioRouter: ObservableObject {
             return false
         }
 
+        let previousDefaultOutput = currentSystemOutputDevice()
         setAsDefaultOutputDevice(output)
         let nativeEngine = ProcessTapEngine()
         nativeEngine.onSampleRateChange = { [weak self] in
@@ -717,6 +737,20 @@ public final class AudioRouter: ObservableObject {
         case let .failure(error):
             processTapEngineStorage = nil
             CoreAudioEngine.shared.stop()
+            let recovery = NativeRoutingFailureRecoveryPolicy.recovery(
+                previous: previousDefaultOutput,
+                attempted: output,
+                previousWasVirtual: previousDefaultOutput?.name.lowercased()
+                    .contains(AppConstants.DeviceNames.blackHoleLowercase) == true
+            )
+            switch recovery {
+            case .none:
+                break
+            case let .restore(outputToRestore):
+                setAsDefaultOutputDevice(outputToRestore)
+            case .recoverPhysicalOutput:
+                restoreOriginalSystemOutputDevice()
+            }
             DiagnosticEventStore.shared.record(
                 "routing.enable.failed",
                 details: ["backend": "native", "reason": String(describing: error)]
