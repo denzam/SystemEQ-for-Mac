@@ -70,6 +70,9 @@ private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
 }
 
 struct AutoEQView: View {
+    static let databaseCandidatePrefix = "database:"
+    private let databaseService = AutoEQDatabaseService(database: .shared)
+
     enum BandMode: String, CaseIterable, Identifiable {
         case ten = "10"
         case thirtyOne = "31"
@@ -193,6 +196,9 @@ struct AutoEQView: View {
         let parsed31: [ParsedBand]
         let preampDB10: Double? // Preamp для 10-band
         let preampDB31: Double? // Preamp для 31-band
+        let name: String
+        let source: String?
+        let target: String?
         let timestamp: Date
     }
 
@@ -324,8 +330,13 @@ struct AutoEQView: View {
                     bassBoost = Double(saved.bassBoost)
                 }
 
-                // Load offline index from user or bundle
-                if let result = loadOfflineIndexFromDisk() {
+                if EQDatabase.shared.isAvailable {
+                    let stats = EQDatabase.shared.getDatabaseStats()
+                    indexStatusRaw = .raw("\(localization.localized(.databaseHeadphones)): \(stats.headphones)")
+                    if let result = loadOfflineIndexFromDisk() {
+                        offlineIndex = result.entries
+                    }
+                } else if let result = loadOfflineIndexFromDisk() {
                     offlineIndex = result.entries
 
                     // Показати статус індексу
@@ -336,7 +347,6 @@ struct AutoEQView: View {
                         indexStatusRaw = .updated(count: result.entries.count, timestamp: cache.lastUpdate)
                     }
 
-                    // Автоматичне оновлення якщо індекс застарів
                     if result.needsUpdate {
                         indexStatusRaw = .updating
                         Task { await buildOrUpdateIndex() }
@@ -349,9 +359,6 @@ struct AutoEQView: View {
                     Task { await buildOrUpdateIndex() }
                 }
 
-                // Показати у вікні останній застосований пресет (рушій його вже відновив
-                // сам при старті — тут лише UI, без повторного застосування).
-                // Після завантаження індексу: відновлення БД-пресета шукає в ньому шляхи.
                 restoreLastAppliedPresetUI()
             }
         }
@@ -447,26 +454,34 @@ struct AutoEQView: View {
 
                 Spacer()
 
-                HStack(spacing: AppSpacing.sm) {
-                    if isBuildingIndex {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Button {
-                            Task { await buildOrUpdateIndex() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-
+                if EQDatabase.shared.isAvailable {
                     if let s = indexStatus {
                         Text(s)
                             .font(AppTypography.bodySmall)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .tooltip(s)
+                    }
+                } else {
+                    HStack(spacing: AppSpacing.sm) {
+                        if isBuildingIndex {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button {
+                                Task { await buildOrUpdateIndex() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+
+                        if let s = indexStatus {
+                            Text(s)
+                                .font(AppTypography.bodySmall)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .tooltip(s)
+                        }
                     }
                 }
             }
@@ -978,9 +993,57 @@ struct AutoEQView: View {
         }.filter { !$0.path.isEmpty }
     }
 
-    private func clearIndexCache() {
-        guard let p = indexDiskPath() else { return }
-        try? FileManager.default.removeItem(at: p)
+    static func databaseCandidate(_ headphone: DatabaseHeadphone) -> SearchCandidate {
+        let identity = [headphone.source, headphone.brand, headphone.model]
+            .map { Data($0.utf8).base64EncodedString() }
+            .joined(separator: ":")
+        return SearchCandidate(
+            path: databaseCandidatePrefix + identity,
+            name: String(headphone.id),
+            display: "\(headphone.displayName) · \(headphone.source)",
+            isParametric: false
+        )
+    }
+
+    static func directBands(centers: [Double], gains: [Float]) -> [ParsedBand]? {
+        guard centers.count == gains.count, gains.allSatisfy(\.isFinite) else { return nil }
+        return zip(centers, gains).map { center, gain in
+            ParsedBand(freq: center, gain: Double(gain))
+        }
+    }
+
+    private func databaseCandidates(for query: String) -> [SearchCandidate] {
+        var candidates: [SearchCandidate] = []
+        for headphone in databaseService.search(query) {
+            candidates.append(Self.databaseCandidate(headphone))
+        }
+        return candidates
+    }
+
+    static func databaseSource(from candidate: SearchCandidate) -> String? {
+        databaseIdentity(from: candidate.path)?.source
+    }
+
+    static func databaseIdentity(from path: String) -> (source: String, brand: String, model: String)? {
+        guard path.hasPrefix(databaseCandidatePrefix) else { return nil }
+        let encoded = path.dropFirst(databaseCandidatePrefix.count).split(separator: ":")
+        guard encoded.count == 3 else { return nil }
+        let values = encoded.compactMap { component -> String? in
+            guard let data = Data(base64Encoded: String(component)) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        guard values.count == 3 else { return nil }
+        return (values[0], values[1], values[2])
+    }
+
+    private func databaseHeadphoneID(from candidate: SearchCandidate) -> Int? {
+        guard candidate.path.hasPrefix(Self.databaseCandidatePrefix) else { return nil }
+        guard let identity = Self.databaseIdentity(from: candidate.path) else { return nil }
+        return databaseService.headphoneID(
+            brand: identity.brand,
+            model: identity.model,
+            source: identity.source
+        )
     }
 
     private func buildOrUpdateIndex() async {
@@ -988,8 +1051,6 @@ struct AutoEQView: View {
         isBuildingIndex = true
         indexStatusRaw = .building
         defer { isBuildingIndex = false }
-        // Clear old cache before building
-        clearIndexCache()
         do {
             guard let url = URL(string: AppConstants.URLs.autoEQIndex)
             else { indexStatusRaw = .raw("Invalid URL"); return }
@@ -1421,8 +1482,7 @@ struct AutoEQView: View {
 
         // Створити новий Task з затримкою
         searchDebounceTask = Task {
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 сек
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 сек
+            try? await Task.sleep(nanoseconds: 300_000_000)
             // Перевірити чи запит ще актуальний
             guard !Task.isCancelled, q == normalizedQuery else { return }
 
@@ -1436,10 +1496,15 @@ struct AutoEQView: View {
                 }
             }
 
-            // Використовуємо офлайн індекс та кеш
-            var combined: [SearchCandidate] = offlineSearch(q)
-            if combined.isEmpty, let cached = loadCachedCandidates(for: q) {
-                combined = cached
+            let combined: [SearchCandidate]
+            if EQDatabase.shared.isAvailable {
+                combined = databaseCandidates(for: q)
+            } else {
+                var fallback = offlineSearch(q)
+                if fallback.isEmpty, let cached = loadCachedCandidates(for: q) {
+                    fallback = cached
+                }
+                combined = fallback
             }
 
             guard !Task.isCancelled else { return }
@@ -1476,7 +1541,9 @@ struct AutoEQView: View {
             self.preampDB31 = cached.preampDB31
             self.preampDB = (bandMode == .ten) ? cached.preampDB10 : cached.preampDB31
             self.rawText = "Imported from cache"
-            self.activePresetName = c.display
+            self.activePresetName = cached.name
+            self.activePresetSource = cached.source
+            self.activePresetTarget = cached.target
             self.activePresetPath = c.path
 
             // Update mapped bands
@@ -1497,6 +1564,11 @@ struct AutoEQView: View {
         }
         activeRequests.insert(c.path)
         defer { activeRequests.remove(c.path) }
+
+        if let headphoneID = databaseHeadphoneID(from: c) {
+            importDatabaseCandidate(c, headphoneID: headphoneID)
+            return
+        }
 
         // Знаходимо entry в offline index для отримання шляхів до .txt файлів
         let entry = offlineIndex.first { entry in
@@ -1571,6 +1643,9 @@ struct AutoEQView: View {
                     parsed31: self.parsed31,
                     preampDB10: loadedPreamp,
                     preampDB31: loadedPreamp, // TIER 1 має однаковий preamp
+                    name: self.activePresetName ?? c.display,
+                    source: self.activePresetSource,
+                    target: self.activePresetTarget,
                     timestamp: Date()
                 )
 
@@ -1786,15 +1861,15 @@ struct AutoEQView: View {
     private func importFromDatabase(_ searchQuery: String) {
         searchError = nil
 
-        // Use offline search (same as regular search)
         let normalizedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else {
             searchError = "Please enter a headphone name"
             return
         }
 
-        // Search using offline index
-        let searchResults = offlineSearch(normalizedQuery)
+        let searchResults = EQDatabase.shared.isAvailable
+            ? databaseCandidates(for: normalizedQuery)
+            : offlineSearch(normalizedQuery)
         let rankedCandidates = rank(searchResults, query: normalizedQuery)
 
         guard !rankedCandidates.isEmpty else {
@@ -1802,8 +1877,9 @@ struct AutoEQView: View {
             return
         }
 
-        // Get best match - prioritize oratory1990
-        let oratoryMatch = rankedCandidates.first { $0.path.contains("oratory1990") }
+        let oratoryMatch = rankedCandidates.first {
+            Self.databaseSource(from: $0)?.localizedCaseInsensitiveContains("oratory") == true
+        }
         guard let bestMatch = oratoryMatch ?? rankedCandidates.first else {
             searchError = "No valid match found"
             return
@@ -1813,6 +1889,54 @@ struct AutoEQView: View {
         Task {
             await importCandidate(bestMatch)
         }
+    }
+
+    @MainActor
+    private func importDatabaseCandidate(_ candidate: SearchCandidate, headphoneID: Int) {
+        guard let imported = databaseService.load(headphoneID: headphoneID),
+              let bands10 = Self.directBands(
+                  centers: tenCenters,
+                  gains: imported.gains10
+              ),
+              let bands31 = Self.directBands(
+                  centers: thirtyOneCenters,
+                  gains: imported.gains31
+              ) else {
+            searchError = localization.localized(.autoEQImportFileError)
+            return
+        }
+
+        let preset = imported.preset
+        let name = candidate.display.components(separatedBy: " · ").first ?? candidate.display
+        parsed10 = bands10
+        parsed31 = bands31
+        parsed = bandMode == .ten ? bands10 : bands31
+        preampDB10 = Double(preset.preampGain)
+        preampDB31 = Double(preset.preampGain)
+        preampDB = Double(preset.preampGain)
+        rawText = "EQDatabase.db"
+        activePresetName = name
+        activePresetSource = if !preset.author.isEmpty {
+            preset.author
+        } else if !preset.source.isEmpty {
+            preset.source
+        } else {
+            Self.databaseSource(from: candidate)
+        }
+        activePresetTarget = preset.targetCurve.isEmpty ? targetProfile : preset.targetCurve
+        activePresetPath = candidate.path
+        mapped = mappedBands()
+
+        importCache[candidate.path] = ImportCacheEntry(
+            parsed10: bands10,
+            parsed31: bands31,
+            preampDB10: Double(preset.preampGain),
+            preampDB31: Double(preset.preampGain),
+            name: name,
+            source: activePresetSource,
+            target: activePresetTarget,
+            timestamp: Date()
+        )
     }
 
     @MainActor
@@ -1869,6 +1993,14 @@ struct AutoEQView: View {
 
     private func mappedBands() -> [MappedBand] {
         let centers = (bandMode == .ten) ? tenCenters : thirtyOneCenters
+        if activePresetPath?.hasPrefix(Self.databaseCandidatePrefix) == true {
+            let direct = bandMode == .ten ? parsed10 : parsed31
+            if direct.count == centers.count {
+                return zip(centers, direct).map { center, band in
+                    MappedBand(center: center, gain: band.gain)
+                }
+            }
+        }
         let sampleRate: Double = 48000
 
         return centers.map { c in
@@ -2660,8 +2792,8 @@ struct AutoEQView: View {
             let favorite = FavoritePreset(
                 id: UUID().uuidString,
                 name: candidate.display,
-                source: activePresetSource,
-                target: activePresetTarget,
+                source: Self.databaseSource(from: candidate),
+                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix) ? targetProfile : nil,
                 path: candidate.path,
                 timestamp: Date()
             )
@@ -2740,8 +2872,15 @@ struct AutoEQView: View {
             return
         }
 
-        // Знаходимо кандидата в offline index
-        if offlineIndex.contains(where: { entry in
+        if favorite.path.hasPrefix(Self.databaseCandidatePrefix) {
+            let candidate = SearchCandidate(
+                path: favorite.path,
+                name: "",
+                display: favorite.name,
+                isParametric: false
+            )
+            await importCandidate(candidate)
+        } else if offlineIndex.contains(where: { entry in
             entry.pathReadme?.contains(favorite.path) == true ||
                 entry.pathParametric?.contains(favorite.path) == true
         }) {

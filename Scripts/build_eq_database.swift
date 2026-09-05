@@ -375,9 +375,9 @@ class EQDatabaseBuilder {
         defer { sqlite3_finalize(statement) }
         
         sqlite3_bind_int(statement, 1, Int32(headphoneId))
-        sqlite3_bind_text(statement, 2, source, -1, nil)
-        sqlite3_bind_text(statement, 3, author, -1, nil)
-        sqlite3_bind_text(statement, 4, targetCurve, -1, nil)
+        sqlite3_bind_text(statement, 2, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, author, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, targetCurve, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(statement, 5, Double(preampGain))
         sqlite3_bind_int(statement, 6, isHandCrafted ? 1 : 0)
         sqlite3_bind_int(statement, 7, isRecommended ? 1 : 0)
@@ -425,7 +425,7 @@ class EQDatabaseBuilder {
         
         sqlite3_bind_int(statement, 1, Int32(presetId))
         sqlite3_bind_int(statement, 2, Int32(bandIndex))
-        sqlite3_bind_text(statement, 3, band.filterType, -1, nil)
+        sqlite3_bind_text(statement, 3, band.filterType, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(statement, 4, band.frequency)
         sqlite3_bind_double(statement, 5, Double(band.gain))
         sqlite3_bind_double(statement, 6, Double(band.qFactor))

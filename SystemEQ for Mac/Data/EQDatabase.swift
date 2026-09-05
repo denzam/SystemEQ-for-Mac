@@ -8,6 +8,34 @@
 import Foundation
 import SQLite3
 
+struct AutoEQDatabaseImport {
+    let preset: DatabasePreset
+    let gains10: [Float]
+    let gains31: [Float]
+}
+
+struct AutoEQDatabaseService {
+    let database: EQDatabase
+
+    func search(_ query: String) -> [DatabaseHeadphone] {
+        database.searchHeadphones(query)
+    }
+
+    func headphoneID(brand: String, model: String, source: String) -> Int? {
+        database.headphone(brand: brand, model: model, source: source)?.id
+    }
+
+    func load(headphoneID: Int) -> AutoEQDatabaseImport? {
+        guard let preset = database.getRecommendedPreset(for: headphoneID) else { return nil }
+        let gains10 = database.getFixedBand10(presetId: preset.id)
+        let gains31 = database.getGraphicEQ31(presetId: preset.id)
+        guard gains10.count == 10, gains31.count == 31,
+              gains10.allSatisfy(\.isFinite), gains31.allSatisfy(\.isFinite),
+              preset.preampGain.isFinite else { return nil }
+        return AutoEQDatabaseImport(preset: preset, gains10: gains10, gains31: gains31)
+    }
+}
+
 /// SQLITE_TRANSIENT tells SQLite to make its own copy of the string
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -158,6 +186,8 @@ class EQDatabase {
         JOIN headphones_fts fts ON h.id = fts.rowid
         WHERE headphones_fts MATCH ?
         ORDER BY 
+            CASE WHEN lower(h.brand || ' ' || h.model) = lower(?) THEN 0 ELSE 1 END,
+            bm25(headphones_fts),
             CASE WHEN h.source = 'oratory1990' THEN 0 ELSE 1 END,
             h.brand, h.model
         LIMIT 100
@@ -176,6 +206,8 @@ class EQDatabase {
             logSQLiteError("FTS bind", status: bindStatus)
             return []
         }
+
+        guard sqlite3_bind_text(statement, 2, query, -1, SQLITE_TRANSIENT) == SQLITE_OK else { return [] }
 
         var results: [DatabaseHeadphone] = []
         var stepStatus = sqlite3_step(statement)
@@ -340,21 +372,50 @@ class EQDatabase {
         return results
     }
 
+    func headphone(brand: String, model: String, source: String) -> DatabaseHeadphone? {
+        let sql = "SELECT id, brand, model, type, source FROM headphones WHERE brand = ? AND model = ? AND source = ? LIMIT 1"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        for (index, value) in [brand, model, source].enumerated() {
+            guard sqlite3_bind_text(statement, Int32(index + 1), value, -1, SQLITE_TRANSIENT) == SQLITE_OK else {
+                return nil
+            }
+        }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return parseHeadphoneRow(statement)
+    }
+
     // MARK: - Presets
 
     /// Get all presets for a headphone
     func getPresets(for headphoneId: Int) -> [DatabasePreset] {
         let sql = """
-        SELECT id, headphone_id, source, author, target_curve, preamp_gain,
-               is_hand_crafted, is_recommended
-        FROM presets
-        WHERE headphone_id = ?
+        SELECT p.id, p.headphone_id,
+               CASE WHEN p.source IS NULL OR instr(p.source, char(0)) > 0 OR length(trim(p.source)) = 0
+                    THEN h.source ELSE p.source END,
+               CASE WHEN p.author IS NULL OR instr(p.author, char(0)) > 0 OR length(trim(p.author)) = 0
+                    THEN h.source ELSE p.author END,
+               CASE WHEN p.target_curve IS NULL OR instr(p.target_curve, char(0)) > 0 OR length(trim(p.target_curve)) = 0
+                    THEN '\(AppConstants.EQ.defaultTarget)' ELSE p.target_curve END,
+               p.preamp_gain, p.is_hand_crafted, p.is_recommended
+        FROM presets p
+        JOIN headphones h ON h.id = p.headphone_id
+        WHERE p.headphone_id = ?
         ORDER BY 
-            is_recommended DESC,
-            is_hand_crafted DESC,
-            CASE WHEN author = 'oratory1990' THEN 0 ELSE 1 END,
-            CASE WHEN target_curve LIKE '%JM-1%' OR target_curve LIKE '%JM1%' THEN 0 ELSE 1 END,
-            source
+            p.is_recommended DESC,
+            p.is_hand_crafted DESC,
+            CASE WHEN (p.author IS NULL OR instr(p.author, char(0)) > 0 OR length(trim(p.author)) = 0)
+                          AND h.source = 'oratory1990'
+                      OR p.author = 'oratory1990'
+                 THEN 0 ELSE 1 END,
+            CASE WHEN (p.target_curve IS NULL OR instr(p.target_curve, char(0)) > 0 OR length(trim(p.target_curve)) = 0)
+                          AND '\(AppConstants.EQ.defaultTarget)' LIKE '%JM-1%'
+                      OR p.target_curve LIKE '%JM-1%'
+                      OR p.target_curve LIKE '%JM1%'
+                 THEN 0 ELSE 1 END,
+            CASE WHEN p.source IS NULL OR instr(p.source, char(0)) > 0 OR length(trim(p.source)) = 0
+                 THEN h.source ELSE p.source END
         """
 
         var statement: OpaquePointer?

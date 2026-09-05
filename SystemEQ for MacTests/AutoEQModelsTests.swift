@@ -207,4 +207,114 @@ final class AutoEQModelsTests: XCTestCase {
         XCTAssertEqual(BandMode.ten.rawValue, "10")
         XCTAssertEqual(BandMode.thirtyOne.rawValue, "31")
     }
+
+    func testDatabaseCandidate_usesStableDatabasePath() {
+        let headphone = DatabaseHeadphone(
+            id: 42,
+            brand: "Sennheiser",
+            model: "HD 600",
+            type: "over-ear",
+            source: "oratory1990"
+        )
+
+        let candidate = AutoEQView.databaseCandidate(headphone)
+
+        XCTAssertTrue(candidate.path.hasPrefix("database:"))
+        XCTAssertEqual(candidate.name, "42")
+        XCTAssertEqual(candidate.display, "Sennheiser HD 600 · oratory1990")
+        XCTAssertEqual(AutoEQView.databaseSource(from: candidate), "oratory1990")
+        let identity = AutoEQView.databaseIdentity(from: candidate.path)
+        XCTAssertEqual(identity?.brand, "Sennheiser")
+        XCTAssertEqual(identity?.model, "HD 600")
+        XCTAssertEqual(identity?.source, "oratory1990")
+
+        let rebuiltDatabaseRow = DatabaseHeadphone(
+            id: 9001,
+            brand: headphone.brand,
+            model: headphone.model,
+            type: headphone.type,
+            source: headphone.source
+        )
+        XCTAssertEqual(AutoEQView.databaseCandidate(rebuiltDatabaseRow).path, candidate.path)
+    }
+
+    func testDirectBands_preservesDatabaseGains() throws {
+        let centers = [31.5, 63.0, 125.0]
+        let gains: [Float] = [-1.5, 2.25, 0.0]
+
+        let bands = try XCTUnwrap(AutoEQView.directBands(centers: centers, gains: gains))
+
+        XCTAssertEqual(bands.map(\.freq), centers)
+        XCTAssertEqual(bands.map(\.gain), gains.map(Double.init))
+    }
+
+    func testDirectBands_rejectsInvalidDatabaseRows() {
+        XCTAssertNil(AutoEQView.directBands(centers: [31.5], gains: []))
+        XCTAssertNil(AutoEQView.directBands(centers: [31.5], gains: [.nan]))
+    }
+
+    func testBundledDatabase_providesSearchableTenAndThirtyOneBandPreset() throws {
+        let database = EQDatabase.shared
+        XCTAssertTrue(database.isAvailable)
+
+        let headphone = try XCTUnwrap(database.searchHeadphones("Sennheiser HD 600").first(where: {
+            $0.brand == "Sennheiser" && $0.model == "HD 600" && $0.source == "oratory1990"
+        }))
+        let preset = try XCTUnwrap(database.getRecommendedPreset(for: headphone.id))
+        let gains10 = database.getFixedBand10(presetId: preset.id)
+        let gains31 = database.getGraphicEQ31(presetId: preset.id)
+
+        XCTAssertEqual(gains10.count, 10)
+        XCTAssertEqual(gains31.count, 31)
+        XCTAssertNotNil(AutoEQView.directBands(
+            centers: AutoEQConstants.tenBandFrequencies.map(Double.init),
+            gains: gains10
+        ))
+        XCTAssertNotNil(AutoEQView.directBands(
+            centers: AutoEQConstants.thirtyOneBandFrequencies.map(Double.init),
+            gains: gains31
+        ))
+    }
+
+    func testDatabaseServiceLoadsBothModesWithoutView() throws {
+        let service = AutoEQDatabaseService(database: .shared)
+        let id = try XCTUnwrap(service.headphoneID(
+            brand: "Sennheiser", model: "HD 800", source: "Innerfidelity"
+        ))
+        let imported = try XCTUnwrap(service.load(headphoneID: id))
+        XCTAssertEqual(imported.gains10.count, 10)
+        XCTAssertEqual(imported.gains31.count, 31)
+        XCTAssertEqual(imported.preset.headphoneId, id)
+        XCTAssertNil(service.load(headphoneID: -1))
+    }
+
+    func testExactHeadphoneLookupPreservesSourceAndRejectsPartialIdentity() throws {
+        let database = EQDatabase.shared
+        let headphone = try XCTUnwrap(database.headphone(
+            brand: "Sennheiser", model: "HD 800", source: "Innerfidelity"
+        ))
+        XCTAssertEqual(headphone.model, "HD 800")
+        XCTAssertEqual(headphone.source, "Innerfidelity")
+        let results = database.searchHeadphones("Sennheiser HD 800")
+        XCTAssertEqual(results.first?.model, "HD 800")
+        XCTAssertTrue(results.contains { $0.id == headphone.id })
+        XCTAssertNotNil(database.getRecommendedPreset(for: headphone.id))
+        XCTAssertNil(database.headphone(brand: "Sennheiser", model: "HD 80", source: "Innerfidelity"))
+        XCTAssertNil(database.headphone(brand: "Sennheiser", model: "HD 800", source: "missing"))
+    }
+
+    func testBundledDatabase_presetMetadataFallsBackWhenStoredFieldsAreEmpty() throws {
+        let database = EQDatabase.shared
+        XCTAssertTrue(database.isAvailable)
+
+        let headphone = try XCTUnwrap(database.searchHeadphones("Sennheiser HD 600").first(where: {
+            $0.brand == "Sennheiser" && $0.model == "HD 600" && $0.source == "oratory1990"
+        }))
+        let preset = try XCTUnwrap(database.getRecommendedPreset(for: headphone.id))
+
+        XCTAssertEqual(preset.source, headphone.source)
+        XCTAssertEqual(preset.author, headphone.source)
+        XCTAssertFalse(preset.targetCurve.isEmpty)
+        XCTAssertFalse(preset.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
 }
