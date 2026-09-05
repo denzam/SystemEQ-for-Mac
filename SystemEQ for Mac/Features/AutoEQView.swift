@@ -1565,7 +1565,11 @@ struct AutoEQView: View {
         activeRequests.insert(c.path)
         defer { activeRequests.remove(c.path) }
 
-        if let headphoneID = databaseHeadphoneID(from: c) {
+        if c.path.hasPrefix(Self.databaseCandidatePrefix) {
+            guard let headphoneID = databaseHeadphoneID(from: c) else {
+                searchError = localization.localized(.autoEQImportFileError)
+                return
+            }
             importDatabaseCandidate(c, headphoneID: headphoneID)
             return
         }
