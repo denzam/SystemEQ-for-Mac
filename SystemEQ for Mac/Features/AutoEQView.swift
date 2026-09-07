@@ -72,6 +72,7 @@ private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
 struct AutoEQView: View {
     static let databaseCandidatePrefix = "database:"
     private let databaseService = AutoEQDatabaseService(database: .shared)
+    private let legacyRepository = AutoEQLegacyRepository()
 
     enum BandMode: String, CaseIterable, Identifiable {
         case ten = "10"
@@ -89,8 +90,6 @@ struct AutoEQView: View {
             self == .ten ? .tenBand : .thirtyOneBand
         }
     }
-    private static let indexVersion = 5 // Increment when path logic changes
-    private static let indexUpdateInterval: TimeInterval = 30 * 24 * 3600 // 30 днів (1 місяць)
 
     // MARK: - Localization
 
@@ -175,7 +174,6 @@ struct AutoEQView: View {
     ]
     @State private var indexTruncated: Bool = false
 
-    // AutoEQ Setup Dialog
     @State private var showAutoEQSetup: Bool = false
     @State private var isInstallingAutoEQ: Bool = false
     @State private var autoEQInstallProgress: Double = 0.0
@@ -217,20 +215,6 @@ struct AutoEQView: View {
     // Останній ЗАСТОСОВАНИЙ пресет будь-якого походження (custom або БД) —
     // саме він відновлюється в UI при відкритті вікна
     @AppStorage("lastAppliedPresetJSON") private var lastAppliedPresetJSON: String = ""
-
-    /// URLSession з кешуванням (computed property для struct)
-    private var cachedSession: URLSession {
-        let config = URLSessionConfiguration.default
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        config.urlCache = URLCache(
-            memoryCapacity: 50 * 1024 * 1024, // 50 MB в пам'яті
-            diskCapacity: 100 * 1024 * 1024, // 100 MB на диску
-            directory: nil
-        )
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        return URLSession(configuration: config)
-    }
 
     private let tenCenters: [Double] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
     private let thirtyOneCenters: [Double] = [
@@ -333,25 +317,18 @@ struct AutoEQView: View {
                 if EQDatabase.shared.isAvailable {
                     let stats = EQDatabase.shared.getDatabaseStats()
                     indexStatusRaw = .raw("\(localization.localized(.databaseHeadphones)): \(stats.headphones)")
-                    if let result = loadOfflineIndexFromDisk() {
+                    if let result = legacyRepository.loadOfflineIndex() {
                         offlineIndex = result.entries
                     }
-                } else if let result = loadOfflineIndexFromDisk() {
+                } else if let result = legacyRepository.loadOfflineIndex() {
                     offlineIndex = result.entries
-
-                    // Показати статус індексу
-                    if let cache = try? JSONDecoder().decode(
-                        OfflineIndexCache.self,
-                        from: Data(contentsOf: indexDiskPath() ?? URL(fileURLWithPath: ""))
-                    ) {
-                        indexStatusRaw = .updated(count: result.entries.count, timestamp: cache.lastUpdate)
-                    }
+                    indexStatusRaw = .updated(count: result.entries.count, timestamp: result.lastUpdate)
 
                     if result.needsUpdate {
                         indexStatusRaw = .updating
                         Task { await buildOrUpdateIndex() }
                     }
-                } else if let bundled = loadOfflineIndexFromBundle() {
+                } else if let bundled = legacyRepository.loadBundledOfflineIndex() {
                     offlineIndex = bundled
                     // Оновити індекс в фоні після завантаження з bundle
                     Task { await buildOrUpdateIndex() }
@@ -906,53 +883,6 @@ struct AutoEQView: View {
         }
     }
 
-    private func indexDiskPath() -> URL? {
-        do {
-            let dir = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let appDir = dir.appendingPathComponent("SystemEQ", isDirectory: true)
-            try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
-            return appDir.appendingPathComponent("AutoEQIndex.json")
-        } catch { return nil }
-    }
-
-    private func loadOfflineIndexFromDisk() -> (entries: [OfflineIndexEntry], needsUpdate: Bool)? {
-        guard let p = indexDiskPath(), let data = try? Data(contentsOf: p) else { return nil }
-        // Try new versioned format first
-        if let cache = try? JSONDecoder().decode(OfflineIndexCache.self, from: data) {
-            guard cache.version == Self.indexVersion else { return nil }
-            let age = Date().timeIntervalSince1970 - cache.lastUpdate
-            let needsUpdate = age > Self.indexUpdateInterval
-            return (cache.entries, needsUpdate)
-        }
-        // Old format - ignore it
-        return nil
-    }
-
-    private func saveOfflineIndexToDisk(_ items: [OfflineIndexEntry]) {
-        guard let p = indexDiskPath() else { return }
-        let cache = OfflineIndexCache(
-            version: Self.indexVersion,
-            entries: items,
-            lastUpdate: Date().timeIntervalSince1970
-        )
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        try? data.write(to: p, options: .atomic)
-    }
-
-    private func loadOfflineIndexFromBundle() -> [OfflineIndexEntry]? {
-        if let url = Bundle.main.url(forResource: "AutoEqIndex", withExtension: "json"),
-           let data = try? Data(contentsOf: url),
-           let items = try? JSONDecoder().decode([OfflineIndexEntry].self, from: data) {
-            return items
-        }
-        return nil
-    }
-
     private func offlineSearch(_ query: String) -> [SearchCandidate] {
         let q = sanitize(query)
         let t = tokens(q)
@@ -1054,7 +984,7 @@ struct AutoEQView: View {
         do {
             guard let url = URL(string: AppConstants.URLs.autoEQIndex)
             else { indexStatusRaw = .raw("Invalid URL"); return }
-            let (data, resp) = try await cachedSession.data(from: url)
+            let (data, resp) = try await legacyRepository.session.data(from: url)
             guard let http = resp as? HTTPURLResponse,
                   (200...299).contains(http.statusCode)
             else { indexStatusRaw = .error(localization.localized(.httpError)); return }
@@ -1122,7 +1052,7 @@ struct AutoEQView: View {
                 }
             }
             let out = Array(map.values).filter { $0.pathReadme != nil || $0.pathParametric != nil }
-            saveOfflineIndexToDisk(out)
+            legacyRepository.saveOfflineIndex(out)
             offlineIndex = out
             indexTruncated = false
             indexStatusRaw = .updatedNow(count: out.count)
@@ -1132,57 +1062,6 @@ struct AutoEQView: View {
             }
         } catch {
             indexStatusRaw = .error(friendlyNetworkError(error))
-        }
-    }
-
-    // MARK: - Cache helpers (search results)
-
-    private let cacheTTL: TimeInterval = 7 * 24 * 3600
-
-    private func cacheRoot() -> URL? {
-        do {
-            let dir = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let appDir = dir.appendingPathComponent("SystemEQ", isDirectory: true)
-            try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
-            let searchDir = appDir.appendingPathComponent("AutoEQCache/search", isDirectory: true)
-            try? FileManager.default.createDirectory(at: searchDir, withIntermediateDirectories: true)
-            return searchDir
-        } catch { return nil }
-    }
-
-    private func cachePathForQuery(_ q: String) -> URL? {
-        guard let root = cacheRoot() else { return nil }
-        let key = sanitize(q).replacingOccurrences(of: "/", with: "_")
-        return root.appendingPathComponent("\(key).json")
-    }
-
-    private func loadCachedCandidates(for q: String) -> [SearchCandidate]? {
-        guard let url = cachePathForQuery(q), let data = try? Data(contentsOf: url) else { return nil }
-        guard let cache = try? JSONDecoder().decode(CandidateCache.self, from: data) else { return nil }
-        if Date().timeIntervalSince1970 - cache.ts > cacheTTL { return nil }
-        if cache.items.isEmpty { return nil }
-        return cache.items.map { dto in
-            SearchCandidate(path: dto.path, name: dto.name, display: dto.display, isParametric: dto.isParametric)
-        }
-    }
-
-    private func saveCachedCandidates(for q: String, items: [SearchCandidate]) {
-        guard !items.isEmpty else { return }
-        guard let url = cachePathForQuery(q) else { return }
-        let dto = items.map { CandidateDTO(
-            path: $0.path,
-            name: $0.name,
-            display: $0.display,
-            isParametric: $0.isParametric
-        ) }
-        let payload = CandidateCache(ts: Date().timeIntervalSince1970, items: dto)
-        if let data = try? JSONEncoder().encode(payload) {
-            try? data.write(to: url, options: .atomic)
         }
     }
 
@@ -1501,7 +1380,7 @@ struct AutoEQView: View {
                 combined = databaseCandidates(for: q)
             } else {
                 var fallback = offlineSearch(q)
-                if fallback.isEmpty, let cached = loadCachedCandidates(for: q) {
+                if fallback.isEmpty, let cached = legacyRepository.loadCandidates(for: q) {
                     fallback = cached
                 }
                 combined = fallback
@@ -1517,7 +1396,7 @@ struct AutoEQView: View {
 
             // Зберегти результати пошуку в кеш
             if !ranked.isEmpty {
-                saveCachedCandidates(for: q, items: ranked)
+                legacyRepository.saveCandidates(ranked, for: q)
             }
         }
 
@@ -1690,7 +1569,7 @@ struct AutoEQView: View {
             var statusCode: Int?
 
             // Try primary URL
-            let (data, resp) = try await cachedSession.data(from: url)
+            let (data, resp) = try await legacyRepository.session.data(from: url)
             if let http = resp as? HTTPURLResponse { statusCode = http.statusCode }
             if let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) {
                 text = String(data: data, encoding: .utf8) ?? ""
@@ -1704,7 +1583,7 @@ struct AutoEQView: View {
                 let renc = readmePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? readmePath
                 let rraw = AppConstants.URLs.autoEQRawBase + renc
                 if let rurl = URL(string: rraw) {
-                    let (d2, r2) = try await cachedSession.data(from: rurl)
+                    let (d2, r2) = try await legacyRepository.session.data(from: rurl)
                     if let h2 = r2 as? HTTPURLResponse, (200...299).contains(h2.statusCode) {
                         text = String(data: d2, encoding: .utf8) ?? ""
                         ok = true
@@ -1736,7 +1615,7 @@ struct AutoEQView: View {
                         let enc = ap.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ap
                         let url2s = AppConstants.URLs.autoEQRawBase + enc
                         guard let url2 = URL(string: url2s) else { continue }
-                        let (d3, r3) = try await cachedSession.data(from: url2)
+                        let (d3, r3) = try await legacyRepository.session.data(from: url2)
                         if let h3 = r3 as? HTTPURLResponse, (200...299).contains(h3.statusCode) {
                             text = String(data: d3, encoding: .utf8) ?? ""
                             ok = true
@@ -2719,7 +2598,7 @@ struct AutoEQView: View {
     private func fetchJM1FromWebApp(csvURL: URL) async throws -> (bands: [ParsedBand], preamp: Double?)? {
         let csvDataTuple: (freqs: [Double], raw: [Double])?
         do {
-            let (data, resp) = try await cachedSession.data(from: csvURL)
+            let (data, resp) = try await legacyRepository.session.data(from: csvURL)
             if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
             csvDataTuple = parseCSVFrequencyRaw(data)
         } catch { throw error }
@@ -2743,7 +2622,7 @@ struct AutoEQView: View {
             rq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             rq.httpBody = body
             do {
-                let (data, resp) = try await cachedSession.data(for: rq)
+                let (data, resp) = try await legacyRepository.session.data(for: rq)
                 if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) { continue }
                 let dec = JSONDecoder()
                 let out = try dec.decode(WebAppResponse.self, from: data)
