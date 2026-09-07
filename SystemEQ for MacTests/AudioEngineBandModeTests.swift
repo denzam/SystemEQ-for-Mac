@@ -151,6 +151,40 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(right[0], expected, accuracy: 0.0001)
     }
 
+    func testConcurrentFilterSwapAndRenderStress() {
+        let coreEngine = CoreAudioEngine.shared
+        coreEngine.setEnabled(true)
+        coreEngine.applyFixedBandEQ(Array(repeating: 0, count: 10))
+        let renderFinished = expectation(description: "Concurrent render finished")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var left = [Float](repeating: 0.05, count: 128)
+            var right = [Float](repeating: 0.05, count: 128)
+            for _ in 0..<2000 {
+                left.withUnsafeMutableBufferPointer { leftBuffer in
+                    right.withUnsafeMutableBufferPointer { rightBuffer in
+                        guard let leftAddress = leftBuffer.baseAddress,
+                              let rightAddress = rightBuffer.baseAddress else { return }
+                        coreEngine.processStereoInPlace(
+                            left: leftAddress,
+                            right: rightAddress,
+                            frameCount: leftBuffer.count
+                        )
+                    }
+                }
+            }
+            renderFinished.fulfill()
+        }
+
+        for iteration in 0..<250 {
+            let gain = Float(iteration % 7) - 3
+            coreEngine.applyFixedBandEQ(Array(repeating: gain, count: 10))
+        }
+
+        wait(for: [renderFinished], timeout: 10)
+        coreEngine.clearEQ()
+    }
+
     func testOutputBoostIsClampedAndPersisted() throws {
         let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
