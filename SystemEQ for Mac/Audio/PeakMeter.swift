@@ -5,8 +5,7 @@
 //  Peak level metering for audio buffers
 //  Extracted from CoreAudioEngine to improve modularity
 //
-//  Usage: Call update() from the audio thread, then publishToMainThread()
-//  to push values to @Published properties on the main thread.
+//  Usage: sample from the audio thread; a main-thread timer publishes values.
 //
 
 import Accelerate
@@ -47,11 +46,21 @@ public final class PeakMeter: ObservableObject {
     /// Update interval in frames (~85ms at 48kHz)
     var updateInterval: Int = 4096
 
-    /// Coalesces redundant main-thread dispatches when one is already in flight.
-    /// Set from audio thread (test-and-set), cleared from main thread.
-    private let pendingPublishFlag: UnsafeMutablePointer<SEQAtomicFlag> = {
-        let p = UnsafeMutablePointer<SEQAtomicFlag>.allocate(capacity: 1)
-        seq_atomic_flag_clear(p)
+    private let publishedLevels: UnsafeMutablePointer<SEQAtomicInt64> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
+        seq_atomic_int64_init(p, 0)
+        return p
+    }()
+
+    private let publishedLimiterGain: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, Int32(bitPattern: Float(1).bitPattern))
+        return p
+    }()
+
+    private let publishGeneration: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
         return p
     }()
 
@@ -63,9 +72,25 @@ public final class PeakMeter: ObservableObject {
 
     private var reportedNonFiniteOutputPeak = false
     private var limiterClearWorkItem: DispatchWorkItem?
+    private var lastPublishedGeneration: Int32 = 0
+    private var publicationTimer: DispatchSourceTimer?
+
+    init() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.08, repeating: 0.08, leeway: .milliseconds(20))
+        timer.setEventHandler { [weak self] in
+            self?.publishLatest()
+        }
+        publicationTimer = timer
+        timer.resume()
+    }
 
     deinit {
-        pendingPublishFlag.deallocate()
+        publicationTimer?.setEventHandler {}
+        publicationTimer?.cancel()
+        publishedLevels.deallocate()
+        publishedLimiterGain.deallocate()
+        publishGeneration.deallocate()
         nonFiniteOutputPeakCount.deallocate()
     }
 
@@ -98,7 +123,7 @@ public final class PeakMeter: ObservableObject {
         ))
     }
 
-    /// Post-EQ level, and the trigger that pushes both values to the UI.
+    /// Post-EQ level, and the trigger that publishes both values atomically.
     /// Only call when `shouldSample` returned true.
     @inline(__always)
     func sampleOutput(
@@ -119,7 +144,7 @@ public final class PeakMeter: ObservableObject {
             rtOutputPeak = 0
             _ = seq_atomic_int32_fetch_add(nonFiniteOutputPeakCount, 1)
         }
-        schedulePublish()
+        publishSample()
     }
 
     @inline(__always)
@@ -157,6 +182,9 @@ public final class PeakMeter: ObservableObject {
         rtInputPeak = 0.0
         rtOutputPeak = 0.0
         rtMinimumLimiterGain = 1.0
+        seq_atomic_int64_store_release(publishedLevels, 0)
+        seq_atomic_int32_store_release(publishedLimiterGain, Int32(bitPattern: Float(1).bitPattern))
+        _ = seq_atomic_int32_fetch_add(publishGeneration, 1)
         DispatchQueue.main.async { [weak self] in
             self?.limiterClearWorkItem?.cancel()
             self?.limiterClearWorkItem = nil
@@ -168,36 +196,58 @@ public final class PeakMeter: ObservableObject {
 
     // MARK: - Private
 
-    /// Schedule a main-thread update (coalesced via atomic flag).
-    private func schedulePublish() {
-        // test-and-set: returns true only if we transitioned clear → set,
-        // so exactly one dispatch is in flight at a time.
-        guard seq_atomic_flag_test_and_set(pendingPublishFlag) else { return }
-        let inVal = rtInputPeak
-        let outVal = rtOutputPeak
-        let limiterGain = rtMinimumLimiterGain
+    @inline(__always)
+    private func publishSample() {
+        let packedLevels = Self.packLevels(input: rtInputPeak, output: rtOutputPeak)
+        let limiterBits = Int32(bitPattern: rtMinimumLimiterGain.bitPattern)
         rtMinimumLimiterGain = 1.0
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.inputPeakLevel = inVal
-            self.outputPeakLevel = outVal
-            if limiterGain < 0.999_9 {
-                let reduction = max(0, -20 * log10(max(limiterGain, 0.000_001)))
-                self.limiterGainReductionDB = reduction
-                self.limiterClearWorkItem?.cancel()
-                let clearWorkItem = DispatchWorkItem { [weak self] in
-                    self?.limiterGainReductionDB = 0.0
-                    self?.limiterClearWorkItem = nil
-                }
-                self.limiterClearWorkItem = clearWorkItem
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: clearWorkItem)
+        seq_atomic_int32_store_min(publishedLimiterGain, limiterBits)
+        seq_atomic_int64_store_release(publishedLevels, Int64(bitPattern: packedLevels))
+        _ = seq_atomic_int32_fetch_add(publishGeneration, 1)
+    }
+
+    private func publishLatest() {
+        let generation = seq_atomic_int32_load(publishGeneration)
+        guard generation != lastPublishedGeneration else { return }
+        lastPublishedGeneration = generation
+
+        let packedLevels = UInt64(bitPattern: seq_atomic_int64_load_acquire(publishedLevels))
+        let levels = Self.unpackLevels(packedLevels)
+        let limiterBits = UInt32(bitPattern: seq_atomic_int32_exchange(
+            publishedLimiterGain,
+            Int32(bitPattern: Float(1).bitPattern)
+        ))
+        let limiterGain = Float(bitPattern: limiterBits)
+
+        inputPeakLevel = levels.input
+        outputPeakLevel = levels.output
+        if limiterGain < 0.999_9 {
+            let reduction = max(0, -20 * log10(max(limiterGain, 0.000_001)))
+            limiterGainReductionDB = reduction
+            limiterClearWorkItem?.cancel()
+            let clearWorkItem = DispatchWorkItem { [weak self] in
+                self?.limiterGainReductionDB = 0.0
+                self?.limiterClearWorkItem = nil
             }
-            if !self.reportedNonFiniteOutputPeak,
-               seq_atomic_int32_load(self.nonFiniteOutputPeakCount) > 0 {
-                self.reportedNonFiniteOutputPeak = true
-                dlog("Discarded a non-finite post-EQ peak value", level: .warning, category: .engine)
-            }
-            seq_atomic_flag_clear(self.pendingPublishFlag)
+            limiterClearWorkItem = clearWorkItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: clearWorkItem)
         }
+        if !reportedNonFiniteOutputPeak,
+           seq_atomic_int32_load(nonFiniteOutputPeakCount) > 0 {
+            reportedNonFiniteOutputPeak = true
+            dlog("Discarded a non-finite post-EQ peak value", level: .warning, category: .engine)
+        }
+    }
+
+    @inline(__always)
+    static func packLevels(input: Float, output: Float) -> UInt64 {
+        UInt64(input.bitPattern) << 32 | UInt64(output.bitPattern)
+    }
+
+    static func unpackLevels(_ packed: UInt64) -> (input: Float, output: Float) {
+        (
+            Float(bitPattern: UInt32(truncatingIfNeeded: packed >> 32)),
+            Float(bitPattern: UInt32(truncatingIfNeeded: packed))
+        )
     }
 }

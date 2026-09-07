@@ -718,6 +718,14 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(smoothedPeak, 0.25)
     }
 
+    func testPeakMeterLevelSnapshotRoundTrip() {
+        let packed = PeakMeter.packLevels(input: 0.25, output: 0.75)
+        let unpacked = PeakMeter.unpackLevels(packed)
+
+        XCTAssertEqual(unpacked.input, 0.25)
+        XCTAssertEqual(unpacked.output, 0.75)
+    }
+
     func testLimiterIndicatorUsesActualGainReductionThresholds() {
         XCTAssertEqual(LimiterIndicatorState.state(for: 0), .normal)
         XCTAssertEqual(LimiterIndicatorState.state(for: 0.1), .mild)
