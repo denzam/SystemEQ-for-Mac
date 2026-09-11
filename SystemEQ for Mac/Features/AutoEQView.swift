@@ -72,7 +72,7 @@ private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
 struct AutoEQView: View {
     static let databaseCandidatePrefix = "database:"
     private let databaseService = AutoEQDatabaseService(database: .shared)
-    private let legacyRepository = AutoEQLegacyRepository()
+    @StateObject private var legacyRepository = AutoEQLegacyRepository()
 
     enum BandMode: String, CaseIterable, Identifiable {
         case ten = "10"

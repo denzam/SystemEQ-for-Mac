@@ -38,6 +38,43 @@ final class AutoEQLegacyRepositoryTests: XCTestCase {
         XCTAssertTrue(stale.needsUpdate)
     }
 
+    func testDiskCacheDoesNotCreateNetworkSessionAndFirstAccessReusesIt() {
+        var sessionCreationCount = 0
+        let expectedSession = URLSession(configuration: .ephemeral)
+        defer { expectedSession.invalidateAndCancel() }
+        let repository = AutoEQLegacyRepository(
+            applicationSupportDirectory: temporaryDirectory,
+            sessionFactory: {
+                sessionCreationCount += 1
+                return expectedSession
+            }
+        )
+
+        repository.saveOfflineIndex([], now: 100)
+        XCTAssertNotNil(repository.loadOfflineIndex(now: 200))
+        XCTAssertNil(repository.loadCandidates(for: "missing"))
+        XCTAssertEqual(sessionCreationCount, 0)
+
+        XCTAssertTrue(repository.session === expectedSession)
+        XCTAssertTrue(repository.session === expectedSession)
+        XCTAssertEqual(sessionCreationCount, 1)
+    }
+
+    func testInjectedNetworkSessionDoesNotCallFactory() {
+        let expectedSession = URLSession(configuration: .ephemeral)
+        defer { expectedSession.invalidateAndCancel() }
+        let repository = AutoEQLegacyRepository(
+            applicationSupportDirectory: temporaryDirectory,
+            session: expectedSession,
+            sessionFactory: {
+                XCTFail("An injected session must take priority over the factory")
+                return expectedSession
+            }
+        )
+
+        XCTAssertTrue(repository.session === expectedSession)
+    }
+
     func testCandidateCacheRoundTripAndExpiration() throws {
         let repository = AutoEQLegacyRepository(applicationSupportDirectory: temporaryDirectory)
         let candidate = SearchCandidate(

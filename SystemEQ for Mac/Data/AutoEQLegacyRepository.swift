@@ -1,13 +1,22 @@
+import Combine
 import Foundation
 
-struct AutoEQLegacyRepository {
+final class AutoEQLegacyRepository: ObservableObject {
     struct IndexSnapshot: Equatable {
         let entries: [OfflineIndexEntry]
         let lastUpdate: TimeInterval
         let needsUpdate: Bool
     }
 
-    let session: URLSession
+    private var cachedSession: URLSession?
+    private let sessionFactory: () -> URLSession
+
+    var session: URLSession {
+        if let cachedSession { return cachedSession }
+        let session = sessionFactory()
+        cachedSession = session
+        return session
+    }
 
     private let applicationSupportDirectory: URL?
     private let bundle: Bundle
@@ -23,13 +32,20 @@ struct AutoEQLegacyRepository {
             create: true
         )
         self.bundle = bundle
-        self.session = session ?? Self.makeSession()
+        cachedSession = session
+        sessionFactory = Self.makeSession
     }
 
-    init(applicationSupportDirectory: URL?, bundle: Bundle = .main, session: URLSession? = nil) {
+    init(
+        applicationSupportDirectory: URL?,
+        bundle: Bundle = .main,
+        session: URLSession? = nil,
+        sessionFactory: @escaping () -> URLSession = AutoEQLegacyRepository.makeSession
+    ) {
         self.applicationSupportDirectory = applicationSupportDirectory
         self.bundle = bundle
-        self.session = session ?? Self.makeSession()
+        cachedSession = session
+        self.sessionFactory = sessionFactory
     }
 
     // MARK: - Offline Index
@@ -116,7 +132,7 @@ struct AutoEQLegacyRepository {
         return allowed.replacingOccurrences(of: "  ", with: " ")
     }
 
-    private static func makeSession() -> URLSession {
+    nonisolated private static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.urlCache = URLCache(
