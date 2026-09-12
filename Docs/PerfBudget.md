@@ -1,6 +1,6 @@
 # Performance & Latency Budget
 
-Updated: 2026-09-11.
+Updated: 2026-09-12.
 
 ## Targets
 
@@ -58,6 +58,14 @@ No measured DSP-call interval exceeded the buffer duration across these runs and
 Raw local results are in `LocalArtifacts/DSPBenchmark/baseline-2026-09-11.json` and `baseline-repeat-2026-09-11.json`. `LocalArtifacts/` is ignored by Git; use the command above to reproduce them on another checkout.
 
 ## Measurements still required
+
+Diagnostic report format 3 includes the executable Mach-O UUID, bundle build number, and Debug/Release configuration. The UUID identifies the actual binary even when multiple local builds share a marketing version; compare it with `dwarfdump --uuid` for the executable being profiled.
+
+Diagnostic history is held only in memory, capped at 100 events. Each entry is limited to 16 fields, 128 UTF-8 bytes for names/keys, and 512 bytes per value. Old entries are discarded, and the report states the discarded count and diagnostic session start. The app creates no automatic diagnostic log files. Exported reports are written only after the user selects a save destination and remain user-owned files; SystemEQ does not delete them automatically.
+
+BlackHole reports distinguish processing-buffer capacity, ring-buffer capacity, and the last fill level before a read, paired with the number of frames requested by that read. The fill is not an end-to-end latency measurement. Underrun/overrun counters use C11 atomic increments and exchanges; export resets these interval counters and reports elapsed monotonic time since the previous sample or buffer reset. The corresponding 100000-read concurrent sampling test passed under Thread Sanitizer; this only covers that tested scenario. Native/inactive routes mark BlackHole ring statistics as not applicable. Callback timing remains Debug-only; Release events label it unavailable.
+
+Routing requests now include a trigger for backend selection, output selection, sample-rate changes, system-output changes, device recovery, output removal/return, and wake. Sleep and scheduled wake recovery are retained as separate bounded events. Generic enable requests remain labelled `request`.
 
 - Do not use the previous AVAudioPlayerNode loopback probe as an absolute latency number: it included player scheduling, and Native capture could observe the direct Scarlett signal.
 - Measure Native and BlackHole under identical sample rate, buffer size, output device, EQ mode, and audio material.

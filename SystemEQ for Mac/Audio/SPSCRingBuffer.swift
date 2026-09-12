@@ -25,11 +25,10 @@ public final class SPSCRingBuffer {
     private let writePtr: UnsafeMutablePointer<SEQAtomicInt64>
     private let readPtr: UnsafeMutablePointer<SEQAtomicInt64>
 
-    // Health counters — each written by exactly one thread, read from main.
-    // Non-atomic is fine for eventual-consistency telemetry.
-    var underrunCount: Int32 = 0
-    var overrunCount: Int32 = 0
-    var lastFillLevelFrames: Int32 = 0
+    private let underruns: UnsafeMutablePointer<SEQAtomicInt32>
+    private let overruns: UnsafeMutablePointer<SEQAtomicInt32>
+    private let readSnapshot: UnsafeMutablePointer<SEQAtomicInt64>
+    private var diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
 
     // MARK: - Init / Deinit
 
@@ -38,12 +37,21 @@ public final class SPSCRingBuffer {
         readPtr = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
         seq_atomic_int64_init(writePtr, 0)
         seq_atomic_int64_init(readPtr, 0)
+        underruns = .allocate(capacity: 1)
+        overruns = .allocate(capacity: 1)
+        readSnapshot = .allocate(capacity: 1)
+        seq_atomic_int32_init(underruns, 0)
+        seq_atomic_int32_init(overruns, 0)
+        seq_atomic_int64_init(readSnapshot, 0)
     }
 
     deinit {
         deallocate()
         writePtr.deallocate()
         readPtr.deallocate()
+        underruns.deallocate()
+        overruns.deallocate()
+        readSnapshot.deallocate()
     }
 
     // MARK: - Index accessors
@@ -92,8 +100,7 @@ public final class SPSCRingBuffer {
         left?.initialize(repeating: 0, count: capacity)
         right?.initialize(repeating: 0, count: capacity)
 
-        seq_atomic_int64_init(writePtr, 0)
-        seq_atomic_int64_init(readPtr, 0)
+        reset()
 
         dlog("🧱 SPSCRingBuffer allocated: \(capacity) frames", category: .engine)
     }
@@ -151,7 +158,7 @@ public final class SPSCRingBuffer {
         let avail = capacity - (w - rIdx)
         let toWrite = min(frameCount, max(0, avail))
         if toWrite < frameCount {
-            overrunCount &+= 1
+            seq_atomic_int32_fetch_add(overruns, 1)
         }
         guard toWrite > 0 else { return 0 }
 
@@ -197,9 +204,9 @@ public final class SPSCRingBuffer {
         let toRead = min(framesRequested, max(0, avail))
         let under = framesRequested - toRead
 
-        lastFillLevelFrames = Int32(truncatingIfNeeded: avail)
+        publishReadSnapshot(available: avail, requested: framesRequested)
         if under > 0 {
-            underrunCount &+= 1
+            seq_atomic_int32_fetch_add(underruns, 1)
         }
 
         if toRead > 0 {
@@ -237,9 +244,9 @@ public final class SPSCRingBuffer {
         let toRead = min(framesRequested, max(0, avail))
         let under = framesRequested - toRead
 
-        lastFillLevelFrames = Int32(truncatingIfNeeded: avail)
+        publishReadSnapshot(available: avail, requested: framesRequested)
         if under > 0 {
-            underrunCount &+= 1
+            seq_atomic_int32_fetch_add(underruns, 1)
         }
 
         if toRead > 0 {
@@ -278,18 +285,29 @@ public final class SPSCRingBuffer {
     func reset() {
         seq_atomic_int64_init(writePtr, 0)
         seq_atomic_int64_init(readPtr, 0)
-        underrunCount = 0
-        overrunCount = 0
-        lastFillLevelFrames = 0
+        seq_atomic_int32_store_release(underruns, 0)
+        seq_atomic_int32_store_release(overruns, 0)
+        seq_atomic_int64_store_release(readSnapshot, 0)
+        diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
     }
 
-    func snapshotAndResetDiag() -> (underruns: Int32, overruns: Int32, fill: Int32, capacity: Int) {
-        let u = underrunCount
-        let o = overrunCount
-        let f = lastFillLevelFrames
-        underrunCount = 0
-        overrunCount = 0
-        return (u, o, f, capacity)
+    @inline(__always)
+    private func publishReadSnapshot(available: Int, requested: Int) {
+        let packed = UInt64(UInt32(truncatingIfNeeded: available)) << 32 |
+            UInt64(UInt32(truncatingIfNeeded: requested))
+        seq_atomic_int64_store_release(readSnapshot, Int64(bitPattern: packed))
+    }
+
+    func snapshotAndResetDiag() -> (
+        underruns: Int32, overruns: Int32, fill: Int32, requested: UInt32, capacity: Int, intervalSeconds: Double
+    ) {
+        let u = seq_atomic_int32_exchange(underruns, 0)
+        let o = seq_atomic_int32_exchange(overruns, 0)
+        let packed = UInt64(bitPattern: seq_atomic_int64_load_acquire(readSnapshot))
+        let now = ProcessInfo.processInfo.systemUptime
+        let interval = max(0, now - diagnosticIntervalStart)
+        diagnosticIntervalStart = now
+        return (u, o, Int32(truncatingIfNeeded: packed >> 32), UInt32(truncatingIfNeeded: packed), capacity, interval)
     }
 }
 

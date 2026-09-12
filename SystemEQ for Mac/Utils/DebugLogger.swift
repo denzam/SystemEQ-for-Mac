@@ -1,4 +1,39 @@
 import Foundation
+import MachO
+
+// MARK: - Diagnostic Build
+
+enum DiagnosticBuild {
+    static var configuration: String {
+        #if DEBUG
+            "Debug"
+        #else
+            "Release"
+        #endif
+    }
+
+    static var executableUUID: String {
+        guard let header = _dyld_get_image_header(0), header.pointee.magic == MH_MAGIC_64 else {
+            return "unavailable"
+        }
+        let start = UnsafeRawPointer(header).advanced(by: MemoryLayout<mach_header_64>.size)
+        var offset = 0
+        let size = Int(header.pointee.sizeofcmds)
+        for _ in 0..<header.pointee.ncmds {
+            guard offset <= size - MemoryLayout<load_command>.size else { break }
+            let command = start.advanced(by: offset).load(as: load_command.self)
+            let commandSize = Int(command.cmdsize)
+            guard commandSize >= MemoryLayout<load_command>.size, commandSize <= size - offset else { break }
+            if command.cmd == LC_UUID, commandSize >= MemoryLayout<uuid_command>.size {
+                return UUID(uuid: start.advanced(by: offset).load(as: uuid_command.self).uuid).uuidString
+            }
+            offset += commandSize
+        }
+        return "unavailable"
+    }
+}
+
+// MARK: - Diagnostic Events
 
 struct DiagnosticEvent: Equatable {
     let timestamp: Date
@@ -12,16 +47,27 @@ nonisolated final class DiagnosticEventStore: @unchecked Sendable {
     private let capacity: Int
     private let lock = NSLock()
     private var events: [DiagnosticEvent] = []
+    private var discardedEvents: UInt64 = 0
+    private let sessionStarted = Date()
 
     init(capacity: Int = 100) {
-        self.capacity = max(capacity, 1)
+        self.capacity = min(max(capacity, 1), 100)
     }
 
     func record(_ name: String, details: [String: String] = [:]) {
-        let event = DiagnosticEvent(timestamp: Date(), name: name, details: details)
+        var boundedDetails: [String: String] = [:]
+        for (key, value) in details.prefix(16) {
+            boundedDetails[Self.boundedText(key, bytes: 128)] = Self.boundedText(value, bytes: 512)
+        }
+        let event = DiagnosticEvent(
+            timestamp: Date(),
+            name: Self.boundedText(name, bytes: 128),
+            details: boundedDetails
+        )
         lock.lock()
         events.append(event)
         if events.count > capacity {
+            discardedEvents &+= UInt64(events.count - capacity)
             events.removeFirst(events.count - capacity)
         }
         lock.unlock()
@@ -35,11 +81,20 @@ nonisolated final class DiagnosticEventStore: @unchecked Sendable {
     }
 
     func reportText() -> String {
-        let events = snapshot()
-        guard !events.isEmpty else { return "No SystemEQ diagnostic events were recorded in this session." }
+        lock.lock()
+        let events = events
+        let discarded = discardedEvents
+        lock.unlock()
 
         let formatter = ISO8601DateFormatter()
-        return events.map { event in
+        let header = """
+        Retention: memory only; newest \(capacity) events; cleared on app exit; no automatic log files
+        Entry limits: 16 fields; name/key 128 UTF-8 bytes; value 512 UTF-8 bytes (truncated if longer)
+        Diagnostic session started: \(formatter.string(from: sessionStarted))
+        Retained events: \(events.count); discarded older events: \(discarded)
+        """
+        guard !events.isEmpty else { return header + "\nNo SystemEQ diagnostic events were recorded in this session." }
+        return header + "\n" + events.map { event in
             let details = event.details
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key)=\($0.value)" }
@@ -48,6 +103,16 @@ nonisolated final class DiagnosticEventStore: @unchecked Sendable {
                 ? "\(formatter.string(from: event.timestamp)) \(event.name)"
                 : "\(formatter.string(from: event.timestamp)) \(event.name): \(details)"
         }.joined(separator: "\n")
+    }
+
+    private static func boundedText(_ text: String, bytes: Int) -> String {
+        var prefix = text.utf8.prefix(bytes)
+        while String(bytes: prefix, encoding: .utf8) == nil {
+            prefix = prefix.dropLast()
+        }
+        return String(decoding: prefix, as: UTF8.self)
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
     }
 }
 

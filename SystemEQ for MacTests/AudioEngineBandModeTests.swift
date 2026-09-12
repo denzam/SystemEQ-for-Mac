@@ -783,6 +783,97 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(events.map(\.name), ["routing.volumeTransfer", "engine.start.succeeded"])
         XCTAssertFalse(store.reportText().contains("routing.enable.request"))
         XCTAssertTrue(store.reportText().contains("requestedScalar=1.000"))
+        XCTAssertTrue(store.reportText().contains("discarded older events: 1"))
+    }
+
+    func testDiagnosticHistoryRemainsBoundedWithLargeUnicodeEntries() {
+        let store = DiagnosticEventStore(capacity: 1000)
+        let text = String(repeating: "🎵\n", count: 1000)
+        let details = Dictionary(uniqueKeysWithValues: (0..<40).map { ("field\($0)", text) })
+        for _ in 0..<110 {
+            store.record(text, details: details)
+        }
+
+        let events = store.snapshot()
+        XCTAssertEqual(events.count, 100)
+        for event in events {
+            XCTAssertLessThanOrEqual(event.name.utf8.count, 128)
+            XCTAssertFalse(event.name.contains("\n"))
+            XCTAssertLessThanOrEqual(event.details.count, 16)
+            for (key, value) in event.details {
+                XCTAssertLessThanOrEqual(key.utf8.count, 128)
+                XCTAssertLessThanOrEqual(value.utf8.count, 512)
+                XCTAssertFalse(value.contains("\n"))
+                XCTAssertFalse(value.contains("�"))
+            }
+        }
+        XCTAssertTrue(store.reportText().contains("discarded older events: 10"))
+    }
+
+    func testDiagnosticExecutableIdentityIsAvailable() {
+        XCTAssertNotNil(UUID(uuidString: DiagnosticBuild.executableUUID))
+    }
+
+    func testRingDiagnosticsDescribeReadAndResetWithoutChangingAudio() {
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 1024)
+        let input = UnsafeMutablePointer<Float>.allocate(capacity: 1025)
+        input.initialize(repeating: 0.25, count: 1025)
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: 1025)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: 1025)
+        defer {
+            input.deallocate()
+            left.deallocate()
+            right.deallocate()
+        }
+        XCTAssertEqual(ring.write(inL: input, inR: input, frameCount: 1025), 1024)
+        ring.readNonInterleaved(outL: left, outR: right, framesRequested: 1025)
+        let health = ring.snapshotAndResetDiag()
+        XCTAssertEqual(health.fill, 1024)
+        XCTAssertEqual(health.requested, 1025)
+        XCTAssertEqual(health.capacity, 1024)
+        XCTAssertEqual(health.underruns, 1)
+        XCTAssertEqual(health.overruns, 1)
+        XCTAssertGreaterThanOrEqual(health.intervalSeconds, 0)
+        XCTAssertEqual(left[0], 0.25)
+        XCTAssertEqual(right[1023], 0.25)
+        XCTAssertEqual(left[1024], 0)
+        let next = ring.snapshotAndResetDiag()
+        XCTAssertEqual(next.underruns, 0)
+        XCTAssertEqual(next.overruns, 0)
+        ring.reset()
+        XCTAssertEqual(ring.snapshotAndResetDiag().requested, 0)
+    }
+
+    func testConcurrentRingDiagnosticSamplingPreservesUnderrunCount() {
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 1024)
+        let finished = expectation(description: "Ring reads completed")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let left = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+            let right = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+            defer {
+                left.deallocate()
+                right.deallocate()
+            }
+            for _ in 0..<100_000 {
+                ring.readNonInterleaved(outL: left, outR: right, framesRequested: 1)
+            }
+            finished.fulfill()
+        }
+        var total: Int64 = 0
+        for _ in 0..<1000 {
+            total += Int64(ring.snapshotAndResetDiag().underruns)
+        }
+        wait(for: [finished], timeout: 10)
+        total += Int64(ring.snapshotAndResetDiag().underruns)
+        XCTAssertEqual(total, 100_000)
+    }
+
+    func testNativeDiagnosticReportDoesNotClaimBlackHoleHealth() {
+        let report = CoreAudioEngine.shared.diagnosticSummary(backend: .native)
+        XCTAssertTrue(report.contains("not applicable"))
+        XCTAssertFalse(report.contains("Underruns in interval"))
     }
 
     func testProcessTapInputSelectsUniqueStereoTapStream() {

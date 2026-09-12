@@ -42,6 +42,18 @@ struct OutputVolumeState: Equatable {
     }
 }
 
+enum RoutingRequestReason: String {
+    case request
+    case backendPreferenceChanged
+    case outputSelected
+    case sampleRateChanged
+    case systemOutputChanged
+    case preferredOutputReturned
+    case outputDisconnected
+    case deviceRecovery
+    case wake
+}
+
 enum OutputVolumeTransfer {
     static func transfer(
         from source: AudioDeviceID,
@@ -247,7 +259,7 @@ public final class AudioRouter: ObservableObject {
         UserDefaults.standard.set(preference.rawValue, forKey: Self.backendPreferenceKey)
         updateStatus()
         if isRoutingOwned {
-            enableEQRouting(forceRestart: true)
+            enableEQRouting(forceRestart: true, reason: .backendPreferenceChanged)
         }
     }
 
@@ -530,7 +542,7 @@ public final class AudioRouter: ObservableObject {
             wakeRestartTask?.cancel()
             wakeRestartTask = nil
             wasRoutingBeforeSleep = false
-            enableEQRouting(forceRestart: true)
+            enableEQRouting(forceRestart: true, reason: .outputSelected)
         }
     }
 
@@ -637,10 +649,13 @@ public final class AudioRouter: ObservableObject {
     @discardableResult
     func enableEQRouting(
         forceRestart: Bool = false,
-        persistEnabledStateOnFailure: Bool = true
+        persistEnabledStateOnFailure: Bool = true,
+        reason: RoutingRequestReason = .request
     ) -> Bool {
         guard let physicalOutput = preferredOutputDevice() else {
-            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "noPhysicalOutput"])
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: [
+                "reason": "noPhysicalOutput", "trigger": reason.rawValue
+            ])
             errorLog("No physical output device found!", category: .routing)
             return false
         }
@@ -650,6 +665,7 @@ public final class AudioRouter: ObservableObject {
             details: [
                 "backendPreference": backendPreference.rawValue,
                 "forceRestart": "\(forceRestart)",
+                "trigger": reason.rawValue,
                 "outputKind": diagnosticDeviceKind(physicalOutput)
             ]
         )
@@ -707,7 +723,7 @@ public final class AudioRouter: ObservableObject {
         setAsDefaultOutputDevice(output)
         let nativeEngine = ProcessTapEngine()
         nativeEngine.onSampleRateChange = { [weak self] in
-            self?.enableEQRouting(forceRestart: true)
+            self?.enableEQRouting(forceRestart: true, reason: .sampleRateChanged)
         }
         switch nativeEngine.start(outputDeviceID: output.id, prepareProcessing: { sampleRate, bufferFrames in
             CoreAudioEngine.shared.prepareProcessTap(
@@ -1667,7 +1683,7 @@ public final class AudioRouter: ObservableObject {
         preferredOutputUID = device.uid
         selectedOutputDevice = device
         dlog("System output changed to \(device.name) — rebuilding EQ routing", category: .routing)
-        enableEQRouting(forceRestart: true)
+        enableEQRouting(forceRestart: true, reason: .systemOutputChanged)
     }
 
     /// Runs after every debounced device-list change. Catches the states that kill
@@ -1683,7 +1699,7 @@ public final class AudioRouter: ObservableObject {
             if let wantedUID = preferredOutputUID,
                wantedUID != outputUID,
                outputDevices.contains(where: { $0.uid == wantedUID }) {
-                enableEQRouting(forceRestart: true)
+                enableEQRouting(forceRestart: true, reason: .preferredOutputReturned)
                 return
             }
             guard let output = outputDevices.first(where: { $0.uid == outputUID }) else {
@@ -1692,11 +1708,11 @@ public final class AudioRouter: ObservableObject {
                     disableEQRouting()
                     return
                 }
-                enableEQRouting(forceRestart: true)
+                enableEQRouting(forceRestart: true, reason: .outputDisconnected)
                 return
             }
             if !CoreAudioEngine.shared.isRunning || CoreAudioEngine.shared.currentOutputDeviceID != output.id {
-                enableEQRouting(forceRestart: true)
+                enableEQRouting(forceRestart: true, reason: .deviceRecovery)
             }
             return
         }
@@ -1723,7 +1739,7 @@ public final class AudioRouter: ObservableObject {
            wantedUID != outputUID,
            outputDevices.contains(where: { $0.uid == wantedUID }) {
             dlog("Preferred output reappeared — switching back", level: .info, category: .routing)
-            enableEQRouting(forceRestart: true)
+            enableEQRouting(forceRestart: true, reason: .preferredOutputReturned)
             return
         }
 
@@ -1745,7 +1761,7 @@ public final class AudioRouter: ObservableObject {
                 level: .warning,
                 category: .routing
             )
-            enableEQRouting(forceRestart: true)
+            enableEQRouting(forceRestart: true, reason: .outputDisconnected)
             return
         }
 
@@ -1757,7 +1773,7 @@ public final class AudioRouter: ObservableObject {
                 level: .warning,
                 category: .routing
             )
-            enableEQRouting(forceRestart: true)
+            enableEQRouting(forceRestart: true, reason: .deviceRecovery)
         }
     }
 
@@ -1788,6 +1804,8 @@ public final class AudioRouter: ObservableObject {
         let hadPendingWakeRestart = wakeRestartTask != nil
         guard CoreAudioEngine.shared.isRunning || hadPendingWakeRestart else { return }
 
+        DiagnosticEventStore.shared.record("routing.sleep")
+
         wakeRestartTask?.cancel()
         wakeRestartTask = nil
         wasRoutingBeforeSleep = true
@@ -1804,6 +1822,7 @@ public final class AudioRouter: ObservableObject {
     @objc
     private func handleDidWake(_ notification: Notification) {
         guard wasRoutingBeforeSleep else { return }
+        DiagnosticEventStore.shared.record("routing.wake.scheduled")
         wasRoutingBeforeSleep = false
 
         wakeRestartTask?.cancel()
@@ -1815,7 +1834,7 @@ public final class AudioRouter: ObservableObject {
             await self.refreshDevices()
             guard !Task.isCancelled else { return }
             dlog("Wake — restoring EQ routing", level: .info, category: .routing)
-            self.enableEQRouting(forceRestart: true)
+            self.enableEQRouting(forceRestart: true, reason: .wake)
         }
     }
 

@@ -710,10 +710,13 @@ struct SettingsView: View {
 
         return """
         SystemEQ diagnostic report
-        Report format: 2
+        Report format: 3
         Privacy: This report contains only SystemEQ state and generic audio-device capabilities. It contains no audio, media metadata, device names, UIDs, file paths, or automatic upload.
         Created: \(ISO8601DateFormatter().string(from: Date()))
         App version: \(version)
+        App build: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown")
+        Build configuration: \(DiagnosticBuild.configuration)
+        Executable UUID: \(DiagnosticBuild.executableUUID)
         macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Launch at login: \(launchManager.isEnabled)
         Startup mode: \(startupMode.rawValue)
@@ -734,7 +737,7 @@ struct SettingsView: View {
         \(router.diagnosticSummary())
 
         --- Core Audio state ---
-        \(core.diagnosticSummary())
+        \(core.diagnosticSummary(backend: router.activeBackend))
 
         --- Recent SystemEQ diagnostic events ---
         \(DiagnosticEventStore.shared.reportText())

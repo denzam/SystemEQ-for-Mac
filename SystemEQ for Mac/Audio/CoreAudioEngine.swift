@@ -1188,6 +1188,9 @@ public final class CoreAudioEngine: ObservableObject {
         underruns: Int32,
         overruns: Int32,
         fill: Int32,
+        requested: UInt32,
+        capacity: Int,
+        intervalSeconds: Double,
         maxNanos: UInt64,
         averageNanos: UInt64,
         deadlineNanos: UInt64,
@@ -1212,25 +1215,34 @@ public final class CoreAudioEngine: ObservableObject {
         let isNotable = diag.underruns > 0 || diag.overruns > 0 ||
             (deadlineNanos > 0 && maxNanos > deadlineNanos / 2)
         if isNotable {
-            DiagnosticEventStore.shared.record(
-                "engine.audioHealth",
-                details: [
+            var details = [
+                "bufferCapacityFrames": "\(diag.capacity)",
+                "fillFramesBeforeRead": "\(diag.fill)",
+                "requestedFrames": "\(diag.requested)",
+                "intervalSeconds": String(format: "%.3f", diag.intervalSeconds),
+                "overruns": "\(diag.overruns)",
+                "source": source,
+                "underruns": "\(diag.underruns)",
+                "callbackTiming": "unavailable"
+            ]
+            #if DEBUG
+                details["callbackTiming"] = "debug"
+                details.merge([
                     "averageCallbackMicros": "\(averageNanos / 1000)",
-                    "bufferCapacityFrames": "\(diag.capacity)",
                     "deadlineMicros": "\(deadlineNanos / 1000)",
-                    "fillFrames": "\(diag.fill)",
-                    "maxCallbackMicros": "\(maxNanos / 1000)",
-                    "overruns": "\(diag.overruns)",
-                    "source": source,
-                    "underruns": "\(diag.underruns)"
-                ]
-            )
+                    "maxCallbackMicros": "\(maxNanos / 1000)"
+                ], uniquingKeysWith: { _, new in new })
+            #endif
+            DiagnosticEventStore.shared.record("engine.audioHealth", details: details)
         }
 
         return (
             diag.underruns,
             diag.overruns,
             diag.fill,
+            diag.requested,
+            diag.capacity,
+            diag.intervalSeconds,
             maxNanos,
             averageNanos,
             deadlineNanos,
@@ -1277,19 +1289,31 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Diagnostics API
 
-    func diagnosticSummary() -> String {
+    func diagnosticSummary(backend: ActiveAudioRoutingBackend) -> String {
         let pipeline = vdspFilter != nil ? "vDSP" : filterChain != nil ? "scalar" : "none"
-        let health = snapshotAudioHealth(source: "export")
-        return """
+        let summary = """
         Setup complete: \(isSetupComplete)
         Engine running: \(isRunning)
         Processing pipeline: \(pipeline)
         Client sample rate: \(String(format: "%.0f", currentSampleRate)) Hz
         Channels: \(channelCount)
-        Buffer capacity: \(allocatedFrameCapacity) frames
-        Ring-buffer fill: \(health.fill) frames
-        Underruns since last sample: \(health.underruns)
-        Overruns since last sample: \(health.overruns)
+        Processing buffer capacity (not latency): \(allocatedFrameCapacity) frames
+        """
+        guard backend == .blackHole, isRunning else {
+            return summary + "\nBlackHole ring-buffer health: not applicable (backend inactive)"
+        }
+        let health = snapshotAudioHealth(source: "export")
+        return summary + "\n" + """
+        Ring-buffer capacity: \(health.capacity) frames
+        Last ring-buffer fill before read: \(health.fill) frames
+        Frames requested by that read: \(health.requested)
+        Counter interval: \(String(
+            format: "%.3f",
+            health.intervalSeconds
+        )) seconds since previous sample or buffer reset
+        Underruns in interval: \(health.underruns)
+        Overruns in interval: \(health.overruns)
+        Export resets interval counters. Fill is a last-read snapshot, not measured end-to-end latency.
         """
     }
 
