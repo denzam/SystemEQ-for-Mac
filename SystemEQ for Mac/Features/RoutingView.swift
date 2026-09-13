@@ -88,16 +88,23 @@ struct RoutingView: View {
             // System Output Management
             systemOutputCard
 
-            // Input Device Selection
-            deviceSelectionCard(
-                title: localization.localized(.inputDevice),
-                subtitle: localization.localized(.routingDesc), // Using similar context
-                devices: audioRouter.inputDevices,
-                selectedDevice: audioRouter.selectedInputDevice,
-                onSelect: { device in
-                    audioRouter.selectInputDevice(device)
-                }
-            )
+            if audioRouter.activeBackend == .native {
+                statusCheckCard(
+                    title: localization.localized(.audioBackend),
+                    status: .success,
+                    message: localization.localized(.audioBackendNative)
+                )
+            } else {
+                deviceSelectionCard(
+                    title: localization.localized(.inputDevice),
+                    subtitle: localization.localized(.routingDesc),
+                    devices: audioRouter.inputDevices,
+                    selectedDevice: audioRouter.selectedInputDevice,
+                    onSelect: { device in
+                        audioRouter.selectInputDevice(device)
+                    }
+                )
+            }
 
             // Output Device Selection
             deviceSelectionCard(
@@ -384,11 +391,19 @@ struct RoutingView: View {
                     .localized(.notInstalled)
             )
 
-            statusCheckCard(
-                title: localization.localized(.inputDevice),
-                status: audioRouter.selectedInputDevice != nil ? .success : .warning,
-                message: audioRouter.selectedInputDevice?.name ?? localization.localized(.notConfigured)
-            )
+            if audioRouter.activeBackend == .native {
+                statusCheckCard(
+                    title: localization.localized(.audioBackend),
+                    status: .success,
+                    message: localization.localized(.audioBackendNative)
+                )
+            } else {
+                statusCheckCard(
+                    title: localization.localized(.inputDevice),
+                    status: audioRouter.selectedInputDevice != nil ? .success : .warning,
+                    message: audioRouter.selectedInputDevice?.name ?? localization.localized(.notConfigured)
+                )
+            }
 
             statusCheckCard(
                 title: localization.localized(.outputDevice),
