@@ -189,6 +189,7 @@ final class ProjectMHelperClient: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self,
                   self.socketIsCurrent(originalSocket, generation: generation) else { return }
+            DiagnosticEventStore.shared.record("visualizer.ipc.disconnected", details: ["reason": "writeFailure"])
             self.disconnectSocket()
         }
     }
@@ -215,12 +216,20 @@ final class ProjectMHelperClient: ObservableObject {
 
     func start(frame: NSRect) {
         guard !isRunning else { return }
+        DiagnosticEventStore.shared.record("visualizer.start.request", details: [
+            "category": selectedCategory == "All" ? "all" : "filtered",
+            "locked": isPresetLocked ? "true" : "false",
+            "quality": selectedQuality,
+            "shuffle": isShuffleEnabled ? "true" : "false",
+            "weight": selectedWeight
+        ])
         helperGeneration &+= 1
         let generation = helperGeneration
 
         // Find helper app in bundle
         guard let helperURL = findHelperApp() else {
             dlog("❌ ProjectMHelper not found in bundle", level: .error, category: .audio)
+            DiagnosticEventStore.shared.record("visualizer.start.failed", details: ["reason": "helperMissing"])
             return
         }
 
@@ -245,6 +254,7 @@ final class ProjectMHelperClient: ObservableObject {
             isRunning = true
 
             dlog("✅ ProjectMHelper launched (PID: \(process.processIdentifier))", category: .audio)
+            DiagnosticEventStore.shared.record("visualizer.helper.launched")
 
             // Monitor process termination (user closes window).
             process.terminationHandler = { [weak self] terminatedProcess in
@@ -252,7 +262,15 @@ final class ProjectMHelperClient: ObservableObject {
                     guard let self,
                           self.helperGeneration == generation,
                           self.helperProcess === terminatedProcess else { return }
-                    dlog("🛑 ProjectMHelper terminated by user", category: .audio)
+                    let reason = terminatedProcess.terminationReason == .exit ? "exit" : "signal"
+                    dlog(
+                        "🛑 ProjectMHelper terminated (\(reason), status \(terminatedProcess.terminationStatus))",
+                        category: .audio
+                    )
+                    DiagnosticEventStore.shared.record("visualizer.helper.terminated", details: [
+                        "reason": reason,
+                        "status": "\(terminatedProcess.terminationStatus)"
+                    ])
                     self.cleanupAfterTermination()
                 }
             }
@@ -268,6 +286,7 @@ final class ProjectMHelperClient: ObservableObject {
 
         } catch {
             dlog("❌ Failed to launch ProjectMHelper: \(error)", level: .error, category: .audio)
+            DiagnosticEventStore.shared.record("visualizer.start.failed", details: ["reason": "processLaunch"])
         }
     }
 
@@ -321,6 +340,7 @@ final class ProjectMHelperClient: ObservableObject {
         socketPath = nil
 
         dlog("🛑 ProjectMHelper stopped", category: .audio)
+        DiagnosticEventStore.shared.record("visualizer.stop")
     }
 
     // MARK: - Helper Location
@@ -417,6 +437,7 @@ final class ProjectMHelperClient: ObservableObject {
             let sock = socket(AF_UNIX, SOCK_STREAM, 0)
             guard sock >= 0 else {
                 dlog("❌ Failed to create IPC socket", level: .error, category: .audio)
+                DiagnosticEventStore.shared.record("visualizer.ipc.failed", details: ["reason": "socketCreate"])
                 return
             }
 
@@ -442,6 +463,10 @@ final class ProjectMHelperClient: ObservableObject {
 
             guard connectResult == 0 else {
                 dlog("❌ Failed to connect to helper socket: \(errno)", level: .error, category: .audio)
+                DiagnosticEventStore.shared.record("visualizer.ipc.failed", details: [
+                    "reason": "connect",
+                    "status": "\(errno)"
+                ])
                 close(sock)
                 return
             }
@@ -460,16 +485,20 @@ final class ProjectMHelperClient: ObservableObject {
                 let generation = self.installSocket(sock)
                 self.startReadingResponses(socket: sock, generation: generation)
                 self.startAudioSending()
-                for command in Self.startupCommands(
+                let startupCommands = Self.startupCommands(
                     category: self.selectedCategory,
                     weight: self.selectedWeight,
                     quality: self.selectedQuality,
                     shuffle: self.isShuffleEnabled,
                     locked: self.isPresetLocked
-                ) {
+                )
+                for command in startupCommands {
                     self.sendCommand(command)
                 }
                 dlog("✅ Connected to ProjectMHelper IPC", category: .audio)
+                DiagnosticEventStore.shared.record("visualizer.ipc.connected", details: [
+                    "replayedCommands": "\(startupCommands.count)"
+                ])
             }
         }
     }
@@ -498,6 +527,10 @@ final class ProjectMHelperClient: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self,
                           self.socketIsCurrent(socket, generation: generation) else { return }
+                    DiagnosticEventStore.shared.record(
+                        "visualizer.ipc.disconnected",
+                        details: ["reason": "peerClosed"]
+                    )
                     self.disconnectSocket()
                 }
             }
