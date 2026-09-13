@@ -460,9 +460,14 @@ final class ProjectMHelperClient: ObservableObject {
                 let generation = self.installSocket(sock)
                 self.startReadingResponses(socket: sock, generation: generation)
                 self.startAudioSending()
-                // Відновити збережену якість (helper стартує з High)
-                if self.selectedQuality != "High" {
-                    self.sendCommand("QUALITY:\(self.selectedQuality)")
+                for command in Self.startupCommands(
+                    category: self.selectedCategory,
+                    weight: self.selectedWeight,
+                    quality: self.selectedQuality,
+                    shuffle: self.isShuffleEnabled,
+                    locked: self.isPresetLocked
+                ) {
+                    self.sendCommand(command)
                 }
                 dlog("✅ Connected to ProjectMHelper IPC", category: .audio)
             }
@@ -538,8 +543,22 @@ final class ProjectMHelperClient: ObservableObject {
                 guard let self, self.socketIsCurrent(socket, generation: generation) else { return }
                 if let name = status["presetName"] as? String { self.currentPresetName = name }
                 if let count = status["presetCount"] as? Int { self.presetCount = count }
-                if let category = status["category"] as? String { self.currentCategory = category }
-                if let weight = status["weight"] as? String { self.currentWeight = weight }
+                if let category = status["category"] as? String {
+                    let shouldAdopt = Self.shouldAdoptReportedSelection(
+                        selected: self.selectedCategory,
+                        current: self.currentCategory
+                    )
+                    self.currentCategory = category
+                    if shouldAdopt { self.selectedCategory = category }
+                }
+                if let weight = status["weight"] as? String {
+                    let shouldAdopt = Self.shouldAdoptReportedSelection(
+                        selected: self.selectedWeight,
+                        current: self.currentWeight
+                    )
+                    self.currentWeight = weight
+                    if shouldAdopt { self.selectedWeight = weight }
+                }
                 if let categories = status["categories"] as? [String] { self.availableCategories = categories }
                 if let fps = status["fps"] as? Int { self.currentFPS = fps }
             }
@@ -563,6 +582,26 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     // MARK: - Commands
+
+    nonisolated static func startupCommands(
+        category: String,
+        weight: String,
+        quality: String,
+        shuffle: Bool,
+        locked: Bool
+    ) -> [String] {
+        var commands: [String] = []
+        if category != "All" { commands.append("CATEGORY:\(category)") }
+        if weight != "All" { commands.append("WEIGHT:\(weight)") }
+        if quality != "High" { commands.append("QUALITY:\(quality)") }
+        if !shuffle { commands.append("SHUFFLE:0") }
+        if locked { commands.append("LOCK:1") }
+        return commands
+    }
+
+    nonisolated static func shouldAdoptReportedSelection(selected: String, current: String) -> Bool {
+        selected == current
+    }
 
     nonisolated func sendCommand(_ command: String) {
         ipcQueue.async { [weak self] in

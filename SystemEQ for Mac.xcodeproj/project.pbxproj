@@ -11,6 +11,7 @@
 		C012D7D32F410D3A00DB5B39 /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D22F410D3A00DB5B39 /* OpenGL.framework */; };
 		C012D7D52F410D4300DB5B39 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D42F410D4300DB5B39 /* CoreVideo.framework */; };
 		C012D7D72F410DB100DB5B39 /* ProjectMHelper.app in CopyFiles */ = {isa = PBXBuildFile; fileRef = C012D7BA2F410A9300DB5B39 /* ProjectMHelper.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C0PMADAPT02F4200000000001 /* ProjectMAdaptiveFPS.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0PMADAPT12F4200000000001 /* ProjectMAdaptiveFPS.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -43,6 +44,7 @@
 		C012D7D42F410D4300DB5B39 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 		C06457252E959CD100CF1B0E /* SystemEQ for Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SystemEQ for Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0TEST0012F41200000000001 /* SystemEQ for MacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SystemEQ for MacTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0PMADAPT12F4200000000001 /* ProjectMAdaptiveFPS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SystemEQ for Mac/Audio/Visualizer/ProjectM/ProjectMAdaptiveFPS.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -100,6 +102,7 @@
 				C06457272E959CD100CF1B0E /* SystemEQ for Mac */,
 				C0TEST0022F41200000000002 /* SystemEQ for MacTests */,
 				C012D7BB2F410A9300DB5B39 /* ProjectMHelper */,
+				C0PMADAPT12F4200000000001 /* ProjectMAdaptiveFPS.swift */,
 				C012D7CF2F410D2F00DB5B39 /* Frameworks */,
 				C06457262E959CD100CF1B0E /* Products */,
 			);
@@ -308,6 +311,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0PMADAPT02F4200000000001 /* ProjectMAdaptiveFPS.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

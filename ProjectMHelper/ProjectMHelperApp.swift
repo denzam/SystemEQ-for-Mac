@@ -240,7 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 // MARK: - Preset Weight Classification
 
-enum PresetWeight: String, CaseIterable {
+enum PresetWeight: String, CaseIterable, Sendable {
     case light = "Light"
     case medium = "Medium"
     case heavy = "Heavy"
@@ -260,7 +260,7 @@ enum PresetWeight: String, CaseIterable {
 
 // MARK: - Preset Info
 
-struct PresetInfo {
+struct PresetInfo: Sendable {
     let path: String
     let name: String
     let category: String
@@ -347,6 +347,7 @@ class VisualizerController: NSObject {
     private var availableCategories: [String] = []
     private var currentCategory: String = "All"
     private var currentWeight: PresetWeight = .all
+    private var filterGeneration: UInt64 = 0
 
     // Lock-free audio ring buffer
     private let audioBufferSize = 8192
@@ -390,23 +391,17 @@ class VisualizerController: NSObject {
     private var currentQuality: VisualQuality = .high
 
     // Прапор: змінити backing-розмір GL-поверхні на render-треді під замком (без крадіжки контексту).
-    nonisolated(unsafe) private var needsBackingResize = true
+    private var needsBackingResize = true
 
     // FPS measurement (updated once per second on the render thread)
     private var fpsFrameCount: Int = 0
     private var fpsWindowStart: CFTimeInterval = CACurrentMediaTime()
     private var measuredFPS: Int = 0
-    private var isFPSWarmup = true
-
     // Адаптивний render-scale: дуже важкі пресети самі знижують роздільність, щоб тримати ≥30 FPS.
     // Множиться на якість користувача; перераховується раз на секунду на render-треді.
-    private var adaptiveScale: Double = 1.0
-    private static let minAdaptiveScale = 0.25
-    private static let targetMinFPS = 30
+    private var adaptiveFPS = ProjectMAdaptiveFPS()
 
     private var currentPresetPath: String = ""
-    private var lowFPSSeconds = 0
-    private static let lowFPSSecondsToSkip = 2
 
     // Broken preset blacklist — filled by preset_switch_failed callback, persisted across sessions
     private var brokenPresets: Set<String> = []
@@ -694,6 +689,9 @@ class VisualizerController: NSObject {
                 self.allPresets = presets
                 self.filteredPresets = presets
                 self.availableCategories = sortedCategories
+                if !sortedCategories.contains(self.currentCategory) {
+                    self.currentCategory = "All"
+                }
                 print(
                     "[ProjectMHelper] Scanned \(presets.count) presets: \(lightCount) light, \(mediumCount) medium, \(heavyCount) heavy"
                 )
@@ -735,6 +733,8 @@ class VisualizerController: NSObject {
     private func reloadPlaylist() {
         guard playlistHandle != nil else { return }
 
+        filterGeneration &+= 1
+        let generation = filterGeneration
         let snapshot = allPresets
         let category = currentCategory
         let weight = currentWeight
@@ -748,7 +748,9 @@ class VisualizerController: NSObject {
             }
 
             DispatchQueue.main.async { [weak self] in
-                guard let self, let playlist = self.playlistHandle else { return }
+                guard let self,
+                      self.filterGeneration == generation,
+                      let playlist = self.playlistHandle else { return }
                 projectm_playlist_clear(playlist)
                 for preset in filtered {
                     projectm_playlist_add_preset(playlist, preset.path, false)
@@ -771,7 +773,7 @@ class VisualizerController: NSObject {
     // MARK: - Filter Control
 
     func setCategory(_ category: String) {
-        guard availableCategories.contains(category) else { return }
+        guard category == "All" || availableCategories.contains(category) || allPresets.isEmpty else { return }
         currentCategory = category
         reloadPlaylist()
     }
@@ -788,10 +790,8 @@ class VisualizerController: NSObject {
 
     /// Усі пресети (не лише поточна категорія) як [{name, category, index}].
     /// index == позиція в allPresets → SELECT трактується як глобальний (див. selectPreset).
-    func getPresetList() -> [[String: Any]] {
-        allPresets.enumerated().map { idx, p in
-            ["name": p.name, "category": p.category, "index": idx]
-        }
+    func getPresetSnapshot() -> [PresetInfo] {
+        allPresets
     }
 
     func shutdown() {
@@ -894,46 +894,38 @@ class VisualizerController: NSObject {
     /// Лише вниз і лише поки реально потрібно — без осциляції (інакше backing-resize мерехтить).
     /// Повна роздільність повертається при зміні пресета (resetAdaptiveScale), а не за FPS.
     private func adaptRenderScale() {
-        if isFPSWarmup {
-            isFPSWarmup = false
+        switch adaptiveFPS.observe(
+            measuredFPS: measuredFPS,
+            presetLocked: isPresetLocked,
+            hasPresetPath: !currentPresetPath.isEmpty
+        ) {
+        case .unchanged:
             return
-        }
-        guard measuredFPS > 0 else { return }
-
-        if measuredFPS < Self.targetMinFPS {
-            // Знижуємо роздільність (для багатьох пресетів це повертає 60 FPS) ...
-            if adaptiveScale > Self.minAdaptiveScale {
-                adaptiveScale = max(Self.minAdaptiveScale, adaptiveScale - 0.25)
-                needsBackingResize = true
-                lowFPSSeconds = 0
-                return
+        case .warmup:
+            return
+        case .reduceScale:
+            needsBackingResize = true
+        case .skipPreset:
+            let path = currentPresetPath
+            guard !path.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.currentPresetPath == path,
+                      !self.isPresetLocked,
+                      self.measuredFPS < ProjectMAdaptiveFPS.targetMinFPS,
+                      let playlist = self.playlistHandle else { return }
+                projectm_playlist_play_next(playlist, false)
+                self.updateCurrentPresetName()
             }
-            lowFPSSeconds += 1
-            if lowFPSSeconds >= Self.lowFPSSecondsToSkip, !isPresetLocked {
-                lowFPSSeconds = 0
-                let path = currentPresetPath
-                if !path.isEmpty {
-                    // playlist/файл не чіпаємо з render-треда — на main.
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self,
-                              self.currentPresetPath == path,
-                              !self.isPresetLocked,
-                              self.measuredFPS < Self.targetMinFPS,
-                              let playlist = self.playlistHandle else { return }
-                        projectm_playlist_play_next(playlist, false)
-                        self.updateCurrentPresetName()
-                    }
-                }
-            }
-        } else {
-            lowFPSSeconds = 0
         }
     }
 
     private func resetAdaptiveScale() {
-        if adaptiveScale != 1.0 {
-            adaptiveScale = 1.0
+        if adaptiveFPS.adaptiveScale != 1.0 {
+            adaptiveFPS.reset()
             needsBackingResize = true
+        } else {
+            adaptiveFPS.reset()
         }
     }
 
@@ -1026,12 +1018,16 @@ class VisualizerController: NSObject {
         // Не у поточному playlist → переключаємось на «All» і граємо після перебудови.
         currentCategory = "All"
         currentWeight = .all
+        filterGeneration &+= 1
+        let generation = filterGeneration
         let snapshot = allPresets
         let broken = brokenPresets
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let filtered = snapshot.filter { !broken.contains($0.path) }
             DispatchQueue.main.async {
-                guard let self, let playlist = self.playlistHandle else { return }
+                guard let self,
+                      self.filterGeneration == generation,
+                      let playlist = self.playlistHandle else { return }
                 projectm_playlist_clear(playlist)
                 for preset in filtered {
                     projectm_playlist_add_preset(playlist, preset.path, false)
@@ -1075,8 +1071,6 @@ class VisualizerController: NSObject {
     }
 
     func setQuality(_ quality: VisualQuality) {
-        // Викликається з IPC-треда. НЕ чіпаємо projectM/GL тут (не thread-safe з render-тредом) —
-        // лише виставляємо стан і прапор; mesh + backing застосує renderFrame під замком.
         currentQuality = quality
         needsBackingResize = true
     }
@@ -1089,7 +1083,7 @@ class VisualizerController: NSObject {
         _ cglContext: CGLContextObj
     ) {
         let backing = glView.convertToBacking(glView.bounds)
-        let scale = currentQuality.renderScale * adaptiveScale
+        let scale = currentQuality.renderScale * adaptiveFPS.adaptiveScale
         let w = max(64, Int((Double(backing.width) * scale).rounded()))
         let h = max(48, Int((Double(backing.height) * scale).rounded()))
 
@@ -1123,11 +1117,9 @@ class VisualizerController: NSObject {
             if path != currentPresetPath {
                 currentPresetName = newName
                 currentPresetPath = path
-                lowFPSSeconds = 0
                 fpsFrameCount = 0
                 fpsWindowStart = CACurrentMediaTime()
                 measuredFPS = 0
-                isFPSWarmup = true
                 resetAdaptiveScale() // новий пресет стартує з повної якості, далі адаптується під себе
             }
         }

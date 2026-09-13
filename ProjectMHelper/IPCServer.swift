@@ -30,6 +30,7 @@ enum IPCCommand: String {
 
 class IPCServer {
     private let socketPath: String
+    private let responseQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.write", qos: .userInitiated)
     private var serverSocket: Int32 = -1
     private var isRunning = false
     private var serverGeneration: UInt64 = 0
@@ -450,10 +451,13 @@ class IPCServer {
             }
 
         case "STATUS":
-            let status = controller.getStatus()
-            if let jsonData = try? JSONSerialization.data(withJSONObject: status),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("STATUS:\(jsonString)", socket: socket, generation: generation)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.clientIsCurrent(socket, generation: generation) else { return }
+                let status = self.controller.getStatus()
+                if let jsonData = try? JSONSerialization.data(withJSONObject: status),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    self.sendResponse("STATUS:\(jsonString)", socket: socket, generation: generation)
+                }
             }
 
         case "CATEGORY":
@@ -475,28 +479,33 @@ class IPCServer {
             }
 
         case "QUALITY":
-            // Без main.async: рендер крутиться на main RunLoop і на важкому пресеті (низький FPS)
-            // команда висіла б у хвості черги хвилинами. setQuality лише виставляє стан+прапор,
-            // GL чіпає тільки render-тред під замком.
             if let arg = argument,
                let quality = VisualizerController.VisualQuality(rawValue: arg) {
-                withCurrentClient(socket, generation: generation) {
-                    controller.setQuality(quality)
+                DispatchQueue.main.async { [weak self] in
+                    self?.withCurrentClient(socket, generation: generation) {
+                        self?.controller.setQuality(quality)
+                    }
                 }
             }
 
         case "CATEGORIES":
-            let categories = controller.getCategories()
-            if let jsonData = try? JSONSerialization.data(withJSONObject: categories),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("CATEGORIES:\(jsonString)", socket: socket, generation: generation)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.clientIsCurrent(socket, generation: generation) else { return }
+                let categories = self.controller.getCategories()
+                if let jsonData = try? JSONSerialization.data(withJSONObject: categories),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    self.sendResponse("CATEGORIES:\(jsonString)", socket: socket, generation: generation)
+                }
             }
 
         case "LIST":
-            let list = controller.getPresetList()
-            if let jsonData = try? JSONSerialization.data(withJSONObject: list),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                sendResponse("LIST:\(jsonString)", socket: socket, generation: generation)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.clientIsCurrent(socket, generation: generation) else { return }
+                self.sendPresetListResponse(
+                    self.controller.getPresetSnapshot(),
+                    socket: socket,
+                    generation: generation
+                )
             }
 
         case "QUIT":
@@ -511,9 +520,27 @@ class IPCServer {
     }
 
     private func sendResponse(_ message: String, socket: Int32, generation: UInt64) {
+        responseQueue.async { [weak self] in
+            self?.writeResponse(message, socket: socket, generation: generation)
+        }
+    }
+
+    private func sendPresetListResponse(_ presets: [PresetInfo], socket: Int32, generation: UInt64) {
+        responseQueue.async { [weak self] in
+            guard let self, self.clientIsCurrent(socket, generation: generation) else { return }
+            let list: [[String: Any]] = presets.enumerated().map { index, preset in
+                ["name": preset.name, "category": preset.category, "index": index]
+            }
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: list),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+            self.writeResponse("LIST:\(jsonString)", socket: socket, generation: generation)
+        }
+    }
+
+    private func writeResponse(_ message: String, socket: Int32, generation: UInt64) {
         guard clientIsCurrent(socket, generation: generation) else { return }
 
-        let data = (message + "\n").data(using: .utf8)!
+        guard let data = (message + "\n").data(using: .utf8) else { return }
         // Повний запис у циклі: великий LIST (~1 МБ) не влазить у буфер сокета за один write,
         // а частковий запис обрізав би JSON і клієнт ніколи б не розпарсив відповідь.
         data.withUnsafeBytes { raw in
