@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // left with no sound until they fix it manually in System Settings.
         // AudioObjectSetPropertyData is synchronous, so .terminateNow is safe.
         AudioEngine.shared.persistCurrentPlaybackState()
+        CalibrationEngine.shared.flushProfileWrites()
         if AudioRouter.shared.isRoutingOwned {
             AudioRouter.shared.disableEQRouting(persistEnabledState: false)
         }

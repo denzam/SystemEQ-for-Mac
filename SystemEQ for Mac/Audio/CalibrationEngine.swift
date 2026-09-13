@@ -102,6 +102,22 @@ public final class CalibrationEngine: ObservableObject {
     private var testToneBuffer: AVAudioPCMBuffer?
     private var isAudioEngineSetup: Bool = false
 
+    private let profilesQueue = DispatchQueue(label: "com.systemeq.calibration-profiles", qos: .utility)
+    private let profilePersistenceState = ProfilePersistenceState()
+    private var didFinishLoadingProfiles = false
+    private var profilesRevision = 0
+    private var deletedProfileIDsWhileLoading: Set<UUID> = []
+
+    private enum ProfileMutation {
+        case upsert(CalibrationProfile)
+        case delete(UUID)
+    }
+
+    private final class ProfilePersistenceState: @unchecked Sendable {
+        var profiles: [CalibrationProfile] = []
+        var needsWrite = false
+    }
+
     // MARK: - Calibration Signal Type
 
     @Published public var useFilteredNoise: Bool = true // true = filtered pink noise, false = pure tone
@@ -572,7 +588,7 @@ public final class CalibrationEngine: ObservableObject {
     public func createProfile(name: String, type: CalibrationType) -> CalibrationProfile {
         let profile = CalibrationProfile(name: name, type: type)
         profiles.append(profile)
-        saveProfiles()
+        profilesDidChange(.upsert(profile))
         dlog("✅ Created calibration profile: \(name)", category: .calibration)
         return profile
     }
@@ -581,7 +597,7 @@ public final class CalibrationEngine: ObservableObject {
     public func updateProfile(_ profile: CalibrationProfile) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
-            saveProfiles()
+            profilesDidChange(.upsert(profile))
             dlog("✅ Updated calibration profile: \(profile.name)", category: .calibration)
         }
     }
@@ -592,7 +608,7 @@ public final class CalibrationEngine: ObservableObject {
         if activeProfile?.id == profile.id {
             activeProfile = nil
         }
-        saveProfiles()
+        profilesDidChange(.delete(profile.id))
         dlog("🗑️ Deleted calibration profile: \(profile.name)", category: .calibration)
     }
 
@@ -690,28 +706,111 @@ public final class CalibrationEngine: ObservableObject {
         return documentsPath.appendingPathComponent("CalibrationProfiles.json")
     }
 
-    private func saveProfiles() {
-        do {
-            let data = try JSONEncoder().encode(profiles)
-            try data.write(to: profilesURL)
-            dlog("💾 Saved \(profiles.count) calibration profiles", category: .calibration)
-        } catch {
-            dlog("❌ Failed to save profiles: \(error)", category: .calibration)
+    private func profilesDidChange(_ mutation: ProfileMutation) {
+        profilesRevision &+= 1
+        if !didFinishLoadingProfiles, case let .delete(id) = mutation {
+            deletedProfileIDsWhileLoading.insert(id)
+        }
+        persist(mutation)
+    }
+
+    private func persist(_ mutation: ProfileMutation) {
+        let url = profilesURL
+        let state = profilePersistenceState
+        profilesQueue.async {
+            var profiles = state.profiles
+
+            switch mutation {
+            case let .upsert(profile):
+                if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+                    profiles[index] = profile
+                } else {
+                    profiles.append(profile)
+                }
+            case let .delete(id):
+                profiles.removeAll { $0.id == id }
+            }
+            state.profiles = profiles
+            state.needsWrite = true
+
+            do {
+                let data = try JSONEncoder().encode(profiles)
+                try data.write(to: url, options: .atomic)
+                state.needsWrite = false
+                dlog("💾 Saved \(profiles.count) calibration profiles", category: .calibration)
+            } catch {
+                dlog("❌ Failed to save profiles: \(error)", category: .calibration)
+            }
         }
     }
 
     private func loadProfiles() {
-        guard FileManager.default.fileExists(atPath: profilesURL.path) else {
+        let url = profilesURL
+        let revision = profilesRevision
+        let state = profilePersistenceState
+        profilesQueue.async { [weak self] in
+            let result: Result<[CalibrationProfile]?, Error>
+            do {
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    result = .success(nil)
+                    state.profiles = []
+                    DispatchQueue.main.async { self?.finishLoadingProfiles(result, revision: revision) }
+                    return
+                }
+                let data = try Data(contentsOf: url)
+                let profiles = try JSONDecoder().decode([CalibrationProfile].self, from: data)
+                state.profiles = profiles
+                result = .success(profiles)
+            } catch {
+                state.profiles = []
+                result = .failure(error)
+            }
+            DispatchQueue.main.async { self?.finishLoadingProfiles(result, revision: revision) }
+        }
+    }
+
+    private func finishLoadingProfiles(_ result: Result<[CalibrationProfile]?, Error>, revision: Int) {
+        switch result {
+        case let .success(loadedProfiles?):
+            if profilesRevision != revision {
+                let currentProfiles = profiles
+                var currentProfilesByID: [UUID: CalibrationProfile] = [:]
+                for profile in currentProfiles {
+                    currentProfilesByID[profile.id] = profile
+                }
+                let loadedIDs = Set(loadedProfiles.map(\.id))
+                profiles = loadedProfiles
+                    .filter { !deletedProfileIDsWhileLoading.contains($0.id) }
+                    .map { currentProfilesByID[$0.id] ?? $0 }
+                profiles.append(contentsOf: currentProfiles.filter { !loadedIDs.contains($0.id) })
+            } else {
+                profiles = loadedProfiles
+            }
+            dlog("✅ Loaded \(loadedProfiles.count) calibration profiles", category: .calibration)
+        case .success(nil):
             dlog("ℹ️ No saved calibration profiles found", category: .calibration)
-            return
+        case let .failure(error):
+            dlog("❌ Failed to load profiles: \(error)", category: .calibration)
         }
 
-        do {
-            let data = try Data(contentsOf: profilesURL)
-            profiles = try JSONDecoder().decode([CalibrationProfile].self, from: data)
-            dlog("✅ Loaded \(profiles.count) calibration profiles", category: .calibration)
-        } catch {
-            dlog("❌ Failed to load profiles: \(error)", category: .calibration)
+        didFinishLoadingProfiles = true
+        deletedProfileIDsWhileLoading.removeAll()
+    }
+
+    public func flushProfileWrites() {
+        let state = profilePersistenceState
+        let url = profilesURL
+        profilesQueue.sync {
+            guard state.needsWrite else { return }
+            let profiles = state.profiles
+            do {
+                let data = try JSONEncoder().encode(profiles)
+                try data.write(to: url, options: .atomic)
+                state.needsWrite = false
+                dlog("💾 Flushed \(profiles.count) calibration profiles", category: .calibration)
+            } catch {
+                dlog("❌ Failed to flush profiles: \(error)", category: .calibration)
+            }
         }
     }
 
