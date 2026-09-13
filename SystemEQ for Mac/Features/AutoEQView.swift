@@ -474,7 +474,7 @@ struct AutoEQView: View {
                 )
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
                         ForEach(candidates) { c in
                             HStack(spacing: AppSpacing.sm) {
                                 Text(c.display)
@@ -1304,21 +1304,22 @@ struct AutoEQView: View {
 
     private func rank(_ input: [SearchCandidate], query: String) -> [SearchCandidate] {
         let q = sanitize(query)
-        let t = tokens(q)
-        func score(_ c: SearchCandidate) -> Int {
-            let s = sanitize(c.display + " " + c.path)
-            var sc = 0
-            for tok in t {
-                if s.contains(tok) { sc += 2 }
-                if s.hasPrefix(tok) { sc += 1 }
+        let queryTokens = q.split(separator: " ").map(String.init)
+        let scored = input.map { candidate in
+            let sanitizedCandidate = sanitize(candidate.display + " " + candidate.path)
+            var score = 0
+            for token in queryTokens {
+                if sanitizedCandidate.contains(token) { score += 2 }
+                if sanitizedCandidate.hasPrefix(token) { score += 1 }
             }
-            if c.isParametric { sc += 1 }
-            return sc
+            if candidate.isParametric { score += 1 }
+            return (candidate: candidate, score: score)
         }
-        return input.sorted { a, b in
-            let sa = score(a), sb = score(b)
-            return sa == sb ? a.display.count < b.display.count : sa > sb
-        }
+        return scored.sorted { lhs, rhs in
+            lhs.score == rhs.score
+                ? lhs.candidate.display.count < rhs.candidate.display.count
+                : lhs.score > rhs.score
+        }.map(\.candidate)
     }
 
     private func friendlyNetworkError(_ error: Error) -> String {
