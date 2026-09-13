@@ -396,6 +396,7 @@ class VisualizerController: NSObject {
     private var fpsFrameCount: Int = 0
     private var fpsWindowStart: CFTimeInterval = CACurrentMediaTime()
     private var measuredFPS: Int = 0
+    private var isFPSWarmup = true
 
     // Адаптивний render-scale: дуже важкі пресети самі знижують роздільність, щоб тримати ≥30 FPS.
     // Множиться на якість користувача; перераховується раз на секунду на render-треді.
@@ -403,8 +404,6 @@ class VisualizerController: NSObject {
     private static let minAdaptiveScale = 0.25
     private static let targetMinFPS = 30
 
-    // Авто-пропуск + чорний список: пресет, що тримає <30 FPS навіть на мін. роздільності кілька
-    // секунд поспіль, додається в blacklist і авто-перемикається. Ручний вибір зі списку не пропускаємо.
     private var currentPresetPath: String = ""
     private var lowFPSSeconds = 0
     private static let lowFPSSecondsToSkip = 2
@@ -895,7 +894,10 @@ class VisualizerController: NSObject {
     /// Лише вниз і лише поки реально потрібно — без осциляції (інакше backing-resize мерехтить).
     /// Повна роздільність повертається при зміні пресета (resetAdaptiveScale), а не за FPS.
     private func adaptRenderScale() {
-        // Уникаємо реакції на перехідний кадр (перемикання пресета дає короткий провал FPS).
+        if isFPSWarmup {
+            isFPSWarmup = false
+            return
+        }
         guard measuredFPS > 0 else { return }
 
         if measuredFPS < Self.targetMinFPS {
@@ -903,9 +905,9 @@ class VisualizerController: NSObject {
             if adaptiveScale > Self.minAdaptiveScale {
                 adaptiveScale = max(Self.minAdaptiveScale, adaptiveScale - 0.25)
                 needsBackingResize = true
+                lowFPSSeconds = 0
+                return
             }
-            // ... і ПАРАЛЕЛЬНО рахуємо секунди низького FPS. Якщо навіть зниження не допомогло —
-            // пресет CPU-bound, пропускаємо швидко (не чекаючи спершу досягнення мінімуму).
             lowFPSSeconds += 1
             if lowFPSSeconds >= Self.lowFPSSecondsToSkip, !isPresetLocked {
                 lowFPSSeconds = 0
@@ -913,7 +915,13 @@ class VisualizerController: NSObject {
                 if !path.isEmpty {
                     // playlist/файл не чіпаємо з render-треда — на main.
                     DispatchQueue.main.async { [weak self] in
-                        self?.markPresetBroken(path, reason: "too slow (<\(Self.targetMinFPS) FPS)")
+                        guard let self,
+                              self.currentPresetPath == path,
+                              !self.isPresetLocked,
+                              self.measuredFPS < Self.targetMinFPS,
+                              let playlist = self.playlistHandle else { return }
+                        projectm_playlist_play_next(playlist, false)
+                        self.updateCurrentPresetName()
                     }
                 }
             }
@@ -1112,10 +1120,14 @@ class VisualizerController: NSObject {
 
             let newName = (path as NSString).lastPathComponent
                 .replacingOccurrences(of: ".milk", with: "")
-            if newName != currentPresetName {
+            if path != currentPresetPath {
                 currentPresetName = newName
                 currentPresetPath = path
                 lowFPSSeconds = 0
+                fpsFrameCount = 0
+                fpsWindowStart = CACurrentMediaTime()
+                measuredFPS = 0
+                isFPSWarmup = true
                 resetAdaptiveScale() // новий пресет стартує з повної якості, далі адаптується під себе
             }
         }
