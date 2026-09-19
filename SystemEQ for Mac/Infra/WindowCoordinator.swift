@@ -64,16 +64,15 @@ struct WindowAccessor: NSViewRepresentable {
         WindowCoordinator.shared.register(window: window, id: id)
         context.coordinator.window = window
 
-        // Configure window for glass effect transparency
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
         window.hasShadow = true
 
-        // Configure transparent title bar for all windows
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
-        window.styleMask.insert(.fullSizeContentView)
         window.styleMask.insert(.resizable)
+        window.isMovable = true
+        window.isMovableByWindowBackground = true
 
         // Enable fullscreen support - remove transient behavior
         window.collectionBehavior = [.fullScreenPrimary, .managed]

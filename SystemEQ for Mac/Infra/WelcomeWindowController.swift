@@ -15,8 +15,9 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
         window.title = ""
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)

@@ -641,7 +641,8 @@ class VisualizerController: NSObject {
     /// Enumerates ~10k preset files and stats each one — ~hundreds of ms even on SSD,
     /// so the I/O runs on a background queue and only the property writes hop to main.
     private func scanPresetsAsync(at basePath: String, completion: @escaping () -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
             let fileManager = FileManager.default
             var presets: [PresetInfo] = []
             var categories = Set<String>()
