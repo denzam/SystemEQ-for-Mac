@@ -188,6 +188,7 @@ dist/
 # Internal docs (not for public)
 Docs/internal/
 .claude/
+.codex/
 .agents/*
 !.agents/skills/
 !.agents/skills/**

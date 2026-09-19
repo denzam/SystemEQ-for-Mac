@@ -55,7 +55,7 @@ no telemetry.
 ### AutoEQ Integration
 
 - **SQLite Database** — Instant offline search (<10ms)
-- **4-tier Fallback** — Python server → Database → Local files → GitHub
+- **Offline SQLite + Network Fallback** — Instant local database search with GitHub fallback
 - **ParametricEQ & GraphicEQ** — Full format support
 
 ## 🚀 Quick Start

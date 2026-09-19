@@ -54,7 +54,7 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 ### Integrazione AutoEQ
 
 - **Database SQLite** — Ricerca offline istantanea (<10ms)
-- **Fallback a 4 livelli** — Server Python → Database → File locali → GitHub
+- **SQLite offline + fallback di rete** — Ricerca istantanea nel database locale con fallback su GitHub
 - **ParametricEQ e GraphicEQ** — Supporto completo dei formati
 
 ## 🚀 Avvio rapido

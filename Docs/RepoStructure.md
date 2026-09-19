@@ -6,7 +6,7 @@
 SystemEQ for Mac/
 ├── SystemEQ for Mac/           # Main Xcode target
 │   ├── Audio/                  # ✅ Audio engines (CoreAudioEngine, AudioRouter, CalibrationEngine, VisualizerEngine)
-│   ├── AutoEQ/                 # ✅ AutoEQ integration (models, parsers, Python server)
+│   ├── AutoEQ/                 # ✅ AutoEQ integration (models, parsers, repository)
 │   ├── Data/                   # ✅ Preset persistence, EQ database
 │   ├── Database/               # ✅ SQLite database (2,347 headphones, 8,850 presets)
 │   ├── DesignSystem/           # ✅ UI components, design tokens
@@ -17,7 +17,7 @@ SystemEQ for Mac/
 │   ├── Config/                 # ✅ App configuration
 │   └── Resources/              # ✅ Assets, localization
 ├── Docs/                       # 📝 Documentation, specs, wireframes
-├── Scripts/                    # 🔧 Build scripts, Python server
+├── Scripts/                    # 🔧 Build scripts, benchmarks, database generator
 ├── archive/                    # 📦 Historical docs and migration guides
 └── AutoEq/                     # 📂 AutoEQ data (optional, fallback)
 ```
