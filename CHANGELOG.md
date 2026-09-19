@@ -4,6 +4,30 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] — 2026-09-19
+
+Compatibility with macOS 27, window interaction improvements, and audio engine fixes.
+
+### Fixed
+- Restored window dragging and titlebar compatibility on macOS 27 by making window backgrounds draggable and maintaining opaque titlebars
+- Routing in active Native (Process Tap) mode no longer displays stale BlackHole input in status and device lists
+- Failed Native start restores the previous physical output before falling back to Automatic/BlackHole routing
+- Fixed app launch delays caused by synchronous calibration profile decoding during UI initialization
+- ProjectM adaptive FPS no longer permanently blacklists slow presets; scales render resolution down first and switches presets after persistent low framerates
+- ProjectM startup replay reliably applies category, weight, quality, shuffle, and lock settings selected before helper launch or during IPC reconnections
+- AutoEQ preset loading in 10-band and 31-band modes now uses bundled SQLite directly without blocking on network index creation
+- Addressed compiler capture warnings in ProjectM helper preset scanning
+
+### Performance
+- Published audio peak meter snapshots outside the render callback using lock-free atomics and throttled UI polling to prevent CPU spikes
+- Reduced AutoEQ search result rendering workload using `LazyVStack` and single-pass candidate ranking
+- Avoided recreating AutoEQ URLSession and network resources on view updates by isolating legacy caching into a dedicated repository
+- Extracted pure `EQProcessor` out of `AutoEQView` to reduce SwiftUI re-render overhead
+
+### Changed
+- Diagnostics format 3 with bounded in-memory event history, session start markers, and clear audio health metrics
+- Local installer retains only the last three verified backups and cleans staging artifacts after install
+
 ## [1.4.1] — 2026-08-28
 
 Small UI polish and documentation aligned with the native audio route.
