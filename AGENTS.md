@@ -48,6 +48,7 @@ xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac"
 - **Атоміки:** тільки C11 `<stdatomic.h>` через bridging headers (`SEQAtomicInt32` / `PMAtomicInt32`). OSAtomic заборонено (deprecated).
 - **Feature flags:** перевіряти `FeatureRegistry` перед реалізацією нових фіч.
 - **Секції:** `// MARK: - Назва` у кожному файлі. Hot path позначати `// ⚡`, thread safety — `// 🔧`.
+- **Роутер задач:** перед суттєвими змінами запустити `.agents/skills/task-router/scripts/route.py` для перевірки ризику (якщо `plan_required` — обов'язковий план).
 - SwiftFormat перевіряється в CI (Code Quality workflow), конфіг — `.swiftformat`; прожени перед комітом.
 - Pre-commit хук лежить у `.githooks/` і вмикається один раз на клон: `git config core.hooksPath .githooks`. Він форматує staged-файли й ганяє ті самі гейти, що CI. Шляхи проекту містять пробіли — у скриптах завжди лапки та `-z`/`read -d ''`, інакше цикл мовчки пропускає всі файли.
 
