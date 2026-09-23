@@ -138,6 +138,8 @@ enum AppStartup {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !isRunningUnitTests else { return }
+        DiagnosticEventStore.shared.startSession()
+        MainThreadHealthMonitor.shared.start()
 
         // Issue #30: опція «сховати з Dock» — лише menu-bar-режим
         if UserDefaults.standard.bool(forKey: "hideDockIcon") {
@@ -157,6 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !isRunningUnitTests {
+            MainThreadHealthMonitor.shared.stop()
+        }
         // While EQ routing is active the system default output is BlackHole.
         // Restore the real output device before quitting, otherwise the user is
         // left with no sound until they fix it manually in System Settings.
@@ -165,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CalibrationEngine.shared.flushProfileWrites()
         if AudioRouter.shared.isRoutingOwned {
             AudioRouter.shared.disableEQRouting(persistEnabledState: false)
+        }
+        if !isRunningUnitTests {
+            DiagnosticEventStore.shared.finishSession()
         }
         return .terminateNow
     }

@@ -255,6 +255,18 @@ public final class CoreAudioEngine: ObservableObject {
     // Ring buffer (extracted into SPSCRingBuffer for modularity)
     let ringBuffer = SPSCRingBuffer()
     fileprivate var inputCallbackCounter: UInt64 = 0
+    fileprivate let diagnosticInputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticOutputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticLastInputCallback = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticLastOutputCallback = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticLastInputSignal = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticLastOutputSignal = CoreAudioEngine.makeDiagnosticCounter()
+    private let diagnosticNativeCallbacks = CoreAudioEngine.makeDiagnosticCounter()
+    private let diagnosticLastNativeCallback = CoreAudioEngine.makeDiagnosticCounter()
+    private let diagnosticNativeOutputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticTestToneOutputSeen = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticTestToneDeviceBufferSeen = CoreAudioEngine.makeDiagnosticCounter()
+    private var callbackWindow: AudioCallbackWindow?
     fileprivate var lastOutSampleTimes: [Double] = []
     fileprivate var lastInSampleTimes: [Double] = []
 
@@ -282,9 +294,20 @@ public final class CoreAudioEngine: ObservableObject {
 
     public static let shared = CoreAudioEngine()
 
+    private static func makeDiagnosticCounter() -> UnsafeMutablePointer<SEQAtomicInt64> {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
+        seq_atomic_int64_init(pointer, 0)
+        return pointer
+    }
+
     // MARK: - Initialization
 
     private init() {
+        callbackWindow = AudioCallbackWindow(
+            input: diagnosticInputCallbacks,
+            output: diagnosticOutputCallbacks,
+            native: diagnosticNativeCallbacks
+        )
         if let saved = UserDefaults.standard.dictionary(forKey: originalDeviceSampleRatesKey) {
             originalDeviceSampleRates = saved.compactMapValues {
                 ($0 as? NSNumber)?.doubleValue
@@ -469,6 +492,7 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     deinit {
+        callbackWindow = nil
         cleanup()
         _vdspFilterAtomic.deallocate()
         _vdspFilterReaders.deallocate()
@@ -477,6 +501,17 @@ public final class CoreAudioEngine: ObservableObject {
         isEnabledAtomic.deallocate()
         testToneEnabledAtomic.deallocate()
         testToneCommandAtomic.deallocate()
+        diagnosticInputCallbacks.deallocate()
+        diagnosticOutputCallbacks.deallocate()
+        diagnosticLastInputCallback.deallocate()
+        diagnosticLastOutputCallback.deallocate()
+        diagnosticLastInputSignal.deallocate()
+        diagnosticLastOutputSignal.deallocate()
+        diagnosticNativeCallbacks.deallocate()
+        diagnosticLastNativeCallback.deallocate()
+        diagnosticNativeOutputCallbacks.deallocate()
+        diagnosticTestToneOutputSeen.deallocate()
+        diagnosticTestToneDeviceBufferSeen.deallocate()
     }
 
     // MARK: - Setup
@@ -1131,6 +1166,17 @@ public final class CoreAudioEngine: ObservableObject {
             dlog("⚠️ Core Audio Engine already running or not set up", category: .engine)
             return false
         }
+        for counter in [
+            diagnosticInputCallbacks,
+            diagnosticOutputCallbacks,
+            diagnosticLastInputCallback,
+            diagnosticLastOutputCallback,
+            diagnosticLastInputSignal,
+            diagnosticLastOutputSignal
+        ] {
+            seq_atomic_int64_store_release(counter, 0)
+        }
+        callbackWindow?.reset()
         // Seed ring with ~2 IO cycles of silence so the first output callbacks
         // have data to read while the input side is still spinning up.
         ringBuffer.primeSilence(frames: 1024)
@@ -1291,6 +1337,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     func diagnosticSummary(backend: ActiveAudioRoutingBackend) -> String {
         let pipeline = vdspFilter != nil ? "vDSP" : filterChain != nil ? "scalar" : "none"
+        let now = mach_absolute_time()
         let summary = """
         Setup complete: \(isSetupComplete)
         Engine running: \(isRunning)
@@ -1298,12 +1345,32 @@ public final class CoreAudioEngine: ObservableObject {
         Client sample rate: \(String(format: "%.0f", currentSampleRate)) Hz
         Channels: \(channelCount)
         Processing buffer capacity (not latency): \(allocatedFrameCapacity) frames
+        Last metered input signal above -80 dBFS: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastInputSignal), now: now))
+        Last metered post-EQ signal above -80 dBFS: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastOutputSignal), now: now))
         """
+        if backend == .native, isRunning {
+            let recent = callbackWindow?.recentCounts()
+            return summary + "\n" + """
+            Process Tap callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticNativeCallbacks))
+            Process Tap callbacks in approximately the last 60 seconds: \(recent?.native ?? 0)
+            Last Process Tap callback: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastNativeCallback), now: now))
+            Process Tap callbacks with populated output: \(seq_atomic_int64_load_acquire(diagnosticNativeOutputCallbacks))
+            BlackHole ring-buffer health: not applicable (backend inactive)
+            """
+        }
         guard backend == .blackHole, isRunning else {
             return summary + "\nBlackHole ring-buffer health: not applicable (backend inactive)"
         }
         let health = snapshotAudioHealth(source: "export")
+        let lifetime = ringBuffer.lifetimeDiagnostics()
+        let recent = callbackWindow?.recentCounts()
         return summary + "\n" + """
+        Input callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticInputCallbacks))
+        Output callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticOutputCallbacks))
+        Input callbacks in approximately the last 60 seconds: \(recent?.input ?? 0)
+        Output callbacks in approximately the last 60 seconds: \(recent?.output ?? 0)
+        Last input callback: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastInputCallback), now: now))
+        Last output callback: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastOutputCallback), now: now))
         Ring-buffer capacity: \(health.capacity) frames
         Last ring-buffer fill before read: \(health.fill) frames
         Frames requested by that read: \(health.requested)
@@ -1313,8 +1380,18 @@ public final class CoreAudioEngine: ObservableObject {
         )) seconds since previous sample or buffer reset
         Underruns in interval: \(health.underruns)
         Overruns in interval: \(health.overruns)
+        Underruns since launch: \(lifetime.underruns)
+        Overruns since launch: \(lifetime.overruns)
+        Last underrun: \(Self.ageDescription(Int64(bitPattern: lifetime.lastUnderrun), now: now))
+        Last overrun: \(Self.ageDescription(Int64(bitPattern: lifetime.lastOverrun), now: now))
         Export resets interval counters. Fill is a last-read snapshot, not measured end-to-end latency.
         """
+    }
+
+    private static func ageDescription(_ timestamp: Int64, now: UInt64) -> String {
+        guard timestamp != 0 else { return "not observed" }
+        let elapsed = AudioConvertHostTimeToNanos(now &- UInt64(bitPattern: timestamp))
+        return String(format: "%.1f seconds ago", Double(elapsed) / 1_000_000_000)
     }
 
     public func printAudioUnitDiagnostics() {
@@ -1520,6 +1597,8 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     public func startTestTone(_ freq: Float = 440.0) {
+        seq_atomic_int64_store_release(diagnosticTestToneOutputSeen, 0)
+        seq_atomic_int64_store_release(diagnosticTestToneDeviceBufferSeen, 0)
         guard isRunning else {
             dlog("⚠️ Cannot start test tone: CoreAudioEngine not running", category: .engine)
             dlog("   Please enable EQ first", category: .engine)
@@ -1531,12 +1610,47 @@ public final class CoreAudioEngine: ObservableObject {
         let command = UInt64(resetGeneration) << 32 | UInt64(freq.bitPattern)
         seq_atomic_int64_store_release(testToneCommandAtomic, Int64(bitPattern: command))
         seq_atomic_int32_store_release(testToneEnabledAtomic, 1)
+        DiagnosticEventStore.shared.record("engine.testTone.started", details: ["frequencyHz": "\(freq)"])
         dlog("🔔 Test tone enabled: \(freq) Hz", category: .engine)
     }
 
     public func stopTestTone() {
         seq_atomic_int32_store_release(testToneEnabledAtomic, 0)
+        DiagnosticEventStore.shared.record("engine.testTone.stopped", details: [
+            "postEQSignalObserved": "\(seq_atomic_int64_load_acquire(diagnosticTestToneOutputSeen) != 0)",
+            "outputBufferSignalObserved": "\(testToneOutputObserved)"
+        ])
         dlog("🔕 Test tone disabled", category: .engine)
+    }
+
+    var testToneOutputObserved: Bool {
+        seq_atomic_int64_load_acquire(diagnosticTestToneDeviceBufferSeen) != 0
+    }
+
+    @inline(__always)
+    func noteNativeTestToneOutput(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frameCount: Int) {
+        guard seq_atomic_int32_load(testToneEnabledAtomic) != 0,
+              seq_atomic_int64_load_acquire(diagnosticTestToneOutputSeen) != 0,
+              frameCount > 0 else { return }
+        var leftPeak: Float = 0
+        var rightPeak: Float = 0
+        vDSP_maxmgv(left, 1, &leftPeak, vDSP_Length(frameCount))
+        vDSP_maxmgv(right, 1, &rightPeak, vDSP_Length(frameCount))
+        if max(leftPeak, rightPeak) > 0.0001 {
+            seq_atomic_int64_store_release(diagnosticTestToneDeviceBufferSeen, 1)
+        }
+    }
+
+    @inline(__always)
+    func noteNativeCallbackInvocation() {
+        seq_atomic_int64_fetch_add(diagnosticNativeCallbacks, 1)
+        seq_atomic_int64_store_release(diagnosticLastNativeCallback, Int64(bitPattern: mach_absolute_time()))
+    }
+
+    @inline(__always)
+    func noteNativeOutputCallback(frameCount: Int) {
+        guard frameCount > 0 else { return }
+        seq_atomic_int64_fetch_add(diagnosticNativeOutputCallbacks, 1)
     }
 
     /// Set all bands at once
@@ -1585,6 +1699,12 @@ public final class CoreAudioEngine: ObservableObject {
         outputDeviceID: AudioDeviceID,
         bufferFrames: UInt32
     ) {
+        seq_atomic_int64_store_release(diagnosticLastInputSignal, 0)
+        seq_atomic_int64_store_release(diagnosticLastOutputSignal, 0)
+        seq_atomic_int64_store_release(diagnosticNativeCallbacks, 0)
+        seq_atomic_int64_store_release(diagnosticLastNativeCallback, 0)
+        seq_atomic_int64_store_release(diagnosticNativeOutputCallbacks, 0)
+        callbackWindow?.reset()
         currentSampleRate = sampleRate
         channelCount = 2
         inputDeviceID = 0
@@ -1638,6 +1758,9 @@ public final class CoreAudioEngine: ObservableObject {
                 frameCount: frameCount,
                 channelCount: 2
             )
+            if peakMeter.rtInputPeak > 0.0001 {
+                seq_atomic_int64_store_release(diagnosticLastInputSignal, Int64(bitPattern: mach_absolute_time()))
+            }
         }
 
         if seq_atomic_int32_load(isEnabledAtomic) != 0 {
@@ -1657,6 +1780,12 @@ public final class CoreAudioEngine: ObservableObject {
                 frameCount: frameCount,
                 channelCount: 2
             )
+            if peakMeter.rtOutputPeak > 0.0001 {
+                seq_atomic_int64_store_release(diagnosticLastOutputSignal, Int64(bitPattern: mach_absolute_time()))
+                if seq_atomic_int32_load(testToneEnabledAtomic) != 0 {
+                    seq_atomic_int64_store_release(diagnosticTestToneOutputSeen, 1)
+                }
+            }
         }
 
         visualizerCounter += frameCount
@@ -1668,6 +1797,70 @@ public final class CoreAudioEngine: ObservableObject {
             }
             endVisualizerCallbackRead()
         }
+    }
+}
+
+private final class AudioCallbackWindow: @unchecked Sendable {
+    private struct Sample {
+        let time: TimeInterval
+        let input: Int64
+        let output: Int64
+        let native: Int64
+    }
+
+    private let queue = DispatchQueue(label: "SystemEQ.diagnostics.callbackWindow")
+    private let input: UnsafeMutablePointer<SEQAtomicInt64>
+    private let output: UnsafeMutablePointer<SEQAtomicInt64>
+    private let native: UnsafeMutablePointer<SEQAtomicInt64>
+    private var samples: [Sample] = []
+    private var timer: DispatchSourceTimer?
+
+    init(
+        input: UnsafeMutablePointer<SEQAtomicInt64>,
+        output: UnsafeMutablePointer<SEQAtomicInt64>,
+        native: UnsafeMutablePointer<SEQAtomicInt64>
+    ) {
+        self.input = input
+        self.output = output
+        self.native = native
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in self?.sample() }
+        self.timer = timer
+        timer.resume()
+    }
+
+    deinit {
+        timer?.cancel()
+    }
+
+    func reset() {
+        queue.sync {
+            samples = [Sample(time: ProcessInfo.processInfo.systemUptime, input: 0, output: 0, native: 0)]
+        }
+    }
+
+    func recentCounts() -> (input: Int64, output: Int64, native: Int64) {
+        queue.sync {
+            sample()
+            guard let first = samples.first, let last = samples.last else { return (0, 0, 0) }
+            return (
+                max(0, last.input - first.input),
+                max(0, last.output - first.output),
+                max(0, last.native - first.native)
+            )
+        }
+    }
+
+    private func sample() {
+        let now = ProcessInfo.processInfo.systemUptime
+        samples.append(Sample(
+            time: now,
+            input: seq_atomic_int64_load_acquire(input),
+            output: seq_atomic_int64_load_acquire(output),
+            native: seq_atomic_int64_load_acquire(native)
+        ))
+        samples.removeAll { now - $0.time > 61 }
     }
 }
 
@@ -1710,6 +1903,8 @@ private func renderCallbackFunction(
 
     // Diagnostics about output buffers and callback cadence
     engine.renderFramesAccum &+= 1
+    seq_atomic_int64_fetch_add(engine.diagnosticOutputCallbacks, 1)
+    seq_atomic_int64_store_release(engine.diagnosticLastOutputCallback, Int64(bitPattern: mach_absolute_time()))
     // ⚡ No logging in render callback — real-time safety.
 
     // Note: test tone now generated in input callback and passes through ring buffer
@@ -1735,6 +1930,24 @@ private func renderCallbackFunction(
         rb.readNonInterleaved(outL: outL, outR: outR, framesRequested: framesRequested)
         outputBuffers[0].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
         outputBuffers[1].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
+    }
+    if seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0,
+       seq_atomic_int64_load_acquire(engine.diagnosticTestToneOutputSeen) != 0 {
+        var peak: Float = 0
+        if outBufferCount == 1,
+           let pointer = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) {
+            vDSP_maxmgv(pointer, 1, &peak, vDSP_Length(framesRequested * 2))
+        } else if outBufferCount >= 2,
+                  let left = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self),
+                  let right = outputBuffers[1].mData?.assumingMemoryBound(to: Float.self) {
+            var rightPeak: Float = 0
+            vDSP_maxmgv(left, 1, &peak, vDSP_Length(framesRequested))
+            vDSP_maxmgv(right, 1, &rightPeak, vDSP_Length(framesRequested))
+            peak = max(peak, rightPeak)
+        }
+        if peak > 0.0001 {
+            seq_atomic_int64_store_release(engine.diagnosticTestToneDeviceBufferSeen, 1)
+        }
     }
     return noErr
 }
@@ -1762,6 +1975,8 @@ private func inputCaptureCallbackFunction(
 
     let engine = Unmanaged<CoreAudioEngine>.fromOpaque(inRefCon).takeUnretainedValue()
     engine.inputCallbackCounter &+= 1
+    seq_atomic_int64_fetch_add(engine.diagnosticInputCallbacks, 1)
+    seq_atomic_int64_store_release(engine.diagnosticLastInputCallback, Int64(bitPattern: mach_absolute_time()))
     engine.lastInputBufferFrames = inNumberFrames
 
     // One-shot real-time priority promotion for the input capture thread.

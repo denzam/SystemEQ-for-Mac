@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -710,8 +711,8 @@ struct SettingsView: View {
 
         return """
         SystemEQ diagnostic report
-        Report format: 3
-        Privacy: This report contains only SystemEQ state and generic audio-device capabilities. It contains no audio, media metadata, device names, UIDs, file paths, or automatic upload.
+        Report format: 4
+        Privacy: This report contains SystemEQ state, generic audio-device capabilities, and process resource metrics. It contains no audio, media metadata, device names, UIDs, file paths, or automatic upload.
         Created: \(ISO8601DateFormatter().string(from: Date()))
         App version: \(version)
         App build: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown")
@@ -739,8 +740,23 @@ struct SettingsView: View {
         --- Core Audio state ---
         \(core.diagnosticSummary(backend: router.activeBackend))
 
+        --- Process health ---
+        \(processHealthSummary())
+
         --- Recent SystemEQ diagnostic events ---
         \(DiagnosticEventStore.shared.reportText())
+        """
+    }
+
+    private func processHealthSummary() -> String {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return "Resource usage: unavailable" }
+        let userSeconds = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
+        let systemSeconds = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1_000_000
+        return """
+        Peak resident memory: \(String(format: "%.1f", Double(usage.ru_maxrss) / 1_048_576)) MiB
+        CPU user time since launch: \(String(format: "%.1f", userSeconds)) seconds
+        CPU system time since launch: \(String(format: "%.1f", systemSeconds)) seconds
         """
     }
 

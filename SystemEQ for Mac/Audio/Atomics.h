@@ -76,6 +76,10 @@ static inline void seq_atomic_int64_store_relaxed(SEQAtomicInt64 *a, int_fast64_
     atomic_store_explicit(&a->value, v, memory_order_relaxed);
 }
 
+static inline int_fast64_t seq_atomic_int64_fetch_add(SEQAtomicInt64 *a, int_fast64_t delta) {
+    return atomic_fetch_add_explicit(&a->value, delta, memory_order_relaxed);
+}
+
 static inline void seq_atomic_ptr_init(SEQAtomicPtr *a, void *p) {
     atomic_store_explicit(&a->value, p, memory_order_relaxed);
 }

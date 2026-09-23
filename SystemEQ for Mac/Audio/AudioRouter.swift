@@ -1332,6 +1332,12 @@ public final class AudioRouter: ObservableObject {
         let blackHole = blackHoleOutputDevice()
         let blackHoleVolume = blackHole.flatMap { Self.outputVolumeState(for: $0.id) }
         let blackHoleSettable = blackHole.map { Self.outputVolumeIsSettable(for: $0.id) } ?? false
+        let physicalVolume = selectedOutputDevice.flatMap { Self.outputVolumeState(for: $0.id) }
+        let physicalAlive = selectedOutputDevice.flatMap { Self.deviceIsAlive($0.id) }
+        let selectedOutputPresent = selectedOutputDevice.map { selected in
+            outputDevices.contains(where: { $0.uid == selected.uid && $0.id == selected.id })
+        } ?? false
+        let core = CoreAudioEngine.shared
 
         return """
         Routing active: \(isRoutingActive)
@@ -1340,12 +1346,33 @@ public final class AudioRouter: ObservableObject {
         System input kind: \(diagnosticDeviceKind(systemInput))
         System output kind: \(diagnosticDeviceKind(systemOutput))
         Selected output kind: \(diagnosticDeviceKind(selectedOutputDevice))
+        System output matches BlackHole: \(systemOutput?.id == blackHole?.id && blackHole != nil)
+        Engine input matches BlackHole: \(core.currentInputDeviceID == blackHole?.id && blackHole != nil)
+        Engine output matches selected device: \(core.currentOutputDeviceID == selectedOutputDevice?.id && selectedOutputDevice != nil)
+        Selected output present: \(selectedOutputPresent)
+        Selected output alive: \(physicalAlive.map { String($0) } ?? "unavailable")
+        Selected output volume readable: \(physicalVolume != nil)
+        Selected output scalar: \(physicalVolume.map { String(format: "%.3f", $0.scalar) } ?? "unavailable")
+        Selected output muted: \(physicalVolume?.isMuted.map { String($0) } ?? "unavailable")
         BlackHole detected: \(blackHoleDetected)
         BlackHole volume readable: \(blackHoleVolume != nil)
         BlackHole volume settable: \(blackHoleSettable)
         BlackHole scalar: \(blackHoleVolume.map { String(format: "%.3f", $0.scalar) } ?? "unavailable")
         BlackHole muted: \(blackHoleVolume?.isMuted.map { String($0) } ?? "unavailable")
         """
+    }
+
+    private static func deviceIsAlive(_ deviceID: AudioDeviceID) -> Bool? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value != 0
     }
 
     nonisolated private static func outputVolumeIsSettable(for deviceID: AudioDeviceID) -> Bool {

@@ -609,7 +609,7 @@ struct TestAudioStepView: View {
             isTestingAudio = false
 
             // Check if audio was detected
-            if CoreAudioEngine.shared.inputPeakLevel > 0.01 {
+            if CoreAudioEngine.shared.testToneOutputObserved {
                 testResult = .success
             } else {
                 testResult = .noAudio

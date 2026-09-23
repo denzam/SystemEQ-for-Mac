@@ -27,6 +27,10 @@ public final class SPSCRingBuffer {
 
     private let underruns: UnsafeMutablePointer<SEQAtomicInt32>
     private let overruns: UnsafeMutablePointer<SEQAtomicInt32>
+    private let totalUnderruns: UnsafeMutablePointer<SEQAtomicInt64>
+    private let totalOverruns: UnsafeMutablePointer<SEQAtomicInt64>
+    private let lastUnderrunHostTime: UnsafeMutablePointer<SEQAtomicInt64>
+    private let lastOverrunHostTime: UnsafeMutablePointer<SEQAtomicInt64>
     private let readSnapshot: UnsafeMutablePointer<SEQAtomicInt64>
     private var diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
 
@@ -39,9 +43,17 @@ public final class SPSCRingBuffer {
         seq_atomic_int64_init(readPtr, 0)
         underruns = .allocate(capacity: 1)
         overruns = .allocate(capacity: 1)
+        totalUnderruns = .allocate(capacity: 1)
+        totalOverruns = .allocate(capacity: 1)
+        lastUnderrunHostTime = .allocate(capacity: 1)
+        lastOverrunHostTime = .allocate(capacity: 1)
         readSnapshot = .allocate(capacity: 1)
         seq_atomic_int32_init(underruns, 0)
         seq_atomic_int32_init(overruns, 0)
+        seq_atomic_int64_init(totalUnderruns, 0)
+        seq_atomic_int64_init(totalOverruns, 0)
+        seq_atomic_int64_init(lastUnderrunHostTime, 0)
+        seq_atomic_int64_init(lastOverrunHostTime, 0)
         seq_atomic_int64_init(readSnapshot, 0)
     }
 
@@ -51,6 +63,10 @@ public final class SPSCRingBuffer {
         readPtr.deallocate()
         underruns.deallocate()
         overruns.deallocate()
+        totalUnderruns.deallocate()
+        totalOverruns.deallocate()
+        lastUnderrunHostTime.deallocate()
+        lastOverrunHostTime.deallocate()
         readSnapshot.deallocate()
     }
 
@@ -159,6 +175,8 @@ public final class SPSCRingBuffer {
         let toWrite = min(frameCount, max(0, avail))
         if toWrite < frameCount {
             seq_atomic_int32_fetch_add(overruns, 1)
+            seq_atomic_int64_fetch_add(totalOverruns, 1)
+            seq_atomic_int64_store_release(lastOverrunHostTime, Int64(bitPattern: mach_absolute_time()))
         }
         guard toWrite > 0 else { return 0 }
 
@@ -207,6 +225,8 @@ public final class SPSCRingBuffer {
         publishReadSnapshot(available: avail, requested: framesRequested)
         if under > 0 {
             seq_atomic_int32_fetch_add(underruns, 1)
+            seq_atomic_int64_fetch_add(totalUnderruns, 1)
+            seq_atomic_int64_store_release(lastUnderrunHostTime, Int64(bitPattern: mach_absolute_time()))
         }
 
         if toRead > 0 {
@@ -247,6 +267,8 @@ public final class SPSCRingBuffer {
         publishReadSnapshot(available: avail, requested: framesRequested)
         if under > 0 {
             seq_atomic_int32_fetch_add(underruns, 1)
+            seq_atomic_int64_fetch_add(totalUnderruns, 1)
+            seq_atomic_int64_store_release(lastUnderrunHostTime, Int64(bitPattern: mach_absolute_time()))
         }
 
         if toRead > 0 {
@@ -308,6 +330,15 @@ public final class SPSCRingBuffer {
         let interval = max(0, now - diagnosticIntervalStart)
         diagnosticIntervalStart = now
         return (u, o, Int32(truncatingIfNeeded: packed >> 32), UInt32(truncatingIfNeeded: packed), capacity, interval)
+    }
+
+    func lifetimeDiagnostics() -> (underruns: Int64, overruns: Int64, lastUnderrun: UInt64, lastOverrun: UInt64) {
+        (
+            seq_atomic_int64_load_acquire(totalUnderruns),
+            seq_atomic_int64_load_acquire(totalOverruns),
+            UInt64(bitPattern: seq_atomic_int64_load_acquire(lastUnderrunHostTime)),
+            UInt64(bitPattern: seq_atomic_int64_load_acquire(lastOverrunHostTime))
+        )
     }
 }
 

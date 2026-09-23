@@ -254,6 +254,7 @@ final class ProcessTapEngine {
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>
     ) {
+        processor.noteNativeCallbackInvocation()
         let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outputs = UnsafeMutableAudioBufferListPointer(output)
         guard inputSelection.bufferIndex < inputs.count else {
@@ -284,11 +285,13 @@ final class ProcessTapEngine {
         processor.processStereoInPlace(left: scratchLeft, right: scratchRight, frameCount: frameCount)
 
         var sourceChannel = 0
+        var copiedFrames = 0
         for buffer in outputs {
             guard let outputData = buffer.mData else { continue }
             let channels = max(Int(buffer.mNumberChannels), 1)
             let outputFrames = Int(buffer.mDataByteSize) / (channels * MemoryLayout<Float>.size)
             let framesToCopy = min(frameCount, outputFrames)
+            copiedFrames = max(copiedFrames, framesToCopy)
             let destination = outputData.assumingMemoryBound(to: Float.self)
             for channel in 0..<channels {
                 let source = sourceChannel.isMultiple(of: 2) ? scratchLeft : scratchRight
@@ -310,6 +313,8 @@ final class ProcessTapEngine {
                 )
             }
         }
+        processor.noteNativeOutputCallback(frameCount: copiedFrames)
+        processor.noteNativeTestToneOutput(left: scratchLeft, right: scratchRight, frameCount: copiedFrames)
     }
 
     @inline(__always)

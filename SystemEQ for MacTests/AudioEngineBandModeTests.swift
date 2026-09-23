@@ -810,6 +810,67 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertTrue(store.reportText().contains("discarded older events: 10"))
     }
 
+    func testDiagnosticSessionDistinguishesInterruptedAndCleanExit() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("diagnostics.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let interrupted = DiagnosticEventStore(persistenceURL: url)
+        interrupted.startSession()
+        let recovered = DiagnosticEventStore(capacity: 2, persistenceURL: url)
+        recovered.startSession()
+        XCTAssertTrue(recovered.reportText().contains("Previous session clean exit: false"))
+        recovered.record("routing.enable.request")
+        recovered.record("engine.setup.ready")
+        recovered.record("routing.enable.succeeded")
+        recovered.finishSession()
+
+        let clean = DiagnosticEventStore(persistenceURL: url)
+        clean.startSession()
+        XCTAssertTrue(clean.reportText().contains("Previous session clean exit: true"))
+        XCTAssertTrue(clean.reportText().contains("routing.enable.succeeded"))
+        XCTAssertTrue(clean.reportText().contains("Previous session discarded older events: 1"))
+        clean.finishSession()
+    }
+
+    func testInterruptedSessionSurvivesRepeatedCleanRelaunches() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("diagnostics.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let interrupted = DiagnosticEventStore(persistenceURL: url)
+        interrupted.startSession()
+        for _ in 0..<10 {
+            let clean = DiagnosticEventStore(persistenceURL: url)
+            clean.startSession()
+            clean.finishSession()
+        }
+        let report = DiagnosticEventStore(persistenceURL: url)
+        report.startSession()
+        XCTAssertTrue(report.reportText().contains("Previous session clean exit: false"))
+        XCTAssertEqual(report.reportText().components(separatedBy: "Previous session started:").count - 1, 8)
+        report.finishSession()
+    }
+
+    func testNewestCleanSessionSurvivesFullInterruptedHistory() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("diagnostics.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for _ in 0..<8 {
+            DiagnosticEventStore(persistenceURL: url).startSession()
+        }
+        let clean = DiagnosticEventStore(persistenceURL: url)
+        clean.startSession()
+        clean.finishSession()
+
+        let report = DiagnosticEventStore(persistenceURL: url)
+        report.startSession()
+        XCTAssertTrue(report.reportText().contains("Previous session clean exit: true"))
+        XCTAssertEqual(report.reportText().components(separatedBy: "Previous session started:").count - 1, 8)
+        report.finishSession()
+    }
+
     func testDiagnosticExecutableIdentityIsAvailable() {
         XCTAssertNotNil(UUID(uuidString: DiagnosticBuild.executableUUID))
     }
@@ -841,8 +902,14 @@ final class AudioEngineBandModeTests: XCTestCase {
         let next = ring.snapshotAndResetDiag()
         XCTAssertEqual(next.underruns, 0)
         XCTAssertEqual(next.overruns, 0)
+        let lifetime = ring.lifetimeDiagnostics()
+        XCTAssertEqual(lifetime.underruns, 1)
+        XCTAssertEqual(lifetime.overruns, 1)
+        XCTAssertGreaterThan(lifetime.lastUnderrun, 0)
+        XCTAssertGreaterThan(lifetime.lastOverrun, 0)
         ring.reset()
         XCTAssertEqual(ring.snapshotAndResetDiag().requested, 0)
+        XCTAssertEqual(ring.lifetimeDiagnostics().underruns, 1)
     }
 
     func testConcurrentRingDiagnosticSamplingPreservesUnderrunCount() {
