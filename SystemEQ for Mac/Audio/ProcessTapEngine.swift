@@ -155,6 +155,28 @@ final class ProcessTapEngine {
         }
         aggregateID = newAggregateID
 
+        let originalBufferFrames = deviceBufferFrames(aggregateID)
+        if originalBufferFrames > 128 {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyBufferFrameSize,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var requestedBufferFrames: UInt32 = 128
+            let size = UInt32(MemoryLayout<UInt32>.size)
+            let bufferStatus = AudioObjectSetPropertyData(
+                aggregateID,
+                &address,
+                0,
+                nil,
+                size,
+                &requestedBufferFrames
+            )
+            if bufferStatus != noErr {
+                dlog("Native buffer request failed: \(bufferStatus)", category: .engine)
+            }
+        }
+
         guard let tapFormat = audioFormat(tapID, selector: kAudioTapPropertyFormat),
               let streams = inputStreams(aggregateID),
               let formats = streamFormats(streams),
@@ -174,7 +196,7 @@ final class ProcessTapEngine {
 
         let sampleRate = nominalSampleRate(outputDeviceID)
         let bufferFrames = deviceBufferFrames(aggregateID)
-        prepareProcessing(sampleRate, bufferFrames)
+        prepareProcessing(sampleRate, max(originalBufferFrames, bufferFrames))
 
         status = AudioDeviceCreateIOProcID(
             aggregateID,
@@ -193,7 +215,11 @@ final class ProcessTapEngine {
             return .failure(.startDevice(status))
         }
         installSampleRateListener(sampleRate: sampleRate)
-        return .success(StartInfo(sampleRate: sampleRate, bufferFrames: bufferFrames))
+        let runningBufferFrames = deviceBufferFrames(aggregateID)
+        return .success(StartInfo(
+            sampleRate: sampleRate,
+            bufferFrames: runningBufferFrames > 0 ? runningBufferFrames : bufferFrames
+        ))
     }
 
     func stop() {

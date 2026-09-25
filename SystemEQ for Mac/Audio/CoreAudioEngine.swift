@@ -254,6 +254,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     // Ring buffer (extracted into SPSCRingBuffer for modularity)
     let ringBuffer = SPSCRingBuffer()
+    fileprivate let ringTargetFillFrames = 512
     fileprivate var inputCallbackCounter: UInt64 = 0
     fileprivate let diagnosticInputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticOutputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
@@ -417,6 +418,18 @@ public final class CoreAudioEngine: ObservableObject {
     /// Set I/O buffer frame size on a device. Mismatched sizes between input
     /// and output units are a common cause of HALC overload warnings in dual-I/O
     /// AUHAL setups because the scheduler can't align their deadlines.
+    private func deviceBufferFrameSize(_ deviceID: AudioDeviceID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var frames: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &frames) == noErr else { return nil }
+        return frames
+    }
+
     @discardableResult
     private func setDeviceBufferFrameSize(_ deviceID: AudioDeviceID, frames: UInt32) -> Bool {
         var addr = AudioObjectPropertyAddress(
@@ -584,8 +597,23 @@ public final class CoreAudioEngine: ObservableObject {
         // Force identical buffer sizes on both devices so their I/O deadlines
         // align. Without this, HALC can report "skipping cycle due to overload"
         // during startup until the two IOProcs converge on matching sizes.
-        setDeviceBufferFrameSize(inputDevice, frames: 512)
-        setDeviceBufferFrameSize(outputDevice, frames: 512)
+        let inputBufferSet = setDeviceBufferFrameSize(inputDevice, frames: 256)
+        let outputBufferSet = setDeviceBufferFrameSize(outputDevice, frames: 256)
+        if !inputBufferSet || !outputBufferSet ||
+            deviceBufferFrameSize(inputDevice) != 256 || deviceBufferFrameSize(outputDevice) != 256 {
+            setDeviceBufferFrameSize(inputDevice, frames: 512)
+            setDeviceBufferFrameSize(outputDevice, frames: 512)
+        }
+        let actualInputBufferFrames = deviceBufferFrameSize(inputDevice)
+        let actualOutputBufferFrames = deviceBufferFrameSize(outputDevice)
+        guard let actualInputBufferFrames, let actualOutputBufferFrames,
+              actualInputBufferFrames == actualOutputBufferFrames else {
+            DiagnosticEventStore.shared.record("engine.setup.bufferMismatch", details: [
+                "inputFrames": "\(actualInputBufferFrames ?? 0)",
+                "outputFrames": "\(actualOutputBufferFrames ?? 0)"
+            ])
+            return
+        }
 
         logDeviceBufferInfo(inputDevice, label: "INPUT")
         logDeviceBufferInfo(outputDevice, label: "OUTPUT")
@@ -1177,25 +1205,28 @@ public final class CoreAudioEngine: ObservableObject {
             seq_atomic_int64_store_release(counter, 0)
         }
         callbackWindow?.reset()
-        // Seed ring with ~2 IO cycles of silence so the first output callbacks
-        // have data to read while the input side is still spinning up.
+        ringBuffer.reset()
         ringBuffer.primeSilence(frames: 1024)
-        let s1 = AudioOutputUnitStart(iu)
+        let s1 = AudioOutputUnitStart(ou)
         guard s1 == noErr else {
-            DiagnosticEventStore.shared.record("engine.start.failed", details: ["inputStatus": "\(s1)"])
-            dlog("❌ Failed to start Core Audio Engine input: \(s1)", level: .error, category: .engine)
+            DiagnosticEventStore.shared.record("engine.start.failed", details: ["outputStatus": "\(s1)"])
+            dlog("❌ Failed to start Core Audio Engine output: \(s1)", level: .error, category: .engine)
             return false
         }
-        let s2 = AudioOutputUnitStart(ou)
+        let fillAfterOutputStart = ringBuffer.availableForReading
+        let s2 = AudioOutputUnitStart(iu)
         guard s2 == noErr else {
-            AudioOutputUnitStop(iu)
-            DiagnosticEventStore.shared.record("engine.start.failed", details: ["outputStatus": "\(s2)"])
-            dlog("❌ Failed to start Core Audio Engine output: \(s2)", level: .error, category: .engine)
+            AudioOutputUnitStop(ou)
+            DiagnosticEventStore.shared.record("engine.start.failed", details: ["inputStatus": "\(s2)"])
+            dlog("❌ Failed to start Core Audio Engine input: \(s2)", level: .error, category: .engine)
             return false
         }
 
         isRunning = true
-        DiagnosticEventStore.shared.record("engine.start.succeeded")
+        DiagnosticEventStore.shared.record("engine.start.succeeded", details: [
+            "fillAfterOutputStart": "\(fillAfterOutputStart)",
+            "fillAfterInputStart": "\(ringBuffer.availableForReading)"
+        ])
         dlog("✅ Core Audio Engine started", category: .engine)
         dlog("   Audio flows: Input → EQ Processing → Output", category: .engine)
         #if DEBUG
@@ -1922,12 +1953,21 @@ private func renderCallbackFunction(
 
     if outBufferCount == 1, outputBuffers[0].mNumberChannels >= 2 {
         guard let outPtr = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        rb.readInterleaved(outPtr: outPtr, framesRequested: framesRequested)
+        rb.readInterleavedResampled(
+            outPtr: outPtr,
+            framesRequested: framesRequested,
+            targetFillFrames: engine.ringTargetFillFrames
+        )
         outputBuffers[0].mDataByteSize = UInt32(framesRequested * 2 * MemoryLayout<Float>.size)
     } else if outBufferCount >= 2 {
         guard let outL = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self),
               let outR = outputBuffers[1].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        rb.readNonInterleaved(outL: outL, outR: outR, framesRequested: framesRequested)
+        rb.readNonInterleavedResampled(
+            outL: outL,
+            outR: outR,
+            framesRequested: framesRequested,
+            targetFillFrames: engine.ringTargetFillFrames
+        )
         outputBuffers[0].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
         outputBuffers[1].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
     }

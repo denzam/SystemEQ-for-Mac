@@ -33,6 +33,8 @@ public final class SPSCRingBuffer {
     private let lastOverrunHostTime: UnsafeMutablePointer<SEQAtomicInt64>
     private let readSnapshot: UnsafeMutablePointer<SEQAtomicInt64>
     private var diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
+    private var resamplePhase = 0.0
+    private var resampleCorrection = 0.0
 
     // MARK: - Init / Deinit
 
@@ -290,6 +292,94 @@ public final class SPSCRingBuffer {
         }
     }
 
+    @inline(__always)
+    func readNonInterleavedResampled(
+        outL: UnsafeMutablePointer<Float>,
+        outR: UnsafeMutablePointer<Float>,
+        framesRequested: Int,
+        targetFillFrames: Int
+    ) {
+        guard framesRequested > 0, let l = left, let r = right else { return }
+
+        let rIdxBase = loadReadRelaxed()
+        let w = loadWriteAcquire()
+        let avail = w - rIdxBase
+        let target = max(targetFillFrames + framesRequested, framesRequested)
+        let error = Double(avail - target)
+        let requestedCorrection = min(max(error * 0.00001, -0.001), 0.001)
+        resampleCorrection += (requestedCorrection - resampleCorrection) * 0.05
+        let ratio = 1.0 + resampleCorrection
+        let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
+        let lastOffset = Int(lastPosition)
+        let requiredFrames = lastOffset + (lastPosition == Double(lastOffset) ? 1 : 2)
+
+        guard avail >= requiredFrames else {
+            resamplePhase = 0
+            readNonInterleaved(outL: outL, outR: outR, framesRequested: framesRequested)
+            return
+        }
+
+        publishReadSnapshot(available: avail, requested: framesRequested)
+        var position = resamplePhase
+        for frame in 0..<framesRequested {
+            let sourceOffset = Int(position)
+            let fraction = Float(position - Double(sourceOffset))
+            let index = (rIdxBase + sourceOffset) & mask
+            let nextIndex = (index &+ 1) & mask
+            outL[frame] = l[index] + (l[nextIndex] - l[index]) * fraction
+            outR[frame] = r[index] + (r[nextIndex] - r[index]) * fraction
+            position += ratio
+        }
+
+        let consumed = Int(position)
+        resamplePhase = position - Double(consumed)
+        storeReadRelease(rIdxBase &+ consumed)
+    }
+
+    @inline(__always)
+    func readInterleavedResampled(
+        outPtr: UnsafeMutablePointer<Float>,
+        framesRequested: Int,
+        targetFillFrames: Int
+    ) {
+        guard framesRequested > 0, let l = left, let r = right else { return }
+
+        let rIdxBase = loadReadRelaxed()
+        let w = loadWriteAcquire()
+        let avail = w - rIdxBase
+        let target = max(targetFillFrames + framesRequested, framesRequested)
+        let error = Double(avail - target)
+        let requestedCorrection = min(max(error * 0.00001, -0.001), 0.001)
+        resampleCorrection += (requestedCorrection - resampleCorrection) * 0.05
+        let ratio = 1.0 + resampleCorrection
+        let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
+        let lastOffset = Int(lastPosition)
+        let requiredFrames = lastOffset + (lastPosition == Double(lastOffset) ? 1 : 2)
+
+        guard avail >= requiredFrames else {
+            resamplePhase = 0
+            readInterleaved(outPtr: outPtr, framesRequested: framesRequested)
+            return
+        }
+
+        publishReadSnapshot(available: avail, requested: framesRequested)
+        var position = resamplePhase
+        for frame in 0..<framesRequested {
+            let sourceOffset = Int(position)
+            let fraction = Float(position - Double(sourceOffset))
+            let index = (rIdxBase + sourceOffset) & mask
+            let nextIndex = (index &+ 1) & mask
+            let outIndex = frame &* 2
+            outPtr[outIndex] = l[index] + (l[nextIndex] - l[index]) * fraction
+            outPtr[outIndex &+ 1] = r[index] + (r[nextIndex] - r[index]) * fraction
+            position += ratio
+        }
+
+        let consumed = Int(position)
+        resamplePhase = position - Double(consumed)
+        storeReadRelease(rIdxBase &+ consumed)
+    }
+
     /// Advance the write index by `frames` without writing audio (buffers are
     /// zero-initialized on allocate). Used at startup to seed the consumer so
     /// the first output callbacks don't see an empty ring while the producer
@@ -310,6 +400,8 @@ public final class SPSCRingBuffer {
         seq_atomic_int32_store_release(underruns, 0)
         seq_atomic_int32_store_release(overruns, 0)
         seq_atomic_int64_store_release(readSnapshot, 0)
+        resamplePhase = 0
+        resampleCorrection = 0
         diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
     }
 
