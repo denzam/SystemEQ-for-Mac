@@ -1,6 +1,6 @@
 # Performance & Latency Budget
 
-Updated: 2026-09-12.
+Updated: 2026-09-25.
 
 ## Targets
 
@@ -8,7 +8,7 @@ Updated: 2026-09-12.
   - 10-band EQ: < 2% CPU.
   - 31-band EQ: < 4% CPU.
   - Future partitioned FIR, 4096 taps: < 6% CPU.
-- Desired end-to-end latency: < 10–15 ms. This remains a target, not a confirmed measurement.
+- Desired end-to-end latency: < 10–15 ms. The 2026-09-25 Scarlett loopback measured 11.38 ms in Native mode and about 28 ms through BlackHole on the Debug build at `adb979d`.
 - Peak-meter UI publication: 12.5 Hz. Audio metering remains throttled to approximately one buffer pass per 4096 accumulated frames.
 
 ## Current safeguards
@@ -57,7 +57,7 @@ No measured DSP-call interval exceeded the buffer duration across these runs and
 
 Raw local results are in `LocalArtifacts/DSPBenchmark/baseline-2026-09-11.json` and `baseline-repeat-2026-09-11.json`. `LocalArtifacts/` is ignored by Git; use the command above to reproduce them on another checkout.
 
-## Measurements still required
+## Runtime diagnostics
 
 Diagnostic report format 3 includes the executable Mach-O UUID, bundle build number, and Debug/Release configuration. The UUID identifies the actual binary even when multiple local builds share a marketing version; compare it with `dwarfdump --uuid` for the executable being profiled.
 
@@ -67,7 +67,37 @@ BlackHole reports distinguish processing-buffer capacity, ring-buffer capacity, 
 
 Routing requests now include a trigger for backend selection, output selection, sample-rate changes, system-output changes, device recovery, output removal/return, and wake. Sleep and scheduled wake recovery are retained as separate bounded events. Generic enable requests remain labelled `request`.
 
-- Do not use the previous AVAudioPlayerNode loopback probe as an absolute latency number: it included player scheduling, and Native capture could observe the direct Scarlett signal.
-- Measure Native and BlackHole under identical sample rate, buffer size, output device, EQ mode, and audio material.
-- Derive latency from CoreAudio host timestamps at the output boundary, then report median and high-percentile results separately for Native and BlackHole.
+## Physical loopback latency, 2026-09-25
+
+`Scripts/measure_loopback_latency.swift` writes a 2047-frame marker through a CoreAudio device IOProc, captures the Scarlett input, and uses output/input host timestamps plus offline cross-correlation. The previous AVAudioPlayerNode probe included player scheduling and is not an absolute latency measurement. A Scarlett output-to-input cable was connected; direct Scarlett loopback and BlackHole self-loopback were used as controls. The reported path includes the physical interface, and all runs below used 48 kHz, the same Scarlett, the same cable, the same EQ preset, and 10 accepted markers out of 10 with no capture-segment overflows.
+
+| Binary and route | Median | p95 | Internal buffer |
+|---|---:|---:|---:|
+| Installed binary from 2026-09-19, BlackHole | 99.10 ms | 99.15 ms | 512 output frames |
+| Debug binary at `adb979d`, BlackHole | 27.94 ms | 27.98 ms | 256 output frames |
+| Installed binary from 2026-09-19, Native | 27.40 ms | 27.40 ms | Not recorded in this run |
+| Debug binary at `adb979d`, Native | 11.38 ms | 11.38 ms | 128 aggregate frames |
+
+The Debug BlackHole run measured 27.99 ms median and 28.02 ms p95 after another 7 minutes 44 seconds, a 0.05 ms change from its initial run. The probe still accepted 10/10 markers. A short Debug diagnostic interval of 15.9 seconds showed zero ring underruns and overruns; the long-run counters were not captured because the save dialog became inaccessible. Earlier 256-frame prototype measurements rose from 13.80 to 32.28 ms over roughly nine minutes, which motivated the bounded resampling correction in `adb979d`.
+
+These are end-to-end binary/configuration comparisons, not an isolated measurement of one code change: the internal buffer sizes differ. The separate probe IOProcs reported 512-frame Scarlett and BlackHole device buffers in every run; those values are not the app's internal callback sizes. The EQ was in 31-band mode with 30 active bands and -1.5 dB preamp. Raw local probe results and diagnostic exports are in ignored `LocalArtifacts/LoopbackLatency/`.
+
+To repeat the measurement, compile the checked-in probe and run it while SystemEQ is active in the matching backend. Confirm the exact device UIDs and buffer sizes in each JSON report, and keep the same physical cable and EQ state:
+
+```bash
+mkdir -p LocalArtifacts/LoopbackLatency
+xcrun swiftc -parse-as-library -O -warnings-as-errors \
+  Scripts/measure_loopback_latency.swift \
+  -o LocalArtifacts/LoopbackLatency/measure-loopback-latency
+LocalArtifacts/LoopbackLatency/measure-loopback-latency \
+  --output 'BlackHole 2ch' --input 'Scarlett 2i2 USB' \
+  --trials 10 --min-latency-ms 1 --max-latency-ms 200
+LocalArtifacts/LoopbackLatency/measure-loopback-latency \
+  --output 'Scarlett 2i2 USB' --input 'Scarlett 2i2 USB' \
+  --trials 10 --min-latency-ms 1 --max-latency-ms 200
+```
+
+## Measurements still required
+
 - Record process CPU for flat, 10-band, and 31-band states after warm-up. Keep ProjectM disabled during the EQ baseline, then profile it separately by render scale.
+- Export ring underrun/overrun counters after a long BlackHole run and listen for glitches. The seven-minute correlation test validates timing stability for that run, not uninterrupted playback quality.
