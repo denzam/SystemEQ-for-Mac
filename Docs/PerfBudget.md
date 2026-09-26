@@ -59,7 +59,7 @@ Raw local results are in `LocalArtifacts/DSPBenchmark/baseline-2026-09-11.json` 
 
 ## Runtime diagnostics
 
-Diagnostic report format 3 includes the executable Mach-O UUID, bundle build number, and Debug/Release configuration. The UUID identifies the actual binary even when multiple local builds share a marketing version; compare it with `dwarfdump --uuid` for the executable being profiled.
+Diagnostic report format 4 includes the executable Mach-O UUID, bundle build number, and Debug/Release configuration. The UUID identifies the actual binary even when multiple local builds share a marketing version; compare it with `dwarfdump --uuid` for the executable being profiled.
 
 Diagnostic history is held only in memory, capped at 100 events. Each entry is limited to 16 fields, 128 UTF-8 bytes for names/keys, and 512 bytes per value. Old entries are discarded, and the report states the discarded count and diagnostic session start. The app creates no automatic diagnostic log files. Exported reports are written only after the user selects a save destination and remain user-owned files; SystemEQ does not delete them automatically.
 
@@ -80,6 +80,8 @@ Routing requests now include a trigger for backend selection, output selection, 
 
 The Debug BlackHole run measured 27.99 ms median and 28.02 ms p95 after another 7 minutes 44 seconds, a 0.05 ms change from its initial run. The probe still accepted 10/10 markers. A short Debug diagnostic interval of 15.9 seconds showed zero ring underruns and overruns; the long-run counters were not captured because the save dialog became inaccessible. Earlier 256-frame prototype measurements rose from 13.80 to 32.28 ms over roughly nine minutes, which motivated the bounded resampling correction in `adb979d`.
 
+A later Release build from the same source measured 25.20 ms median and 25.23 ms p95 through BlackHole after a long run, with 10/10 accepted markers, 48 kHz on both devices, and no capture-segment overflows. Its executable UUID was `E3612E03-6E44-3F15-9A51-7BC7B1D47719`. Build configuration and the app's preceding EQ/backend changes differ from the Debug experiment, so this is a separate observation rather than a like-for-like latency improvement.
+
 These are end-to-end binary/configuration comparisons, not an isolated measurement of one code change: the internal buffer sizes differ. The separate probe IOProcs reported 512-frame Scarlett and BlackHole device buffers in every run; those values are not the app's internal callback sizes. The EQ was in 31-band mode with 30 active bands and -1.5 dB preamp. Raw local probe results and diagnostic exports are in ignored `LocalArtifacts/LoopbackLatency/`.
 
 To repeat the measurement, compile the checked-in probe and run it while SystemEQ is active in the matching backend. Confirm the exact device UIDs and buffer sizes in each JSON report, and keep the same physical cable and EQ state:
@@ -97,7 +99,23 @@ LocalArtifacts/LoopbackLatency/measure-loopback-latency \
   --trials 10 --min-latency-ms 1 --max-latency-ms 200
 ```
 
+## Release runtime measurements, 2026-09-25
+
+On the Release binary above, `ps -p <PID> -o %cpu=` was sampled once per second after warm-up, with the main window open, ProjectM stopped, 48 kHz BlackHole to Scarlett, and no program audio. The render callbacks continued to process the selected filters. Each row below is the median of 25 whole-process samples; this is not the offline DSP thread CPU metric above.
+
+| EQ state | Active bands | Whole-process CPU median | Observed range |
+|---|---:|---:|---:|
+| EQ off | Routing stopped | 0.0% | 0.0–0.0% |
+| 10-band custom preset | 9/10 | 2.6% | 1.8–3.1% |
+| 31-band custom preset | 30/31 | 3.1% | 2.2–3.4% |
+
+The written 10-band `<2%` target is exceeded if interpreted as whole-process CPU; the target's metric needs clarification. EQ off stops routing, so its 0% is not a flat, enabled-EQ baseline. A true zero-gain, routing-active measurement remains open.
+
+ProjectM was profiled separately with the same `EoS - waveform 01` preset, auto-change off, its 800 × 600-point window visible in front, and 20 one-second samples per quality setting. The helper CPU medians were 29.5% at Low (0.5 render scale), 33.7% at Medium (0.75), and 40.9% at High (1.0); the UI showed about 60 FPS. Earlier samples with inconsistent window visibility varied substantially and are excluded from this comparison. CPU percentage does not capture GPU load or visual quality.
+
+Two format-4 exports confirmed a 646.2-second BlackHole interval with 0 underruns/0 overruns, followed by another 59.0 seconds with 0/0 after the loopback probe. Lifetime underruns stayed at 5; the last had occurred before the 646-second interval. The app reported 30/31 active EQ bands and current input/output callbacks. Raw CPU samples and reports are in ignored `LocalArtifacts/RuntimeCPU/`; the Release loopback JSON is in ignored `LocalArtifacts/LoopbackLatency/`.
+
 ## Measurements still required
 
-- Record process CPU for flat, 10-band, and 31-band states after warm-up. Keep ProjectM disabled during the EQ baseline, then profile it separately by render scale.
-- Export ring underrun/overrun counters after a long BlackHole run and listen for glitches. The seven-minute correlation test validates timing stability for that run, not uninterrupted playback quality.
+- Measure whole-process CPU with routing active and all EQ gains at zero under the same conditions.
+- Listen for clicks or dropouts during extended playback; counters and marker correlation cannot establish perceived audio quality.
