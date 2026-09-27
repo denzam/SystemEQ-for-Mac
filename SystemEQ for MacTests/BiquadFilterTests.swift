@@ -348,4 +348,143 @@ final class BiquadFilterTests: XCTestCase {
             "Only filters with non-zero gain should be active"
         )
     }
+
+    // MARK: - VDSP Filter Type Tests
+
+    func testVDSPCoefficients_allFilterTypesFiniteAndValid() {
+        let types: [FilterType] = [
+            .peak,
+            .lowShelf,
+            .highShelf,
+            .lowPass,
+            .highPass,
+            .notch,
+            .bandPass,
+            .allPass,
+            .allPassPEQ
+        ]
+        for type in types {
+            let c = BiquadResponseCalculator.coefficients(
+                frequency: 1000,
+                gain: type == .notch ? 0.0 : 6.0,
+                q: 1.0,
+                type: type,
+                sampleRate: 48000
+            )
+            XCTAssertFalse(c.b0.isNaN, "\(type) b0 should not be NaN")
+            XCTAssertFalse(c.b1.isNaN, "\(type) b1 should not be NaN")
+            XCTAssertFalse(c.b2.isNaN, "\(type) b2 should not be NaN")
+            XCTAssertFalse(c.a1.isNaN, "\(type) a1 should not be NaN")
+            XCTAssertFalse(c.a2.isNaN, "\(type) a2 should not be NaN")
+            XCTAssertFalse(c.b0.isInfinite, "\(type) b0 should not be infinite")
+        }
+    }
+
+    func testVDSPFilter_lowPassAndHighPass_retainedWhenZeroGain() {
+        let filter = BiquadFilterVDSP(sampleRate: 48000)
+        let bands = [
+            ParametricBand(frequency: 100, gain: 0.0, q: 0.707, filterType: .highPass),
+            ParametricBand(frequency: 10000, gain: 0.0, q: 0.707, filterType: .lowPass),
+            ParametricBand(frequency: 1000, gain: 0.0, q: 1.0, filterType: .peak),
+        ]
+        filter.configure(bands: bands, preamp: 0.0, outputBoost: 0.0, sampleRate: 48000)
+        XCTAssertEqual(filter.activeFilterCount, 2, "HighPass and LowPass should be active even with 0 gain")
+    }
+
+    func testCoreAudioEngine_roomNotchFilters_preservesActiveEQ() {
+        let engine = CoreAudioEngine.shared
+        // Set a 10-band EQ
+        engine.applyFixedBandEQ([3.0, 3.0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0.0, outputBoost: 0.0)
+        let originalVDSP = engine.vdspFilter
+        XCTAssertNotNil(originalVDSP)
+
+        // Apply room notch filters
+        engine.applyRoomNotchFilters([(frequency: 250, gain: -6.0, q: 8.0)])
+        XCTAssertNotNil(engine.roomFilter, "roomFilter should be configured")
+        XCTAssertTrue(engine.vdspFilter === originalVDSP, "Original vdspFilter must remain intact")
+
+        // Clear room notch filters
+        engine.clearRoomNotchFilters()
+        XCTAssertNil(engine.roomFilter, "roomFilter should be nil after clear")
+        XCTAssertTrue(engine.vdspFilter === originalVDSP, "Original vdspFilter must still remain intact")
+    }
+
+    func testBiquadFilterVDSP_recoversFromTransientNaN() {
+        let filter = BiquadFilterVDSP(sampleRate: 48000)
+        let bands = [ParametricBand(frequency: 1000, gain: 6.0, q: 1.0, filterType: .peak)]
+        filter.configure(bands: bands, preamp: 0.0, outputBoost: 0.0, sampleRate: 48000)
+
+        let count = 64
+        var bufferL = [Float](repeating: 0.5, count: count)
+        var bufferR = [Float](repeating: 0.5, count: count)
+        // Inject NaN in the first frame
+        bufferL[0] = Float.nan
+        bufferR[0] = Float.nan
+
+        // Process block with NaN
+        filter.processStereo(&bufferL, &bufferR, frameCount: count)
+
+        // All output samples must be finite (sanitized, no NaN leak)
+        for i in 0..<count {
+            XCTAssertFalse(bufferL[i].isNaN, "Output sample L[\(i)] must not be NaN")
+            XCTAssertFalse(bufferR[i].isNaN, "Output sample R[\(i)] must not be NaN")
+        }
+
+        // Process subsequent completely clean block
+        var cleanL = [Float](repeating: 0.5, count: count)
+        var cleanR = [Float](repeating: 0.5, count: count)
+        filter.processStereo(&cleanL, &cleanR, frameCount: count)
+
+        // Filter must not be stuck in silence (must produce non-zero output for non-zero input)
+        var sumL: Float = 0
+        for sample in cleanL {
+            XCTAssertFalse(sample.isNaN, "Clean sample must not become NaN")
+            sumL += abs(sample)
+        }
+        XCTAssertGreaterThan(sumL, 0.01, "Filter delay lines must recover and not produce permanent silence")
+    }
+
+    func testSPSCRingBuffer_resampler_boundarySafety() {
+        let rb = SPSCRingBuffer()
+        rb.allocate(capacityFrames: 256)
+
+        // Write exactly 1 frame of data
+        let inL: [Float] = [0.5]
+        let inR: [Float] = [0.5]
+        _ = rb.write(inL: inL, inR: inR, frameCount: 1)
+
+        var outL = [Float](repeating: -999.0, count: 1)
+        var outR = [Float](repeating: -999.0, count: 1)
+
+        // Requesting 1 frame when available == 1:
+        // requiredFrames is lastOffset + 2 == 2. avail (1) < requiredFrames (2).
+        // Resampler must safely fall back to readNonInterleaved instead of reading past the boundary!
+        rb.readNonInterleavedResampled(outL: &outL, outR: &outR, framesRequested: 1, targetFillFrames: 0)
+
+        XCTAssertEqual(outL[0], 0.5, accuracy: 0.001)
+        XCTAssertEqual(outR[0], 0.5, accuracy: 0.001)
+        XCTAssertFalse(outL[0].isNaN)
+        XCTAssertFalse(outR[0].isNaN)
+    }
+
+    func testCoreAudioEngine_roomNotchFilters_rebuildsOnSampleRateChange() {
+        let engine = CoreAudioEngine.shared
+        engine.applyRoomNotchFilters([(frequency: 250, gain: -6.0, q: 8.0)])
+        guard let initialRoomFilter = engine.roomFilter else {
+            XCTFail("roomFilter should be initialized")
+            return
+        }
+        XCTAssertEqual(initialRoomFilter.sampleRate, 48000, accuracy: 1.0)
+
+        // Simulate sample rate change to 96kHz
+        engine.rebuildRoomFilter(sampleRate: 96000)
+        guard let updatedRoomFilter = engine.roomFilter else {
+            XCTFail("roomFilter should be rebuilt")
+            return
+        }
+        XCTAssertEqual(updatedRoomFilter.sampleRate, 96000, accuracy: 1.0)
+
+        // Clean up
+        engine.clearRoomNotchFilters()
+    }
 }
