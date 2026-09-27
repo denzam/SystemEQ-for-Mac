@@ -224,8 +224,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func monitorParentProcess(pid: Int32) {
         DispatchQueue.global(qos: .utility).async {
             while true {
-                // Check if parent process is still running
-                if kill(pid, 0) != 0 {
+                // Check if parent process is still running (only terminate if process no longer exists)
+                if kill(pid, 0) != 0, errno == ESRCH {
                     // Parent died, exit helper
                     DispatchQueue.main.async {
                         NSApplication.shared.terminate(nil)
