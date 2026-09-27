@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import AVFoundation
 import Combine
 import SwiftUI
@@ -23,7 +22,6 @@ public struct WelcomeScreen: View {
                 case 1: welcomeSlide.transition(.opacity)
                 case 2: driverSlide.transition(.opacity)
                 case 3: privacySlide.transition(.opacity)
-                case 4: accessibilitySlide.transition(.opacity)
                 default: EmptyView()
                 }
             }
@@ -34,7 +32,7 @@ public struct WelcomeScreen: View {
             HStack {
                 // Page Indicators
                 HStack(spacing: 8) {
-                    ForEach(0..<5) { index in
+                    ForEach(0..<4) { index in
                         Circle()
                             .fill(index == currentTab ? Color.blue : Color.gray.opacity(0.3))
                             .frame(width: 8, height: 8)
@@ -53,7 +51,7 @@ public struct WelcomeScreen: View {
                 }
 
                 // Next / Get Started Button
-                if currentTab < 4 {
+                if currentTab < 3 {
                     Button(action: {
                         withAnimation { currentTab += 1 }
                     }) {
@@ -186,6 +184,22 @@ public struct WelcomeScreen: View {
                     .padding()
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(8)
+                } else if #available(macOS 14.4, *) {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text(localization.localized(.audioBackendNative))
+                                .fontWeight(.medium)
+                        }
+                        Text(localization.localized(.audioBackendDesc))
+                            .font(AppTypography.label)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
                 } else {
                     VStack(spacing: 12) {
                         HStack {
@@ -264,53 +278,6 @@ public struct WelcomeScreen: View {
                 }
             }
             .padding(.horizontal, 40)
-
-            Spacer()
-        }
-    }
-
-    private var accessibilitySlide: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.system(size: 60))
-                .foregroundColor(.blue)
-                .padding(.top, 40)
-
-            Text(localization.localized(.accessTitle))
-                .font(.title)
-                .bold()
-
-            VStack(spacing: 16) {
-                Text(localization.localized(.accessDesc))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-
-                Text(localization.localized(.accessExplanation))
-                    .multilineTextAlignment(.center)
-                    .font(AppTypography.label)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 40)
-
-                if AXIsProcessTrusted() {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text(localization.localized(.accessEnabled))
-                    }
-                    .padding()
-                } else {
-                    Button(localization.localized(.grantAccess)) {
-                        let options: CFDictionary =
-                            [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                        AXIsProcessTrustedWithOptions(options)
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Text(localization.localized(.accessInstructions))
-                        .font(AppTypography.labelSmall)
-                        .foregroundColor(.secondary)
-                }
-            }
 
             Spacer()
         }
