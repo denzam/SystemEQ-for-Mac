@@ -4,6 +4,26 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] — 2026-09-27
+
+Audio engine stability, device buffer adaptation, and resampler boundary fixes.
+
+### Fixed
+- CoreAudioEngine device setup no longer aborts when input and output devices have differing buffer frame sizes (e.g. AirPods, USB DACs); SPSCRingBuffer adapts mismatched block sizes
+- Resampler linear interpolation now enforces strict window boundary checking, preventing reads past available producer samples and eliminating IEEE 754 NaN generation on edge cases
+- BiquadFilterVDSP sanitizes incoming non-finite samples and auto-recovers delay lines from transient NaN corruption, preventing permanent silence
+- Room correction notch filters are preserved and automatically recalculated when the engine sample rate changes (e.g. 48 kHz to 96 kHz)
+- DevicePresetManager ignores the initial startup device notification, preserving the user's selected startup mode (such as Start Clean)
+- ProjectM helper audio ring buffer writes samples prior to publishing write index with batch atomic updates, preventing consumer data races and buffer overflow
+- ProjectM IPC helper client avoids double-freeing send buffers between timer cancel handlers and deinit
+
+### Changed
+- Streamlined onboarding flow by removing obsolete Accessibility permission step, adding reactive audio permission updates with System Settings fallback, and clarifying Native audio capture availability on macOS 14.4+
+
+### Added
+- Targeted edge-case unit tests covering resampler boundary limits, DSP NaN recovery, and room filter sample rate rebuilds
+- Automated test execution in GitHub Actions Code Quality workflow before release tagging
+
 ## [1.4.2] — 2026-09-19
 
 Compatibility with macOS 27, window interaction improvements, and audio engine fixes.

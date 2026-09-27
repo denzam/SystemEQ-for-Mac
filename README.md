@@ -46,7 +46,7 @@ no telemetry.
 
 ### Audio Engine
 
-- **CoreAudioEngine** — Low-latency processing (~5-10ms) via AudioUnit (AUHAL)
+- **CoreAudioEngine** — Low-latency processing (~11ms Native, ~25ms BlackHole) via AudioUnit (AUHAL)
 - **vDSP Biquad Filters** — Accelerate framework, 5-10× faster than scalar
 - **Peak Meters** — Real-time audio level monitoring
 - **Clipping Protection** — Automatic gain reduction and preamp control

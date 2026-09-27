@@ -45,7 +45,7 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 
 ### Motore audio
 
-- **CoreAudioEngine** — Bassa latenza (~5-10ms) tramite AudioUnit (AUHAL)
+- **CoreAudioEngine** — Bassa latenza (~11ms Native, ~25ms BlackHole) tramite AudioUnit (AUHAL)
 - **Filtri Biquad vDSP** — Framework Accelerate, 5-10× più veloce dello scalare
 - **Peak Meter** — Monitoraggio del livello audio in tempo reale
 - **Protezione dal clipping** — Riduzione automatica del guadagno e controllo del preamplificatore
