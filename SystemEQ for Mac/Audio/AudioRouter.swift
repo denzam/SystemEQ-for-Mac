@@ -546,38 +546,6 @@ public final class AudioRouter: ObservableObject {
         }
     }
 
-    func setupBlackHoleRouting() {
-        guard let blackHoleInput = inputDevices
-            .first(where: { $0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) }),
-            let physicalOutput = findBestPhysicalOutputDevice() else {
-            dlog("Cannot setup BlackHole routing - missing devices", level: .warning, category: .routing)
-            return
-        }
-
-        dlog("Setting up BlackHole routing with CoreAudio...", category: .routing)
-
-        // Setup CoreAudioEngine with BlackHole input and physical output
-        CoreAudioEngine.shared.setup(
-            inputDevice: blackHoleInput.id,
-            outputDevice: physicalOutput.id
-        )
-
-        // Start CoreAudioEngine
-        guard CoreAudioEngine.shared.start() else {
-            errorLog("Cannot start BlackHole routing", category: .routing)
-            restoreOriginalSystemOutputDevice()
-            return
-        }
-
-        // Ensure system output is BlackHole to avoid parallel unprocessed path to Scarlett
-        setAsDefaultOutputDevice(blackHoleInput)
-        dlog(
-            "BlackHole routing configured: System → BlackHole → CoreAudio → \(physicalOutput.name)",
-            level: .info,
-            category: .routing
-        )
-    }
-
     private func findBestPhysicalOutputDevice() -> AudioDevice? {
         // Пріоритетні аудіо інтерфейси
         let priorityDevices = AppConstants.DeviceNames.priorityDevices
@@ -987,53 +955,6 @@ public final class AudioRouter: ObservableObject {
 
             dlog("🎛️ Test routing configured", category: .general)
             dlog("   Audio flows: System → BlackHole → CoreAudioEngine → \(physicalOutput.name)", category: .general)
-        }
-    }
-
-    // MARK: - Diagnostics: Route to Built-in Output
-
-    func routeToBuiltInOutput() {
-        dlog("🔊 Route to Built-in Output (diagnostic)", category: .general)
-        Task { @MainActor in
-            await refreshDevices()
-
-            guard let blackHoleInput = inputDevices.first(where: { $0.name.lowercased().contains("blackhole") }) else {
-                dlog("❌ BlackHole not found. Please install BlackHole 2ch.", category: .general)
-                return
-            }
-
-            // Try common names for built-in speakers/output
-            let builtInCandidates = outputDevices.filter { device in
-                let n = device.name.lowercased()
-                return !n
-                    .contains("blackhole") &&
-                    (n.contains("built-in") || n.contains("internal") || n.contains("speakers") || n
-                        .contains("macbook"))
-            }
-            guard let builtIn = builtInCandidates.first ?? outputDevices
-                .first(where: { $0.name.lowercased().contains("built-in") }) else {
-                dlog("❌ Built-in output not found", category: .general)
-                return
-            }
-
-            // Route system output to BlackHole, process to Built-in
-            setAsDefaultOutputDevice(blackHoleInput)
-            CoreAudioEngine.shared.setup(
-                inputDevice: blackHoleInput.id,
-                outputDevice: builtIn.id
-            )
-            guard CoreAudioEngine.shared.start() else {
-                errorLog("Cannot route to built-in output", category: .routing)
-                restoreOriginalSystemOutputDevice()
-                return
-            }
-
-            selectedOutputDevice = builtIn
-            preferredOutputUID = builtIn.uid
-
-            dlog("🎛️ Diagnostic routing configured", category: .general)
-            dlog("   Audio flows: System → BlackHole → CoreAudioEngine → \(builtIn.name)", category: .general)
-            dlog("   Use 'Start Test Tone' to verify output path", category: .general)
         }
     }
 
@@ -1915,36 +1836,6 @@ public final class AudioRouter: ObservableObject {
             if let error {
                 dlog("❌ Failed to open Audio MIDI Setup: \(error.localizedDescription)", category: .general)
             }
-        }
-    }
-
-    // MARK: - Multi-Output Device Management
-
-    func createMultiOutputDevice() {
-        dlog("🔧 Opening Audio MIDI Setup to set BlackHole as System Output…", category: .general)
-        openAudioMIDISetup()
-
-        // Інструкції для користувача (BlackHole-only)
-        dlog("Instructions: Set BlackHole as System Output via Audio MIDI Setup", category: .routing)
-
-        // Показуємо діалог з інструкціями BlackHole-only
-        let alert = NSAlert()
-        alert.messageText = LocalizationManager.shared.localized(.setBlackHoleAsSystemOutputTitle)
-        alert.informativeText = LocalizationManager.shared.localized(.setBlackHoleAsSystemOutputInstructions)
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: LocalizationManager.shared.localized(.openAudioMIDISetupButton))
-        alert.addButton(withTitle: LocalizationManager.shared.localized(.testAudioButton))
-        alert.addButton(withTitle: LocalizationManager.shared.localized(.cancel))
-
-        let response = alert.runModal()
-
-        switch response {
-        case .alertFirstButtonReturn:
-            openAudioMIDISetup()
-        case .alertSecondButtonReturn:
-            testAudioRouting()
-        default:
-            break
         }
     }
 }
