@@ -35,6 +35,7 @@ xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac"
 | `Config/AppConstants.swift` | URL, sample rate, назви пристроїв |
 | `DesignSystem/AppDesign.swift` | Дизайн-токени, glass-ефекти |
 | `LocalizationManager.swift` | Перемикання мови EN/IT/UK в рантаймі |
+| `Localization/` | Мовні словники (`Translations_EN/IT/UK.swift`) |
 | `Infra/WindowCoordinator.swift` | Реєстрація вікон, управління фокусом |
 
 ## Конвенції
