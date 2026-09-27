@@ -5,21 +5,21 @@
 ```
 SystemEQ for Mac/
 ├── SystemEQ for Mac/           # Main Xcode target
-│   ├── Audio/                  # ✅ Audio engines (CoreAudioEngine, AudioRouter, CalibrationEngine, VisualizerEngine)
-│   ├── AutoEQ/                 # ✅ AutoEQ integration (models, parsers, repository)
-│   ├── Data/                   # ✅ Preset persistence, EQ database
-│   ├── Database/               # ✅ SQLite database (2,347 headphones, 8,850 presets)
-│   ├── DesignSystem/           # ✅ UI components, design tokens
-│   ├── Features/               # ✅ Main views (Equalizer, Calibration, Visualizer, AutoEQ, Routing, Settings)
-│   ├── Infra/                  # ✅ Media keys, window management
-│   ├── SetupAssistant/         # ✅ BlackHole setup wizard
-│   ├── UI/                     # ✅ Reusable components (meters, sliders, toggles)
-│   ├── Config/                 # ✅ App configuration
-│   └── Resources/              # ✅ Assets, localization
-├── Docs/                       # 📝 Documentation, specs, wireframes
-├── Scripts/                    # 🔧 Build scripts, benchmarks, database generator
-├── archive/                    # 📦 Historical docs and migration guides
-└── AutoEq/                     # 📂 AutoEQ data (optional, fallback)
+│   ├── Audio/                  # Audio engines (CoreAudioEngine, AudioRouter, ProcessTapEngine)
+│   ├── AutoEQ/                 # AutoEQ models & converters
+│   ├── Data/                   # EQDatabase (SQLite FTS5), EQProcessor
+│   ├── DesignSystem/           # UI components, design tokens, EQGraphView
+│   ├── Features/               # Main views (AutoEQ, Routing, Settings, Visualizer, Calibration)
+│   ├── Infra/                  # WindowCoordinator, observers
+│   ├── SetupAssistant/         # BlackHole setup wizard
+│   ├── UI/                     # Reusable components
+│   ├── Config/                 # App configuration & features.json
+│   └── Resources/              # Assets & EQDatabase.db
+├── ProjectMHelper/             # Dedicated ProjectM visualizer process (IPC via Unix socket)
+├── SystemEQ for MacTests/      # Unit test suite (141 tests)
+├── Docs/                       # Documentation & archive/
+├── Scripts/                    # Build scripts & database generators
+└── Vendor/                     # External libraries (ProjectM dynamic libraries & headers)
 ```
 
 ## Future Additions (Phase 3+)

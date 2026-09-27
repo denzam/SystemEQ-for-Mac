@@ -29,7 +29,7 @@ xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac"
 | `Audio/PeakMeter.swift` | Рівні pre/post-EQ, тротлінг публікацій в UI |
 | `Data/EQDatabase.swift` | SQLite-клієнт, FTS5-пошук пресетів |
 | `Data/AutoEQModels.swift` | `EQPreset`, `ParametricBand`, `FilterType` |
-| `AutoEQ/EQConverter.swift` | Конвертація AutoEQ-пресетів |
+| `AutoEQ/EQConverter.swift` | Утиліта конвертації AutoEQ-пресетів (тестований backlog, не підключений до UI) |
 | `ProjectMHelper/IPCServer.swift` | Серверна частина IPC helper-процесу |
 | `Visualizer/ProjectM/ProjectMHelperClient.swift` | Клієнт IPC з боку застосунку |
 | `Config/AppConstants.swift` | URL, sample rate, назви пристроїв |
@@ -39,7 +39,7 @@ xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac"
 
 ## Конвенції
 
-- **Логування:** тільки `dlog(_, category:)` — не `print()`. Заборонено в audio render callback.
+- **Логування:** тільки `dlog(_, category:)` — не `print()` (єдиний виняток — `Utils/DebugLogger.swift`, де `print` є термінальним стоком виводу в консоль; виклик `dlog` всередині `log()` створив би нескінченну рекурсію). Заборонено в audio render callback.
 - **Локалізація:** тільки `LocalizationManager.shared.text(for: .ключ)` — не хардкодити рядки.
 - **Атоміки:** тільки C11 `<stdatomic.h>` через bridging headers (`SEQAtomicInt32` / `PMAtomicInt32`). OSAtomic заборонено (deprecated).
 - **Feature flags:** перевіряти `FeatureRegistry` перед реалізацією нових фіч.
