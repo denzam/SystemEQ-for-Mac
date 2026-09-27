@@ -10,10 +10,10 @@ satisfies the attribution requirements of those licenses.
 - Source: https://github.com/projectM-visualizer/projectm
 - License: **LGPL-2.1-or-later**
 - Used by: `ProjectMHelper` target (visualizer rendering).
-- Compliance: ProjectM is dynamically linked. Users have the right to
-  relink against a modified ProjectM. Source for the exact ProjectM
-  version used in each release is preserved in this repository's release
-  notes and is available upstream.
+- Compliance: ProjectM is dynamically linked using prebuilt shared libraries
+  in `Vendor/projectM/lib/`. Users have the right to relink `ProjectMHelper` against
+  a modified ProjectM build. Upstream source code and instructions for the exact ProjectM
+  version used in each release are referenced in release notes and available upstream.
 
 ### Accelerate / vDSP
 - Apple system framework. No redistribution beyond what macOS provides.
