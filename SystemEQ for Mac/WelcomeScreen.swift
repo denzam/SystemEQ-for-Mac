@@ -6,6 +6,7 @@ import SwiftUI
 public struct WelcomeScreen: View {
     @Binding var isPresented: Bool
     @State private var currentTab = 0
+    @State private var hasAudioPermission: Bool = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     @EnvironmentObject var audioRouter: AudioRouter
     @EnvironmentObject var localization: LocalizationManager
 
@@ -86,6 +87,12 @@ public struct WelcomeScreen: View {
         }
         .frame(width: 640, height: 720)
         .background(Color(NSColor.windowBackgroundColor))
+        .onAppear {
+            updateAudioPermission()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            updateAudioPermission()
+        }
     }
 
     // MARK: - Slides
@@ -262,7 +269,7 @@ public struct WelcomeScreen: View {
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(8)
 
-                if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+                if hasAudioPermission {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -270,16 +277,51 @@ public struct WelcomeScreen: View {
                     }
                     .padding()
                 } else {
-                    Button(localization.localized(.grantPermission)) {
-                        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                    VStack(spacing: 8) {
+                        Button(localization.localized(.grantPermission)) {
+                            requestAudioPermission()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+                        if status == .denied || status == .restricted {
+                            Text(localization.localized(.accessInstructions))
+                                .font(AppTypography.labelSmall)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
             }
             .padding(.horizontal, 40)
 
             Spacer()
+        }
+    }
+
+    private func updateAudioPermission() {
+        hasAudioPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    }
+
+    private func requestAudioPermission() {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async {
+                    self.hasAudioPermission = granted
+                }
+            }
+        case .denied,
+             .restricted:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        case .authorized:
+            hasAudioPermission = true
+        @unknown default:
+            break
         }
     }
 
