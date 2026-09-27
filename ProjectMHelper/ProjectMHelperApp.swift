@@ -933,12 +933,20 @@ class VisualizerController: NSObject {
     // MARK: - Audio (Lock-Free)
 
     func addAudioSamples(_ samples: UnsafePointer<Float>, count: Int) {
-        // Lock-free write to ring buffer (audioBufferSize is power-of-two → mask instead of modulo)
+        guard count > 0 else { return }
         let mask = audioBufferSize - 1
-        for i in 0..<count {
-            let writeIdx = Int(pm_atomic_fetch_add(&audioWriteIndex, 1)) & mask
-            audioBuffer[writeIdx] = samples[i]
+        let write = pm_atomic_load(&audioWriteIndex)
+        let read = pm_atomic_load(&audioReadIndex)
+        let used = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
+        let availableCapacity = audioBufferSize - used
+        guard availableCapacity > 0 else { return }
+
+        let toWrite = min(count, availableCapacity)
+        let base = Int(write)
+        for i in 0..<toWrite {
+            audioBuffer[(base &+ i) & mask] = samples[i]
         }
+        _ = pm_atomic_fetch_add(&audioWriteIndex, Int32(toWrite))
     }
 
     private func feedAudioToProjectM() {
@@ -959,10 +967,11 @@ class VisualizerController: NSObject {
         samplesToRead &= ~1
 
         let mask = audioBufferSize - 1
+        let base = Int(read)
         for i in 0..<samplesToRead {
-            let readIdx = Int(pm_atomic_fetch_add(&audioReadIndex, 1)) & mask
-            audioScratch[i] = audioBuffer[readIdx]
+            audioScratch[i] = audioBuffer[(base &+ i) & mask]
         }
+        _ = pm_atomic_fetch_add(&audioReadIndex, Int32(samplesToRead))
 
         projectm_pcm_add_float(handle, audioScratch, UInt32(samplesToRead / 2), PROJECTM_STEREO)
     }

@@ -199,8 +199,16 @@ final class ProjectMHelperClient: ObservableObject {
     // Lock-free ring buffer for audio (written on real-time audio thread, read on ipcQueue)
     private let audioRingCapacity = 8192 // must be power of 2
     nonisolated(unsafe) private var _audioRingBuffer: UnsafeMutablePointer<Float>
-    nonisolated(unsafe) private var _audioWriteIdx: SEQAtomicInt32 = seq_atomic_int32_make(0)
-    nonisolated(unsafe) private var _audioReadIdx: SEQAtomicInt32 = seq_atomic_int32_make(0)
+    nonisolated(unsafe) private let _audioWriteIdx: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
+    nonisolated(unsafe) private let _audioReadIdx: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
     private var audioSendTimer: DispatchSourceTimer?
 
     // Pre-allocated send buffer (only touched from ipcQueue inside audioSendTimer handler)
@@ -210,6 +218,19 @@ final class ProjectMHelperClient: ObservableObject {
     private init() {
         _audioRingBuffer = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
         _audioRingBuffer.initialize(repeating: 0, count: 8192)
+    }
+
+    deinit {
+        if let timer = audioSendTimer {
+            timer.cancel()
+            audioSendTimer = nil
+        } else {
+            _sendBuffer?.deallocate()
+            _sendBuffer = nil
+        }
+        _audioRingBuffer.deallocate()
+        _audioWriteIdx.deallocate()
+        _audioReadIdx.deallocate()
     }
 
     // MARK: - Lifecycle
@@ -683,37 +704,31 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Audio
 
     private func connectToAudioEngine() {
-        CoreAudioEngine.shared.visualizerCallback = { [weak self] leftPtr, rightPtr, frameCount in
-            self?.processAudioData(left: leftPtr, right: rightPtr, frameCount: frameCount)
+        let ringBuffer = _audioRingBuffer
+        let writePtr = _audioWriteIdx
+        let readPtr = _audioReadIdx
+        let capacity = audioRingCapacity
+
+        CoreAudioEngine.shared.visualizerCallback = { left, right, frameCount in
+            let maxSamples = min(frameCount, 1024)
+            let mask = Int32(capacity - 1)
+            let sampleCount = Int32(2 * maxSamples)
+            let write = seq_atomic_int32_load(writePtr)
+            let read = seq_atomic_int32_load(readPtr)
+            let used = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
+            guard used + Int(sampleCount) <= capacity else { return }
+            let base = write
+            for i in 0..<maxSamples {
+                let idx = base &+ Int32(2 * i)
+                ringBuffer[Int(idx & mask)] = left[i]
+                ringBuffer[Int((idx &+ 1) & mask)] = right[i]
+            }
+            _ = seq_atomic_int32_fetch_add(writePtr, sampleCount)
         }
     }
 
     private func disconnectFromAudioEngine() {
         CoreAudioEngine.shared.visualizerCallback = nil
-    }
-
-    /// Called from real-time audio thread — lock-free, no heap allocation
-    nonisolated private func processAudioData(
-        left: UnsafePointer<Float>,
-        right: UnsafePointer<Float>,
-        frameCount: Int
-    ) {
-        let maxSamples = min(frameCount, 1024)
-        let mask = Int32(audioRingCapacity - 1)
-        let sampleCount = Int32(2 * maxSamples)
-        let write = seq_atomic_int32_load(&_audioWriteIdx)
-        let read = seq_atomic_int32_load(&_audioReadIdx)
-        let used = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
-        guard used + Int(sampleCount) <= audioRingCapacity else { return }
-        // Single producer: write samples first, publish the index once after —
-        // one atomic RMW per callback instead of two per sample.
-        let base = write
-        for i in 0..<maxSamples {
-            let idx = base &+ Int32(2 * i)
-            _audioRingBuffer[Int(idx & mask)] = left[i]
-            _audioRingBuffer[Int((idx &+ 1) & mask)] = right[i]
-        }
-        _ = seq_atomic_int32_fetch_add(&_audioWriteIdx, sampleCount)
     }
 
     private func startAudioSending() {
@@ -754,8 +769,8 @@ final class ProjectMHelperClient: ObservableObject {
         defer { close(connection.socket) }
         guard let sendBuf = _sendBuffer else { return }
 
-        let write = seq_atomic_int32_load(&_audioWriteIdx)
-        let read = seq_atomic_int32_load(&_audioReadIdx)
+        let write = seq_atomic_int32_load(_audioWriteIdx)
+        let read = seq_atomic_int32_load(_audioReadIdx)
         let available = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
 
         guard available >= 512 else { return }
@@ -781,7 +796,7 @@ final class ProjectMHelperClient: ObservableObject {
             var sample = _audioRingBuffer[Int((read &+ Int32(i)) & mask)]
             payloadBase.advanced(by: i * floatSize).copyMemory(from: &sample, byteCount: floatSize)
         }
-        _ = seq_atomic_int32_fetch_add(&_audioReadIdx, Int32(toRead))
+        _ = seq_atomic_int32_fetch_add(_audioReadIdx, Int32(toRead))
 
         guard socketIsCurrent(connection.original, generation: connection.generation),
               Self.writeAll(
