@@ -70,15 +70,6 @@ public final class CoreAudioEngine: ObservableObject {
     // Audio thread: acquire-load published pointer, use it for one callback.
     // UI thread: release-store new pointer; retire old filter on the next
     // main-queue tick so ARC never frees a reference the audio thread holds.
-
-    private var _filterChain: BiquadFilterChain?
-    var filterChain: BiquadFilterChain? {
-        get { _filterChain }
-        set { _filterChain = newValue }
-    }
-
-    private var useVDSPFilter: Bool = true
-
     private var _vdspFilterStrong: BiquadFilterVDSP?
     private var retiredVDSPFilters: [BiquadFilterVDSP] = []
 
@@ -1147,38 +1138,14 @@ public final class CoreAudioEngine: ObservableObject {
         let bands = FixedBandEQDefinition.bands(mode: .tenBand, gains: gains)
 
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU)
-        if useVDSPFilter {
-            let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-            filter.configure(
-                bands: bands,
-                preamp: preamp,
-                outputBoost: outputBoost,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.vdspFilter = filter
-            self.filterChain = nil // Clear old filter chain
-        } else {
-            // Fallback to standard filter chain
-            self.filterChain = BiquadFilterChain(filterCount: bands.count)
-            self.filterChain?.preamp = preamp
-            let bandFrequencies = bands.map(\.frequency)
-            let bandGains = bands.map(\.gain)
-            let bandQs = bands.map(\.q)
-            let bandTypes = bands.map(\.filterType)
-            self.filterChain?.configureBands(
-                bandFrequencies,
-                gains: bandGains.map { Float($0) },
-                qs: bandQs.map { Float($0) },
-                types: bandTypes,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.filterChain?.configureOutputSafety(
-                outputBoost: outputBoost,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.vdspFilter = nil
-            dlog("🎛️ Applied 10-band EQ with standard filters", category: .engine)
-        }
+        let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
+        filter.configure(
+            bands: bands,
+            preamp: preamp,
+            outputBoost: outputBoost,
+            sampleRate: Float(currentSampleRate)
+        )
+        self.vdspFilter = filter
     }
 
     /// Apply 31-band graphic EQ using parametric peaks
@@ -1193,48 +1160,18 @@ public final class CoreAudioEngine: ObservableObject {
         let count = bands.count
 
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU even with 31 bands)
-        if useVDSPFilter {
-            let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-            filter.configure(
-                bands: bands,
-                preamp: preamp,
-                outputBoost: outputBoost,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.vdspFilter = filter
-            self.filterChain = nil // Clear old filter chain
-        } else {
-            // Fallback to standard filter chain (only non-zero bands)
-            let activeBands = bands.filter { abs($0.gain) > 0.5 }
-
-            self.filterChain = BiquadFilterChain(filterCount: activeBands.count)
-            self.filterChain?.preamp = preamp
-            let bandFrequencies31 = activeBands.map(\.frequency)
-            let bandGains31 = activeBands.map(\.gain)
-            let bandQs31 = activeBands.map(\.q)
-            let bandTypes31 = activeBands.map(\.filterType)
-            self.filterChain?.configureBands(
-                bandFrequencies31,
-                gains: bandGains31.map { Float($0) },
-                qs: bandQs31.map { Float($0) },
-                types: bandTypes31,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.filterChain?.configureOutputSafety(
-                outputBoost: outputBoost,
-                sampleRate: Float(currentSampleRate)
-            )
-            self.vdspFilter = nil
-            dlog(
-                "🎛️ Applied 31-band EQ with \(activeBands.count) active filters (skipped \(count - activeBands.count) zero-gain bands)",
-                category: .engine
-            )
-        }
+        let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
+        filter.configure(
+            bands: bands,
+            preamp: preamp,
+            outputBoost: outputBoost,
+            sampleRate: Float(currentSampleRate)
+        )
+        self.vdspFilter = filter
     }
 
     /// Clear EQ
     public func clearEQ() {
-        self.filterChain = nil
         self.vdspFilter = nil
         self.preampGain = 0.0
         self.eqGains = Array(repeating: 0.0, count: 10)
@@ -1423,7 +1360,7 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - Diagnostics API
 
     func diagnosticSummary(backend: ActiveAudioRoutingBackend) -> String {
-        let pipeline = vdspFilter != nil ? "vDSP" : filterChain != nil ? "scalar" : "none"
+        let pipeline = vdspFilter != nil ? "vDSP" : "none"
         let now = mach_absolute_time()
         let summary = """
         Setup complete: \(isSetupComplete)
@@ -1863,8 +1800,6 @@ public final class CoreAudioEngine: ObservableObject {
             beginVDSPFilterRead()
             if let vdsp = currentVDSPFilter() {
                 peakMeter.recordLimiterGain(vdsp.processStereo(left, right, frameCount: frameCount))
-            } else if let filterChain {
-                peakMeter.recordLimiterGain(filterChain.processStereoBuffers(left, right, frameCount: frameCount))
             }
             endVDSPFilterRead()
 
