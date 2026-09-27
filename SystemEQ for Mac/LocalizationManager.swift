@@ -588,6 +588,10 @@ public enum LocalizedString: String, CaseIterable {
     case dbUpdateAvailable
     case dbCheckFailed
     case dbVersionUnavailable
+
+    // Accessibility
+    case equalizerCurve
+    case equalizerFlat
 }
 
 // MARK: - Localization Data Structure
@@ -626,7 +630,6 @@ private enum LocalizationData {
 // MARK: - Localization Manager
 
 public final class LocalizationManager: ObservableObject {
-    /// ... rest of the code remains the same ...
     public static let shared = LocalizationManager()
 
     @Published public var currentLanguage: AppLanguage {
@@ -658,7 +661,6 @@ public final class LocalizationManager: ObservableObject {
         self._currentLanguage = Published(wrappedValue: Self.loadLanguageStatic())
     }
 
-    /// ... rest of the code remains the same ...
     private static func loadLanguageStatic() -> AppLanguage {
         guard let languageRaw = UserDefaults.standard.string(forKey: "AppLanguage"),
               let language = AppLanguage(rawValue: languageRaw) else {

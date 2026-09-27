@@ -7,13 +7,14 @@ struct EQGraphView: View {
     private let hPad: CGFloat = 36
 
     private var accessibilitySummary: String {
-        let activeBands = bands.filter { abs($0.gain) >= 0.1 }
+        let activeBands = bands.filter { $0.gain.isFinite && abs($0.gain) >= 0.1 }
         if activeBands.isEmpty {
-            return "Flat (all bands at 0 dB)"
+            return LocalizationManager.shared.localized(.equalizerFlat)
         }
-        return activeBands.map {
-            let freqStr = $0.frequency >= 1000 ? String(format: "%.1fkHz", $0.frequency / 1000) : "\(Int($0.frequency))Hz"
-            return "\(freqStr): \(String(format: "%+.1f", $0.gain)) dB"
+        return activeBands.map { band in
+            let freqStr = AudioEngine.shared.formatFrequency(band.frequency)
+            let gainStr = AudioEngine.shared.formatGain(band.gain)
+            return "\(freqStr): \(gainStr)"
         }.joined(separator: ", ")
     }
 
@@ -38,12 +39,13 @@ struct EQGraphView: View {
         .frame(minHeight: 280)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Equalizer Curve")
+        .accessibilityLabel(LocalizationManager.shared.localized(.equalizerCurve))
         .accessibilityValue(accessibilitySummary)
     }
 }
 
 func eqXFor(freq: Float, width: CGFloat, hPad: CGFloat) -> CGFloat {
+    guard freq.isFinite, freq > 0 else { return hPad }
     let logMin = log10(CGFloat(20))
     let logMax = log10(CGFloat(20000))
     let t = (log10(CGFloat(freq)) - logMin) / (logMax - logMin)
@@ -51,7 +53,8 @@ func eqXFor(freq: Float, width: CGFloat, hPad: CGFloat) -> CGFloat {
 }
 
 func eqYFor(gain: Float, height: CGFloat) -> CGFloat {
-    height / 2 - CGFloat(gain) / 40 * height
+    guard gain.isFinite else { return height / 2 }
+    return height / 2 - CGFloat(gain) / 40 * height
 }
 
 struct EQGridBackground: View {
@@ -263,5 +266,18 @@ struct EQBandHandle: View {
                 )
         }
         .frame(width: size.width, height: size.height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AudioEngine.shared.formatFrequency(band.frequency))
+        .accessibilityValue(AudioEngine.shared.formatGain(gain))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                gain = min(20, gain + 0.5)
+            case .decrement:
+                gain = max(-20, gain - 0.5)
+            @unknown default:
+                break
+            }
+        }
     }
 }

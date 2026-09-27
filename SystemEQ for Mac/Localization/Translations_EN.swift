@@ -474,6 +474,8 @@ enum EnglishTranslations {
         .dbUpToDate: "✅ Database is up to date (version %@)",
         .dbUpdateAvailable: "🔄 Update available: %@ → %@",
         .dbCheckFailed: "⚠️ Could not check: %@",
-        .dbVersionUnavailable: "could not read the local database version"
+        .dbVersionUnavailable: "could not read the local database version",
+        .equalizerCurve: "Equalizer Curve",
+        .equalizerFlat: "Flat (all bands at 0 dB)"
     ]
 }

@@ -474,6 +474,8 @@ enum UkrainianTranslations {
         .dbUpToDate: "✅ База даних актуальна (версія %@)",
         .dbUpdateAvailable: "🔄 Доступне оновлення: %@ → %@",
         .dbCheckFailed: "⚠️ Не вдалося перевірити: %@",
-        .dbVersionUnavailable: "не вдалося прочитати версію локальної бази"
+        .dbVersionUnavailable: "не вдалося прочитати версію локальної бази",
+        .equalizerCurve: "Крива еквалайзера",
+        .equalizerFlat: "Лінійна (всі смуги на 0 дБ)"
     ]
 }

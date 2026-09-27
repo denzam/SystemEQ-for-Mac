@@ -474,6 +474,8 @@ enum ItalianTranslations {
         .dbUpToDate: "✅ Database aggiornato (versione %@)",
         .dbUpdateAvailable: "🔄 Aggiornamento disponibile: %@ → %@",
         .dbCheckFailed: "⚠️ Impossibile verificare: %@",
-        .dbVersionUnavailable: "impossibile leggere la versione del database locale"
+        .dbVersionUnavailable: "impossibile leggere la versione del database locale",
+        .equalizerCurve: "Curva Equalizzatore",
+        .equalizerFlat: "Piatto (tutte le bande a 0 dB)"
     ]
 }
