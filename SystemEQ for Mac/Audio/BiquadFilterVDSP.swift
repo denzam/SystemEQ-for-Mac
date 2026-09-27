@@ -142,7 +142,21 @@ enum BiquadResponseCalculator {
         sampleRate: Float,
         pointCount: Int = 512
     ) -> Float {
-        let activeBands = bands.filter { abs($0.gain) >= 0.01 }
+        let activeBands = bands.filter { band in
+            switch band.filterType {
+            case .highShelf,
+                 .lowShelf,
+                 .peak:
+                abs(band.gain) >= 0.01
+            case .allPass,
+                 .allPassPEQ,
+                 .bandPass,
+                 .highPass,
+                 .lowPass,
+                 .notch:
+                true
+            }
+        }
         guard !activeBands.isEmpty, sampleRate > 0, pointCount > 1 else { return 0 }
         let filterCoefficients = activeBands.map {
             Self.coefficients(
@@ -233,14 +247,47 @@ enum BiquadResponseCalculator {
             a0 = (A + 1) - (A - 1) * cosW + twoSqrtAAlpha
             a1 = 2.0 * ((A - 1) - (A + 1) * cosW)
             a2 = (A + 1) - (A - 1) * cosW - twoSqrtAAlpha
-        default:
+        case .lowPass:
             let alpha = sinW / (2.0 * q)
-            b0 = 1.0 + alpha * A
-            b1 = -2.0 * cosW
-            b2 = 1.0 - alpha * A
-            a0 = 1.0 + alpha / A
+            b0 = (1.0 - cosW) / 2.0
+            b1 = 1.0 - cosW
+            b2 = (1.0 - cosW) / 2.0
+            a0 = 1.0 + alpha
             a1 = -2.0 * cosW
-            a2 = 1.0 - alpha / A
+            a2 = 1.0 - alpha
+        case .highPass:
+            let alpha = sinW / (2.0 * q)
+            b0 = (1.0 + cosW) / 2.0
+            b1 = -(1.0 + cosW)
+            b2 = (1.0 + cosW) / 2.0
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cosW
+            a2 = 1.0 - alpha
+        case .notch:
+            let alpha = sinW / (2.0 * q)
+            b0 = 1.0
+            b1 = -2.0 * cosW
+            b2 = 1.0
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cosW
+            a2 = 1.0 - alpha
+        case .bandPass:
+            let alpha = sinW / (2.0 * q)
+            b0 = alpha
+            b1 = 0.0
+            b2 = -alpha
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cosW
+            a2 = 1.0 - alpha
+        case .allPass,
+             .allPassPEQ:
+            let alpha = sinW / (2.0 * q)
+            b0 = 1.0 - alpha
+            b1 = -2.0 * cosW
+            b2 = 1.0 + alpha
+            a0 = 1.0 + alpha
+            a1 = -2.0 * cosW
+            a2 = 1.0 - alpha
         }
 
         return BiquadCoefficients(
@@ -260,7 +307,10 @@ public final class BiquadFilterVDSP {
     // MARK: - Properties
 
     private var filterCount: Int = 0
-    private var sampleRate: Float
+    public var activeFilterCount: Int {
+        filterCount
+    }
+    public private(set) var sampleRate: Float
 
     /// vDSP biquad setup handle (nil when filterCount == 0 / bypass mode).
     /// Per section, coefficients laid out as [b0, b1, b2, a1, a2] — 5 doubles.
@@ -300,7 +350,21 @@ public final class BiquadFilterVDSP {
         self.preampLinear = pow(10.0, preamp / 20.0)
         outputSafety.configure(boostDB: outputBoost, sampleRate: sampleRate)
 
-        let activeBands = bands.filter { abs($0.gain) >= 0.01 }
+        let activeBands = bands.filter { band in
+            switch band.filterType {
+            case .highShelf,
+                 .lowShelf,
+                 .peak:
+                abs(band.gain) >= 0.01
+            case .allPass,
+                 .allPassPEQ,
+                 .bandPass,
+                 .highPass,
+                 .lowPass,
+                 .notch:
+                true
+            }
+        }
         let newCount = activeBands.count
 
         // Destroy previous setup before rebuilding.
@@ -357,6 +421,11 @@ public final class BiquadFilterVDSP {
         }
 
         if filterCount > 0, let sL = setupL, let sR = setupR {
+            Self.sanitizeNonFinite(bufferL, count: frameCount)
+            Self.sanitizeNonFinite(bufferR, count: frameCount)
+            if delaysL.contains(where: { !$0.isFinite }) || delaysR.contains(where: { !$0.isFinite }) {
+                resetDelays()
+            }
             delaysL.withUnsafeMutableBufferPointer { dL in
                 guard let addressL = dL.baseAddress else { return }
                 vDSP_biquad(sL, addressL, bufferL, 1, bufferL, 1, vDSP_Length(frameCount))
@@ -370,14 +439,31 @@ public final class BiquadFilterVDSP {
         return outputSafety.processStereo(bufferL, bufferR, frameCount: frameCount)
     }
 
-    /// Reset filter states (clears delay lines).
-    public func reset() {
+    @inline(__always)
+    private static func sanitizeNonFinite(_ buffer: UnsafeMutablePointer<Float>, count: Int) {
+        guard count > 0 else { return }
+        var maxMag: Float = 0
+        vDSP_maxmgv(buffer, 1, &maxMag, vDSP_Length(count))
+        guard !maxMag.isFinite else { return }
+        for i in 0..<count {
+            if !buffer[i].isFinite {
+                buffer[i] = 0.0
+            }
+        }
+    }
+
+    private func resetDelays() {
         for i in delaysL.indices {
             delaysL[i] = 0
         }
         for i in delaysR.indices {
             delaysR[i] = 0
         }
+    }
+
+    /// Reset filter states (clears delay lines).
+    public func reset() {
+        resetDelays()
         outputSafety.reset()
     }
 }

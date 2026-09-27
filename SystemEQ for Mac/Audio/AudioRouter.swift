@@ -439,7 +439,7 @@ public final class AudioRouter: ObservableObject {
         }
 
         guard status == noErr, let unmanagedName = name else { return nil }
-        return unmanagedName.takeUnretainedValue() as String
+        return unmanagedName.takeRetainedValue() as String
     }
 
     nonisolated private static func getDeviceUID(_ deviceID: AudioDeviceID) -> String? {
@@ -464,7 +464,7 @@ public final class AudioRouter: ObservableObject {
         }
 
         guard status == noErr, let unmanagedUID = uid else { return nil }
-        return unmanagedUID.takeUnretainedValue() as String
+        return unmanagedUID.takeRetainedValue() as String
     }
 
     nonisolated private static func hasInputStreams(_ deviceID: AudioDeviceID) -> Bool {

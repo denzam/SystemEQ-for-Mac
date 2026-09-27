@@ -127,6 +127,54 @@ public final class CoreAudioEngine: ObservableObject {
         }
     }
 
+    private var _roomFilterStrong: BiquadFilterVDSP?
+    private var retiredRoomFilters: [BiquadFilterVDSP] = []
+
+    private let _roomFilterAtomic: UnsafeMutablePointer<SEQAtomicPtr> = {
+        let p = UnsafeMutablePointer<SEQAtomicPtr>.allocate(capacity: 1)
+        seq_atomic_ptr_init(p, nil)
+        return p
+    }()
+    private let _roomFilterReaders: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(p, 0)
+        return p
+    }()
+
+    @inline(__always)
+    fileprivate func currentRoomFilter() -> BiquadFilterVDSP? {
+        guard let p = seq_atomic_ptr_load_seq_cst(_roomFilterAtomic) else { return nil }
+        return Unmanaged<BiquadFilterVDSP>.fromOpaque(p).takeUnretainedValue()
+    }
+
+    @inline(__always)
+    fileprivate func beginRoomFilterRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_roomFilterReaders, 1)
+    }
+
+    @inline(__always)
+    fileprivate func endRoomFilterRead() {
+        _ = seq_atomic_int32_fetch_add_seq_cst(_roomFilterReaders, -1)
+    }
+
+    var roomFilter: BiquadFilterVDSP? {
+        get { _roomFilterStrong }
+        set { setRoomFilter(newValue) }
+    }
+
+    private func setRoomFilter(_ filter: BiquadFilterVDSP?) {
+        let previous = _roomFilterStrong
+        _roomFilterStrong = filter
+        let newPtr: UnsafeMutableRawPointer? = filter.map {
+            Unmanaged.passUnretained($0).toOpaque()
+        }
+        seq_atomic_ptr_store_seq_cst(_roomFilterAtomic, newPtr)
+        if let previous {
+            retiredRoomFilters.append(previous)
+            scheduleRetiredObjectReclamation()
+        }
+    }
+
     fileprivate var currentSampleRate: Double = 48000.0
     fileprivate var channelCount: UInt32 = 2
 
@@ -217,10 +265,13 @@ public final class CoreAudioEngine: ObservableObject {
         if seq_atomic_int32_load_seq_cst(_vdspFilterReaders) == 0 {
             retiredVDSPFilters.removeAll()
         }
+        if seq_atomic_int32_load_seq_cst(_roomFilterReaders) == 0 {
+            retiredRoomFilters.removeAll()
+        }
         if seq_atomic_int32_load_seq_cst(_visualizerCallbackReaders) == 0 {
             retiredVisualizerCallbacks.removeAll()
         }
-        if retiredVDSPFilters.isEmpty, retiredVisualizerCallbacks.isEmpty {
+        if retiredVDSPFilters.isEmpty, retiredRoomFilters.isEmpty, retiredVisualizerCallbacks.isEmpty {
             reclamationScheduled = false
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in
@@ -351,7 +402,7 @@ public final class CoreAudioEngine: ObservableObject {
             AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
         }
         guard status == noErr, let uid else { return nil }
-        return uid.takeUnretainedValue() as String
+        return uid.takeRetainedValue() as String
     }
 
     private func findDeviceID(uid: String) -> AudioDeviceID? {
@@ -509,6 +560,8 @@ public final class CoreAudioEngine: ObservableObject {
         cleanup()
         _vdspFilterAtomic.deallocate()
         _vdspFilterReaders.deallocate()
+        _roomFilterAtomic.deallocate()
+        _roomFilterReaders.deallocate()
         _visualizerCallbackAtomic.deallocate()
         _visualizerCallbackReaders.deallocate()
         isEnabledAtomic.deallocate()
@@ -584,6 +637,7 @@ public final class CoreAudioEngine: ObservableObject {
         let finalInRate = getDeviceSampleRate(inputDevice) ?? preferred
         let finalOutRate = getDeviceSampleRate(outputDevice) ?? preferred
         self.currentSampleRate = finalOutRate
+        rebuildRoomFilter(sampleRate: finalOutRate)
         DiagnosticEventStore.shared.record(
             "engine.setup.format",
             details: [
@@ -606,13 +660,15 @@ public final class CoreAudioEngine: ObservableObject {
         }
         let actualInputBufferFrames = deviceBufferFrameSize(inputDevice)
         let actualOutputBufferFrames = deviceBufferFrameSize(outputDevice)
-        guard let actualInputBufferFrames, let actualOutputBufferFrames,
-              actualInputBufferFrames == actualOutputBufferFrames else {
+        if let inFrames = actualInputBufferFrames, let outFrames = actualOutputBufferFrames, inFrames != outFrames {
             DiagnosticEventStore.shared.record("engine.setup.bufferMismatch", details: [
-                "inputFrames": "\(actualInputBufferFrames ?? 0)",
-                "outputFrames": "\(actualOutputBufferFrames ?? 0)"
+                "inputFrames": "\(inFrames)",
+                "outputFrames": "\(outFrames)"
             ])
-            return
+            dlog(
+                "ℹ️ Buffer size mismatch: input=\(inFrames), output=\(outFrames). SPSCRingBuffer adapts.",
+                category: .engine
+            )
         }
 
         logDeviceBufferInfo(inputDevice, label: "INPUT")
@@ -1696,33 +1752,41 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Room Correction
 
-    /// Apply notch filters on top of the current EQ preset (room correction).
-    /// Each filter uses a peak biquad with negative gain (notch effect).
-    public func applyRoomNotchFilters(_ notchFilters: [(frequency: Float, gain: Float, q: Float)]) {
-        guard !notchFilters.isEmpty else { return }
+    private var activeRoomNotchFilters: [(frequency: Float, gain: Float, q: Float)] = []
 
-        let bands = notchFilters.map { f in
-            ParametricBand(frequency: f.frequency, gain: f.gain, q: f.q, filterType: .peak)
+    /// Apply notch filters on top of the current EQ preset (room correction).
+    /// Run as an independent filter cascade so active EQ presets are preserved.
+    public func applyRoomNotchFilters(_ notchFilters: [(frequency: Float, gain: Float, q: Float)]) {
+        activeRoomNotchFilters = notchFilters
+        guard !notchFilters.isEmpty else {
+            clearRoomNotchFilters()
+            return
         }
 
-        let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
-        filter.configure(
-            bands: bands,
-            preamp: 0.0,
-            outputBoost: outputBoostGain,
-            sampleRate: Float(currentSampleRate)
-        )
-        self.vdspFilter = filter
-        self.filterChain = nil
-
-        dlog("🏠 Applied \(bands.count) room correction notch filter(s)", category: .engine)
+        rebuildRoomFilter(sampleRate: currentSampleRate)
+        dlog("🏠 Applied \(notchFilters.count) room correction notch filter(s)", category: .engine)
     }
 
     /// Clear room correction notch filters (restore previous EQ state).
     public func clearRoomNotchFilters() {
-        self.vdspFilter = nil
-        self.filterChain = nil
+        activeRoomNotchFilters = []
+        self.roomFilter = nil
         dlog("🏠 Room correction filters cleared", category: .engine)
+    }
+
+    func rebuildRoomFilter(sampleRate: Double) {
+        guard !activeRoomNotchFilters.isEmpty else { return }
+        let bands = activeRoomNotchFilters.map { f in
+            ParametricBand(frequency: f.frequency, gain: f.gain, q: f.q, filterType: .peak)
+        }
+        let filter = BiquadFilterVDSP(sampleRate: Float(sampleRate))
+        filter.configure(
+            bands: bands,
+            preamp: 0.0,
+            outputBoost: 0.0,
+            sampleRate: Float(sampleRate)
+        )
+        self.roomFilter = filter
     }
 
     func prepareProcessTap(
@@ -1737,6 +1801,7 @@ public final class CoreAudioEngine: ObservableObject {
         seq_atomic_int64_store_release(diagnosticNativeOutputCallbacks, 0)
         callbackWindow?.reset()
         currentSampleRate = sampleRate
+        rebuildRoomFilter(sampleRate: sampleRate)
         channelCount = 2
         inputDeviceID = 0
         self.outputDeviceID = outputDeviceID
@@ -1802,6 +1867,12 @@ public final class CoreAudioEngine: ObservableObject {
                 peakMeter.recordLimiterGain(filterChain.processStereoBuffers(left, right, frameCount: frameCount))
             }
             endVDSPFilterRead()
+
+            beginRoomFilterRead()
+            if let room = currentRoomFilter() {
+                peakMeter.recordLimiterGain(room.processStereo(left, right, frameCount: frameCount))
+            }
+            endRoomFilterRead()
         }
 
         if meterTick {

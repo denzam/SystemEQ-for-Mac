@@ -172,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AudioRouter.shared.disableEQRouting(persistEnabledState: false)
         }
         if !isRunningUnitTests {
+            ProjectMHelperClient.shared.stop()
             DiagnosticEventStore.shared.finishSession()
         }
         return .terminateNow

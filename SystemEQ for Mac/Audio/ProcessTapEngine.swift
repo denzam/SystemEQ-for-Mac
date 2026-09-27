@@ -320,15 +320,31 @@ final class ProcessTapEngine {
             copiedFrames = max(copiedFrames, framesToCopy)
             let destination = outputData.assumingMemoryBound(to: Float.self)
             for channel in 0..<channels {
-                let source = sourceChannel.isMultiple(of: 2) ? scratchLeft : scratchRight
-                vDSP_vsadd(
-                    source,
-                    1,
-                    &zeroValue,
-                    destination + channel,
-                    vDSP_Stride(channels),
-                    vDSP_Length(framesToCopy)
-                )
+                if sourceChannel == 0 {
+                    vDSP_vsadd(
+                        scratchLeft,
+                        1,
+                        &zeroValue,
+                        destination + channel,
+                        vDSP_Stride(channels),
+                        vDSP_Length(framesToCopy)
+                    )
+                } else if sourceChannel == 1 {
+                    vDSP_vsadd(
+                        scratchRight,
+                        1,
+                        &zeroValue,
+                        destination + channel,
+                        vDSP_Stride(channels),
+                        vDSP_Length(framesToCopy)
+                    )
+                } else {
+                    vDSP_vclr(
+                        destination + channel,
+                        vDSP_Stride(channels),
+                        vDSP_Length(framesToCopy)
+                    )
+                }
                 sourceChannel += 1
             }
             if outputFrames > framesToCopy {

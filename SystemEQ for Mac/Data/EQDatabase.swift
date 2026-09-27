@@ -551,8 +551,17 @@ class EQDatabase {
             return .checkFailed("Invalid URL")
         }
 
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("SystemEQ-for-Mac", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return .checkFailed("GitHub API HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            }
 
             if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
                let firstCommit = json.first,

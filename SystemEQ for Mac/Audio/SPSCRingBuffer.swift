@@ -311,7 +311,7 @@ public final class SPSCRingBuffer {
         let ratio = 1.0 + resampleCorrection
         let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
         let lastOffset = Int(lastPosition)
-        let requiredFrames = lastOffset + (lastPosition == Double(lastOffset) ? 1 : 2)
+        let requiredFrames = lastOffset + 2
 
         guard avail >= requiredFrames else {
             resamplePhase = 0
@@ -354,7 +354,7 @@ public final class SPSCRingBuffer {
         let ratio = 1.0 + resampleCorrection
         let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
         let lastOffset = Int(lastPosition)
-        let requiredFrames = lastOffset + (lastPosition == Double(lastOffset) ? 1 : 2)
+        let requiredFrames = lastOffset + 2
 
         guard avail >= requiredFrames else {
             resamplePhase = 0

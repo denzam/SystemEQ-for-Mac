@@ -39,6 +39,7 @@ final class DevicePresetManager {
         cancellable = AudioRouter.shared.$selectedOutputDevice
             .compactMap(\.?.uid)
             .removeDuplicates()
+            .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] uid in
                 self?.outputChanged(to: uid)
