@@ -82,14 +82,6 @@ public enum LocalizedString: String, CaseIterable {
     case autoSwitchPresetPerDevice
     case autoSwitchPresetPerDeviceHelp
     case links
-    case appearance
-    case accessibility
-    case accessibilityDesc
-    case accessibilityStatusNotGranted
-    case accessibilityStatusGranted
-    case accessibilityRequestButton
-    case accessibilityOpenSettingsButton
-    case accessibilityTroubleshootHint
     case settingsHeaderSubtitle
     case diagnostics
     case diagnosticsDesc
@@ -105,12 +97,6 @@ public enum LocalizedString: String, CaseIterable {
     case linkAutoEQ
     case linkBlackHole
     case linkBuyMeACoffee
-    case supportDevelopment
-    case supportDesc
-    case supportThankYou
-    case supportKofiDesc
-    case supportBmcDesc
-    case supportGitHubDesc
 
     // Routing
     case routingTitle
@@ -125,24 +111,16 @@ public enum LocalizedString: String, CaseIterable {
     case input
     case output
     case devices
-    case multiOutput
     case status
     case blackHole
     case inputDevice
     case outputDevice
     case installed
     case notInstalled
-    case configured
     case notConfigured
     case download
     case refresh
     case openAudioMIDISetup
-    case eqActive
-    case eqInactive
-    case testToneHintWhenDisabled
-    case blackHoleRequiredHint
-    case noDevicesFound
-    case overallStatus
 
     // Equalizer
     case eqShort
@@ -156,16 +134,11 @@ public enum LocalizedString: String, CaseIterable {
     case limiterActivityDescription
     case bands10
     case bands31
-    case testTone1k
     case cancel
     case save
-    case apply
     case close
     case active
-    case resetEQ
-    case pureSound
     case profile
-    case resetAll
     case frequencyHz
     case dB
     case add
@@ -196,11 +169,6 @@ public enum LocalizedString: String, CaseIterable {
     case permissionGranted
 
     // Accessibility
-    case accessTitle
-    case accessDesc
-    case accessExplanation
-    case grantAccess
-    case accessEnabled
     case accessInstructions
 
     // Buttons
@@ -209,73 +177,29 @@ public enum LocalizedString: String, CaseIterable {
     case getStarted
 
     // Menu Bar
-    case menuStatus
-    case menuQuickControls
-    case menuMainGain
-    case menuCustomPresets
-    case menuNoPresetsYet
-    case menuWindows
     case menuMain
     case menuEQEnabled
     case menuEQDisabled
-    case menuCoreAudioRunning
-    case menuWaitingForRouting
-    case menuProcessingBypassed
-    case menuRoutingActive
-    case menuRoutingIdle
-    case menuBlackHoleDetected
     case menuBlackHoleMissing
-    case menuVirtualLoopbackReady
-    case menuInstallBlackHole
-    case menuMediaKeysAuthorized
-    case menuAccessibilityRequired
-    case menuSystemEQCanListenKeys
-    case menuEnableInAccessibility
-    case menuAutoEQIdle
-    case menuAutoEQStarting
-    case menuAutoEQReady
-    case menuAutoEQError
-    case menuServerNotRunning
-    case menuSpinningUpBackend
-    case menuLocalServerHealthy
-    case menuUnmute
-    case menuMute
-    case menuStopTone
-    case menuApply
     case menuQuit
 
     // AutoEQ
     case autoEQTitle
-    case autoEQSearchPlaceholder
     case autoEQQuickImport
     case autoEQBandMode
-    case autoEQFavorites
-    case autoEQHide
-    case autoEQShow
     case autoEQLoad
     case autoEQImport
-    case autoEQMappedPreview
-    case autoEQView
-    case autoEQBars
-    case autoEQCurve
     case autoEQPreamp
     case autoEQApplyToEQ
-    case autoEQBypass
-    case autoEQEnable
-    case autoEQApplyBands
     case autoEQEQOn
     case autoEQEQOff
     case autoEQBassBoost
-    case autoEQRemoveFromFavorites
-    case autoEQAddToFavorites
     case searchHeadphonesModel
     case quickImportHelp
     case autoEQImportFile
     case autoEQImportFileHelp
     case autoEQImportFileError
-    case autoEQImportFileSuccess
     case autoEQSaveToFavorites
-    case autoEQShowSaved
     case removeFromFavorites
     case addToFavorites
     case indexUpdated
@@ -291,22 +215,8 @@ public enum LocalizedString: String, CaseIterable {
 
     // Visualizer
     case visualizerTitle
-    case visualizerStyleColors
-    case visualizerStyle
-    case visualizerSpectrum
-    case visualizerWaveform
-    case visualizerParticles
-    case visualizerPsychedelic
-    case visualizerIntensity
-    case visualizerPreview
-    case visualizerActive
-    case visualizerInactive
-    case noAudioSignal
-    case startPlaybackToVisualize
 
     // EQ Startup Behavior
-    case eqStartupBehavior
-    case eqStartupDesc
     case eqStartupRemember
     case eqStartupRestorePreset
     case eqStartupStartClean
@@ -324,13 +234,9 @@ public enum LocalizedString: String, CaseIterable {
     case databaseSize
     case checkForUpdates
     case downloadUpdate
-    case databaseUpToDate
-    case databaseUpdateAvailable
-    case databaseCheckFailed
 
     // Personalized Calibration
     case personalizedHearingProfile
-    case personalizedTitle
     case personalizedDesc
     case personalizedSubtitle
     case premium
@@ -356,8 +262,6 @@ public enum LocalizedString: String, CaseIterable {
     case subjectiveRoomTuningDesc
     case subjectiveRoomTuningDisclaimer
     case subjectiveRoomTuningDisclaimerTitle
-    case sineSweepMethod
-    case stepOne
 
     // Resonance Finder (Sine Sweep tool)
     case resonanceFinder
@@ -375,9 +279,6 @@ public enum LocalizedString: String, CaseIterable {
     // Setup Assistant
     case setupRequired
     case systemDiagnostics
-    case lastCheck
-    case blackHoleInstallation
-    case ago
     case checkingYourSystem
     case installBlackHole
     case usedByThousands
@@ -391,7 +292,6 @@ public enum LocalizedString: String, CaseIterable {
     case freeOpenSource
     case mitLicense
     case safeTrusted
-    case canBeRemovedAnytimeDesc
     case installationSteps
     case setBlackHoleAsSystemOutput
     case currentSystemOutput
@@ -403,50 +303,22 @@ public enum LocalizedString: String, CaseIterable {
     // Calibration
     case calibration31BandsWarning
     case calibration31BandsFinalWarning
-    case deleteProfileConfirmation
     case calibrationTitle
     case calibrationSubtitle
     case equalLoudnessCalibration
     case calibrationDescription
-    case calibrationImportantNote
-    case calibrationWillImprove
-    case calibrationWillImprove1
-    case calibrationWillImprove2
-    case calibrationWillImprove3
-    case calibrationWillImprove4
-    case calibrationWontFix
-    case calibrationWontFix1
-    case calibrationWontFix2
-    case calibrationWontFix3
-    case calibrationWontFix4
-    case calibrationForFullResult
-    case calibrationMethodPrinciple
-    case calibrationMethodDescription
-    case calibrationStep1
-    case calibrationStep1Desc
-    case calibrationStep2
-    case calibrationStep2Desc
-    case calibrationStep3
-    case calibrationStep3Desc
-    case calibrationStep4
-    case calibrationStep4Desc
 
     // BlackHole Setup
-    case blackHoleNotInstalled
     case systemeqRequiresBlackHole
     case blackHoleFreeOpenSource
     case whatIsBlackHole
 
     // UI Elements
-    case launchAtLoginEmoji
-    case supportThankYouEmoji
     case setupNow
     case blackHoleNotInstalledShort
 
     // Room Calibration
     case findRoomResonances
-    case startSineSweepAndListen
-    case markFrequenciesThatBoomOrRing
     case applyNotchFilters
     case testWithMusic
     case currentFrequency
@@ -457,30 +329,19 @@ public enum LocalizedString: String, CaseIterable {
     case manualFrequencyTest
     case testSpecificFrequencies
     case frequency
-    case sineSweep
-    case manual
     case notchFilters
     case abTest
     case addResonance
-    case resonanceFrequency
     case severity
     case mild
     case moderate
     case severe
     case extreme
-    case addNotchFilter
     case gain
-    case qFactor
     case saveProfile
     case profileName
     case saveCalibrationProfile
     case compareOriginalVsFiltered
-    case hearingTestDifference
-    case filtersActive
-    case noFiltersAdded
-    case notchFilterDescription
-    case resonanceDescription
-    case roomCalibrationHelp
     case detectedResonances
     case noResonancesDetected
     case playFrequency
@@ -607,28 +468,17 @@ public enum LocalizedString: String, CaseIterable {
 
     // VisualizerView
     case visualizerStyleColorsSubtitle
-    case spectrum
     case waveform
-    case particles
-    case psychedelic
-    case intensity
-    case preview
 
     // CalibrationView - Additional hardcoded strings
-    case calibrationCompensateRoom
     case calibrationCompensateHeadphones
     case calibrationImportantLimitations
     case calibrationWhatWillImprove
     case calibrationMidHighBalance
     case calibrationHearingCompensation
-    case calibrationSpeakerCorrection
     case calibrationHeadphoneCorrection
     case calibrationLessFatigue
     case calibrationWhatWontFix
-    case calibrationBassResonances
-    case calibrationEchoReverb
-    case calibrationRoomUnevenness
-    case calibrationNeedsMicrophone
     case calibrationDriverLimitations
     case calibrationMethodPrincipleTitle
     case calibrationMethodPrincipleDesc
@@ -646,21 +496,6 @@ public enum LocalizedString: String, CaseIterable {
     case calibrationProTip3
     case calibrationProTip4
     case calibrationProTip5
-    case calibrationOptimalConditions
-    case calibrationOptimalCondition1
-    case calibrationOptimalCondition2
-    case calibrationOptimalCondition3
-    case calibrationOptimalCondition4
-    case calibrationOptimalCondition5
-    case calibrationEqualLoudnessVsRoom
-    case calibrationEqualLoudnessMethod
-    case calibrationEqualLoudnessDesc1
-    case calibrationEqualLoudnessDesc2
-    case calibrationEqualLoudnessDesc3
-    case calibrationRoomCorrectionMethod
-    case calibrationRoomCorrectionDesc1
-    case calibrationRoomCorrectionDesc2
-    case calibrationRoomCorrectionDesc3
 
     // AutoEQView - Additional hardcoded strings
     case autoEQTypeModelName
@@ -668,9 +503,6 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQFavoritesLink
     case autoEQFavoritesEmpty
     case autoEQMappedPreviewTitle
-    case autoEQSetupTitle
-    case autoEQSetupDesc1
-    case autoEQSetupDesc2
 
     // AudioRouter - Alert messages
     case eqRoutingSetupRequired
@@ -740,18 +572,10 @@ public enum LocalizedString: String, CaseIterable {
     case calibrationActivatedMessage
 
     // AutoEQ Setup Prompt
-    case neverAsk
-    case later
-    case installNow
 
     // Glass Design Section (Settings)
     case glassDesignTitle
     case glassDesignDesc
-    case glassDesignStyle
-    case glassDesignCustomOpacity
-    case glassDesignOpacity
-    case glassDesignPreview
-    case glassDesignPreviewLabel
 
     // Calibration Mode Selector
     case calibrationModeClean
@@ -975,46 +799,6 @@ private enum LocalizationData {
                     .italian: "Link",
                     .ukrainian: "Посилання"
                 ],
-                .appearance: [
-                    .english: "Appearance",
-                    .italian: "Aspetto",
-                    .ukrainian: "Зовнішній вигляд"
-                ],
-                .accessibility: [
-                    .english: "Accessibility",
-                    .italian: "Accessibilità",
-                    .ukrainian: "Доступність"
-                ],
-                .accessibilityDesc: [
-                    .english: "Enable access so SystemEQ can respond to media keys (F10/F11/F12) for volume control.",
-                    .italian: "Abilita l'accesso per permettere a SystemEQ di rispondere ai tasti multimediali (F10/F11/F12) per il controllo volume.",
-                    .ukrainian: "Увімкніть доступ, щоб SystemEQ міг реагувати на медіа-клавіші (F10/F11/F12) для керування гучністю."
-                ],
-                .accessibilityStatusNotGranted: [
-                    .english: "⚠️ Access not granted",
-                    .italian: "⚠️ Accesso non concesso",
-                    .ukrainian: "⚠️ Доступ не надано"
-                ],
-                .accessibilityStatusGranted: [
-                    .english: "✅ Access granted",
-                    .italian: "✅ Accesso concesso",
-                    .ukrainian: "✅ Доступ надано"
-                ],
-                .accessibilityRequestButton: [
-                    .english: "Request Access",
-                    .italian: "Richiedi Accesso",
-                    .ukrainian: "Запитати доступ"
-                ],
-                .accessibilityOpenSettingsButton: [
-                    .english: "Open Settings",
-                    .italian: "Apri Impostazioni",
-                    .ukrainian: "Відкрити Налаштування"
-                ],
-                .accessibilityTroubleshootHint: [
-                    .english: "If you already enabled the checkbox in System Settings, restart SystemEQ or click Refresh after reopening this window.",
-                    .italian: "Se hai già abilitato la casella nelle Impostazioni di Sistema, riavvia SystemEQ o clicca Aggiorna dopo aver riaperto questa finestra.",
-                    .ukrainian: "Якщо ви вже увімкнули прапорець у Системних Налаштуваннях, перезапустіть SystemEQ або натисніть Оновити після повторного відкриття цього вікна."
-                ],
                 .settingsHeaderSubtitle: [
                     .english: "General • Language • Diagnostics • Links",
                     .italian: "Generale • Lingua • Diagnostica • Link",
@@ -1082,36 +866,6 @@ private enum LocalizationData {
                     .italian: "Buy Me a Coffee",
                     .ukrainian: "Buy Me a Coffee"
                 ],
-                .supportDevelopment: [
-                    .english: "Support Development",
-                    .italian: "Supporta Sviluppo",
-                    .ukrainian: "Підтримати розробку"
-                ],
-                .supportDesc: [
-                    .english: "SystemEQ is free and open-source. If you find it useful, consider supporting development.",
-                    .italian: "SystemEQ è gratuito e open-source. Se lo trovi utile, considera di supportare lo sviluppo.",
-                    .ukrainian: "SystemEQ безкоштовний з відкритим кодом. Якщо ви вважаєте його корисним, підтримайте розробку."
-                ],
-                .supportThankYou: [
-                    .english: "Every donation helps keep this project alive. Thank you! ❤️",
-                    .italian: "Ogni donazione aiuta a mantenere vivo questo progetto. Grazie! ❤️",
-                    .ukrainian: "Кожна пожертва допомагає підтримувати цей проект. Дякуємо! ❤️"
-                ],
-                .supportKofiDesc: [
-                    .english: "One-time donation, 0% fees",
-                    .italian: "Donazione una tantum, 0% commissioni",
-                    .ukrainian: "Разова пожертва, 0% комісія"
-                ],
-                .supportBmcDesc: [
-                    .english: "Buy me a coffee, 0% fees",
-                    .italian: "Offrimi un caffè, 0% commissioni",
-                    .ukrainian: "Купіть мені каву, 0% комісія"
-                ],
-                .supportGitHubDesc: [
-                    .english: "Monthly sponsorship, 0% fees",
-                    .italian: "Sponsorizzazione mensile, 0% commissioni",
-                    .ukrainian: "Щомісячна спонсорська підтримка, 0% комісія"
-                ],
 
                 // Routing
                 .routingTitle: [
@@ -1174,11 +928,6 @@ private enum LocalizationData {
                     .italian: "Dispositivi",
                     .ukrainian: "Пристрої"
                 ],
-                .multiOutput: [
-                    .english: "Multi-Output",
-                    .italian: "Multi-Uscita",
-                    .ukrainian: "Багатоканальний вивід"
-                ],
                 .status: [
                     .english: "Status",
                     .italian: "Stato",
@@ -1209,11 +958,6 @@ private enum LocalizationData {
                     .italian: "Non installato",
                     .ukrainian: "Не встановлено"
                 ],
-                .configured: [
-                    .english: "Configured",
-                    .italian: "Configurato",
-                    .ukrainian: "Налаштовано"
-                ],
                 .notConfigured: [
                     .english: "Not configured",
                     .italian: "Non configurato",
@@ -1233,36 +977,6 @@ private enum LocalizationData {
                     .english: "Open Audio MIDI Setup",
                     .italian: "Apri Configurazione Audio MIDI",
                     .ukrainian: "Відкрити Аудіо MIDI Налаштування"
-                ],
-                .eqActive: [
-                    .english: "EQ Active",
-                    .italian: "EQ Attivo",
-                    .ukrainian: "EQ Активний"
-                ],
-                .eqInactive: [
-                    .english: "EQ Inactive",
-                    .italian: "EQ Inattivo",
-                    .ukrainian: "EQ Неактивний"
-                ],
-                .testToneHintWhenDisabled: [
-                    .english: "💡 Test Tone available only when EQ is enabled",
-                    .italian: "💡 Tono di test disponibile solo quando EQ è abilitato",
-                    .ukrainian: "💡 Тестовий сигнал доступний лише коли EQ увімкнено"
-                ],
-                .blackHoleRequiredHint: [
-                    .english: "BlackHole is required for system-wide audio routing. Download and install it, then restart this app.",
-                    .italian: "BlackHole è richiesto per il routing audio di sistema. Scarica e installalo, quindi riavvia questa app.",
-                    .ukrainian: "BlackHole потрібен для системної маршрутизації аудіо. Завантажте, встановіть його та перезапустіть застосунок."
-                ],
-                .noDevicesFound: [
-                    .english: "No devices found",
-                    .italian: "Nessun dispositivo trovato",
-                    .ukrainian: "Пристроїв не знайдено"
-                ],
-                .overallStatus: [
-                    .english: "Overall Status",
-                    .italian: "Stato Generale",
-                    .ukrainian: "Загальний статус"
                 ],
 
                 // Equalizer
@@ -1321,11 +1035,6 @@ private enum LocalizationData {
                     .italian: "31 Bande",
                     .ukrainian: "31 Смуга"
                 ],
-                .testTone1k: [
-                    .english: "Test 1kHz",
-                    .italian: "Test 1kHz",
-                    .ukrainian: "Тест 1кГц"
-                ],
                 .cancel: [
                     .english: "Cancel",
                     .italian: "Annulla",
@@ -1335,11 +1044,6 @@ private enum LocalizationData {
                     .english: "Save",
                     .italian: "Salva",
                     .ukrainian: "Зберегти"
-                ],
-                .apply: [
-                    .english: "Apply",
-                    .italian: "Applica",
-                    .ukrainian: "Застосувати"
                 ],
                 .close: [
                     .english: "Close",
@@ -1351,25 +1055,10 @@ private enum LocalizationData {
                     .italian: "Attivo",
                     .ukrainian: "Активний"
                 ],
-                .resetEQ: [
-                    .english: "Reset EQ",
-                    .italian: "Ripristina EQ",
-                    .ukrainian: "Скинути EQ"
-                ],
-                .pureSound: [
-                    .english: "Pure Sound",
-                    .italian: "Suono Puro",
-                    .ukrainian: "Чистий звук"
-                ],
                 .profile: [
                     .english: "Profile",
                     .italian: "Profilo",
                     .ukrainian: "Профіль"
-                ],
-                .resetAll: [
-                    .english: "Reset All",
-                    .italian: "Ripristina Tutto",
-                    .ukrainian: "Скинути все"
                 ],
                 .frequencyHz: [
                     .english: "Hz",
@@ -1489,31 +1178,6 @@ private enum LocalizationData {
                 ],
 
                 // Accessibility
-                .accessTitle: [
-                    .english: "Step 3: Volume Controls",
-                    .italian: "Passo 3: Controlli Volume",
-                    .ukrainian: "Крок 3: Керування Гучністю"
-                ],
-                .accessDesc: [
-                    .english: "When using an equalizer, macOS disables the standard F10/F11/F12 volume keys.",
-                    .italian: "Quando usi un equalizzatore, macOS disabilita i tasti volume standard F10/F11/F12.",
-                    .ukrainian: "При використанні еквалайзера macOS вимикає стандартні клавіші гучності F10/F11/F12."
-                ],
-                .accessExplanation: [
-                    .english: "To fix this, SystemEQ needs Accessibility Access to detect volume key presses and adjust the volume manually.",
-                    .italian: "Per risolvere, SystemEQ necessita di Accesso Universale per rilevare la pressione dei tasti volume e regolare il volume manualmente.",
-                    .ukrainian: "Щоб виправити це, SystemEQ потрібен дозвіл 'Спеціальні можливості' для виявлення натискання клавіш та ручної зміни гучності."
-                ],
-                .grantAccess: [
-                    .english: "Grant Accessibility Access",
-                    .italian: "Concedi Accesso Universale",
-                    .ukrainian: "Надати дозвіл Accessibility"
-                ],
-                .accessEnabled: [
-                    .english: "Accessibility Enabled",
-                    .italian: "Accesso Universale Abilitato",
-                    .ukrainian: "Дозвіл Accessibility надано"
-                ],
                 .accessInstructions: [
                     .english: "Clicking this will open System Settings. Enable the toggle for SystemEQ.",
                     .italian: "Cliccando questo aprirà le Impostazioni di Sistema. Abilita l'interruttore per SystemEQ.",
@@ -1538,36 +1202,6 @@ private enum LocalizationData {
                 ],
 
                 // Menu Bar
-                .menuStatus: [
-                    .english: "Status",
-                    .italian: "Stato",
-                    .ukrainian: "Статус"
-                ],
-                .menuQuickControls: [
-                    .english: "Quick Controls",
-                    .italian: "Controlli Veloce",
-                    .ukrainian: "Швидке керування"
-                ],
-                .menuMainGain: [
-                    .english: "Main Gain",
-                    .italian: "Guadagno Principale",
-                    .ukrainian: "Основне посилення"
-                ],
-                .menuCustomPresets: [
-                    .english: "Custom Presets",
-                    .italian: "Preset Personalizzati",
-                    .ukrainian: "Власні пресети"
-                ],
-                .menuNoPresetsYet: [
-                    .english: "No custom presets yet",
-                    .italian: "Nessun preset personalizzato ancora",
-                    .ukrainian: "Ще немає власних пресетів"
-                ],
-                .menuWindows: [
-                    .english: "Windows",
-                    .italian: "Finestre",
-                    .ukrainian: "Вікна"
-                ],
                 .menuMain: [
                     .english: "Main",
                     .italian: "Principale",
@@ -1583,125 +1217,10 @@ private enum LocalizationData {
                     .italian: "EQ Disabilitato",
                     .ukrainian: "EQ Вимкнено"
                 ],
-                .menuCoreAudioRunning: [
-                    .english: "Core Audio running",
-                    .italian: "Core Audio in esecuzione",
-                    .ukrainian: "Core Audio працює"
-                ],
-                .menuWaitingForRouting: [
-                    .english: "Waiting for routing",
-                    .italian: "In attesa di routing",
-                    .ukrainian: "Очікування маршрутизації"
-                ],
-                .menuProcessingBypassed: [
-                    .english: "Processing bypassed",
-                    .italian: "Elaborazione ignorata",
-                    .ukrainian: "Обробку обійдено"
-                ],
-                .menuRoutingActive: [
-                    .english: "Routing Active",
-                    .italian: "Routing Attivo",
-                    .ukrainian: "Маршрутизація активна"
-                ],
-                .menuRoutingIdle: [
-                    .english: "Routing Idle",
-                    .italian: "Routing Inattivo",
-                    .ukrainian: "Маршрутизація неактивна"
-                ],
-                .menuBlackHoleDetected: [
-                    .english: "BlackHole detected",
-                    .italian: "BlackHole rilevato",
-                    .ukrainian: "BlackHole виявлено"
-                ],
                 .menuBlackHoleMissing: [
                     .english: "BlackHole missing",
                     .italian: "BlackHole mancante",
                     .ukrainian: "BlackHole відсутній"
-                ],
-                .menuVirtualLoopbackReady: [
-                    .english: "Virtual loopback ready",
-                    .italian: "Loopback virtuale pronto",
-                    .ukrainian: "Віртуальний loopback готовий"
-                ],
-                .menuInstallBlackHole: [
-                    .english: "Install BlackHole for routing",
-                    .italian: "Installa BlackHole per il routing",
-                    .ukrainian: "Встановіть BlackHole для маршрутизації"
-                ],
-                .menuMediaKeysAuthorized: [
-                    .english: "Media keys authorized",
-                    .italian: "Tasti multimediali autorizzati",
-                    .ukrainian: "Медіа-клавіші авторизовано"
-                ],
-                .menuAccessibilityRequired: [
-                    .english: "Accessibility required",
-                    .italian: "Accessibilità richiesta",
-                    .ukrainian: "Потрібен Accessibility"
-                ],
-                .menuSystemEQCanListenKeys: [
-                    .english: "SystemEQ can listen to keys",
-                    .italian: "SystemEQ può ascoltare i tasti",
-                    .ukrainian: "SystemEQ може слухати клавіші"
-                ],
-                .menuEnableInAccessibility: [
-                    .english: "Enable in Settings → Accessibility",
-                    .italian: "Abilita in Impostazioni → Accessibilità",
-                    .ukrainian: "Увімкнути в Налаштування → Доступність"
-                ],
-                .menuAutoEQIdle: [
-                    .english: "AutoEQ idle",
-                    .italian: "AutoEQ inattivo",
-                    .ukrainian: "AutoEQ неактивний"
-                ],
-                .menuAutoEQStarting: [
-                    .english: "AutoEQ starting",
-                    .italian: "AutoEQ in avvio",
-                    .ukrainian: "AutoEQ запускається"
-                ],
-                .menuAutoEQReady: [
-                    .english: "AutoEQ ready",
-                    .italian: "AutoEQ pronto",
-                    .ukrainian: "AutoEQ готовий"
-                ],
-                .menuAutoEQError: [
-                    .english: "AutoEQ error",
-                    .italian: "Errore AutoEQ",
-                    .ukrainian: "Помилка AutoEQ"
-                ],
-                .menuServerNotRunning: [
-                    .english: "Server not running",
-                    .italian: "Server non in esecuzione",
-                    .ukrainian: "Сервер не запущено"
-                ],
-                .menuSpinningUpBackend: [
-                    .english: "Spinning up Python backend",
-                    .italian: "Avvio backend Python",
-                    .ukrainian: "Запуск Python бекенду"
-                ],
-                .menuLocalServerHealthy: [
-                    .english: "Local server healthy",
-                    .italian: "Server locale sano",
-                    .ukrainian: "Локальний сервер здоровий"
-                ],
-                .menuUnmute: [
-                    .english: "Unmute",
-                    .italian: "Attiva audio",
-                    .ukrainian: "Увімкнути звук"
-                ],
-                .menuMute: [
-                    .english: "Mute",
-                    .italian: "Silenzia",
-                    .ukrainian: "Вимкнути звук"
-                ],
-                .menuStopTone: [
-                    .english: "Stop Tone",
-                    .italian: "Ferma Tono",
-                    .ukrainian: "Зупинити сигнал"
-                ],
-                .menuApply: [
-                    .english: "Apply",
-                    .italian: "Applica",
-                    .ukrainian: "Застосувати"
                 ],
                 .menuQuit: [
                     .english: "Quit",
@@ -1715,11 +1234,6 @@ private enum LocalizationData {
                     .italian: "AutoEQ",
                     .ukrainian: "AutoEQ"
                 ],
-                .autoEQSearchPlaceholder: [
-                    .english: "Type a model name to search",
-                    .italian: "Digita un nome modello per cercare",
-                    .ukrainian: "Введіть назву моделі для пошуку"
-                ],
                 .autoEQQuickImport: [
                     .english: "⚡ Quick Import",
                     .italian: "⚡ Importazione Rapida",
@@ -1729,21 +1243,6 @@ private enum LocalizationData {
                     .english: "Band Mode",
                     .italian: "Modalità Bande",
                     .ukrainian: "Режим смуг"
-                ],
-                .autoEQFavorites: [
-                    .english: "⭐ Favorites",
-                    .italian: "⭐ Preferiti",
-                    .ukrainian: "⭐ Обране"
-                ],
-                .autoEQHide: [
-                    .english: "Hide",
-                    .italian: "Nascondi",
-                    .ukrainian: "Приховати"
-                ],
-                .autoEQShow: [
-                    .english: "Show",
-                    .italian: "Mostra",
-                    .ukrainian: "Показати"
                 ],
                 .autoEQLoad: [
                     .english: "Load",
@@ -1755,26 +1254,6 @@ private enum LocalizationData {
                     .italian: "Importa",
                     .ukrainian: "Імпорт"
                 ],
-                .autoEQMappedPreview: [
-                    .english: "Mapped Preview",
-                    .italian: "Anteprima Mappata",
-                    .ukrainian: "Попередній перегляд мапи"
-                ],
-                .autoEQView: [
-                    .english: "View",
-                    .italian: "Visualizza",
-                    .ukrainian: "Переглянути"
-                ],
-                .autoEQBars: [
-                    .english: "Bars",
-                    .italian: "Barre",
-                    .ukrainian: "Стовпці"
-                ],
-                .autoEQCurve: [
-                    .english: "Curve",
-                    .italian: "Curva",
-                    .ukrainian: "Крива"
-                ],
                 .autoEQPreamp: [
                     .english: "Preamp",
                     .italian: "Preamp",
@@ -1784,21 +1263,6 @@ private enum LocalizationData {
                     .english: "Apply to EQ",
                     .italian: "Applica a EQ",
                     .ukrainian: "Застосувати до EQ"
-                ],
-                .autoEQBypass: [
-                    .english: "Bypass",
-                    .italian: "Bypass",
-                    .ukrainian: "Обійти"
-                ],
-                .autoEQEnable: [
-                    .english: "Enable",
-                    .italian: "Abilita",
-                    .ukrainian: "Увімкнути"
-                ],
-                .autoEQApplyBands: [
-                    .english: "Apply %d bands",
-                    .italian: "Applica %d bande",
-                    .ukrainian: "Застосувати %d смуг"
                 ],
                 .autoEQEQOn: [
                     .english: "EQ ON",
@@ -1815,16 +1279,6 @@ private enum LocalizationData {
                     .italian: "Potenziamento Bassi",
                     .ukrainian: "Підсилення басів"
                 ],
-                .autoEQRemoveFromFavorites: [
-                    .english: "Remove from favorites",
-                    .italian: "Rimuovi dai preferiti",
-                    .ukrainian: "Видалити з обраних"
-                ],
-                .autoEQAddToFavorites: [
-                    .english: "Add to favorites",
-                    .italian: "Aggiungi ai preferiti",
-                    .ukrainian: "Додати до обраних"
-                ],
                 .searchHeadphonesModel: [
                     .english: "Search headphones model...",
                     .italian: "Cerca modello cuffie...",
@@ -1837,78 +1291,8 @@ private enum LocalizationData {
                     .italian: "Visualizzatore",
                     .ukrainian: "Візуалізатор"
                 ],
-                .visualizerStyleColors: [
-                    .english: "Style • Colors • Sensitivity",
-                    .italian: "Stile • Colori • Sensibilità",
-                    .ukrainian: "Стиль • Кольори • Чутливість"
-                ],
-                .visualizerStyle: [
-                    .english: "Style",
-                    .italian: "Stile",
-                    .ukrainian: "Стиль"
-                ],
-                .visualizerSpectrum: [
-                    .english: "Spectrum",
-                    .italian: "Spettro",
-                    .ukrainian: "Спектр"
-                ],
-                .visualizerWaveform: [
-                    .english: "Waveform",
-                    .italian: "Forma d'onda",
-                    .ukrainian: "Хвиля"
-                ],
-                .visualizerParticles: [
-                    .english: "Particles",
-                    .italian: "Particelle",
-                    .ukrainian: "Частинки"
-                ],
-                .visualizerPsychedelic: [
-                    .english: "Psychedelic",
-                    .italian: "Psichedelico",
-                    .ukrainian: "Психоделічний"
-                ],
-                .visualizerIntensity: [
-                    .english: "Intensity",
-                    .italian: "Intensità",
-                    .ukrainian: "Інтенсивність"
-                ],
-                .visualizerPreview: [
-                    .english: "Preview",
-                    .italian: "Anteprima",
-                    .ukrainian: "Попередній перегляд"
-                ],
-                .visualizerActive: [
-                    .english: "Active",
-                    .italian: "Attivo",
-                    .ukrainian: "Активний"
-                ],
-                .visualizerInactive: [
-                    .english: "Inactive",
-                    .italian: "Inattivo",
-                    .ukrainian: "Неактивний"
-                ],
-                .noAudioSignal: [
-                    .english: "No Audio Signal",
-                    .italian: "Nessun Segnale Audio",
-                    .ukrainian: "Немає аудіо сигналу"
-                ],
-                .startPlaybackToVisualize: [
-                    .english: "Start playback to see visualization",
-                    .italian: "Avvia la riproduzione per vedere la visualizzazione",
-                    .ukrainian: "Почніть відтворення для візуалізації"
-                ],
 
                 // EQ Startup Behavior
-                .eqStartupBehavior: [
-                    .english: "EQ Startup Behavior",
-                    .italian: "Comportamento Avvio EQ",
-                    .ukrainian: "Поведінка EQ при запуску"
-                ],
-                .eqStartupDesc: [
-                    .english: "Choose how SystemEQ should behave when launched",
-                    .italian: "Scegli come SystemEQ dovrebbe comportarsi all'avvio",
-                    .ukrainian: "Оберіть, як SystemEQ повинен поводитися при запуску"
-                ],
                 .eqStartupRemember: [
                     .english: "Restore Last State",
                     .italian: "Ripristina Ultimo Stato",
@@ -1986,32 +1370,12 @@ private enum LocalizationData {
                     .italian: "Scarica Aggiornamento",
                     .ukrainian: "Завантажити оновлення"
                 ],
-                .databaseUpToDate: [
-                    .english: "Database is up to date",
-                    .italian: "Database aggiornato",
-                    .ukrainian: "База даних актуальна"
-                ],
-                .databaseUpdateAvailable: [
-                    .english: "Update available",
-                    .italian: "Aggiornamento disponibile",
-                    .ukrainian: "Доступне оновлення"
-                ],
-                .databaseCheckFailed: [
-                    .english: "Could not check for updates",
-                    .italian: "Impossibile verificare aggiornamenti",
-                    .ukrainian: "Не вдалося перевірити оновлення"
-                ],
 
                 // Personalized Calibration
                 .personalizedHearingProfile: [
                     .english: "Personalized Hearing Profile",
                     .italian: "Profilo Uditivo Personalizzato",
                     .ukrainian: "Персоналізований слуховий профіль"
-                ],
-                .personalizedTitle: [
-                    .english: "Personalized",
-                    .italian: "Personalizzato",
-                    .ukrainian: "Персоналізований"
                 ],
                 .personalizedDesc: [
                     .english: "Create your unique hearing signature for perfect headphone calibration",
@@ -2130,16 +1494,6 @@ private enum LocalizationData {
                     .italian: "Questa NON è una correzione professionale della stanza. I risultati dipendono dal tuo udito, dall'acustica della stanza e dalla posizione di ascolto. Per una misurazione accurata della stanza, usa un microfono calibrato. Questo strumento ti aiuta a regolare il suono secondo le TUE preferenze personali.",
                     .ukrainian: "Це НЕ професійна корекція кімнати. Результати залежать від вашого слуху, акустики кімнати та позиції прослуховування. Для точного вимірювання кімнати використовуйте калібрований мікрофон. Цей інструмент допомагає налаштувати звук під ВАШІ особисті вподобання."
                 ],
-                .sineSweepMethod: [
-                    .english: "Sine Sweep Method",
-                    .italian: "Metodo Sine Sweep",
-                    .ukrainian: "Метод Sine Sweep"
-                ],
-                .stepOne: [
-                    .english: "1️⃣",
-                    .italian: "1️⃣",
-                    .ukrainian: "1️⃣"
-                ],
 
                 // Resonance Finder (Sine Sweep tool)
                 .resonanceFinder: [
@@ -2209,21 +1563,6 @@ private enum LocalizationData {
                     .italian: "Diagnostica del Sistema",
                     .ukrainian: "Діагностика системи"
                 ],
-                .lastCheck: [
-                    .english: "Last check: %@ ago",
-                    .italian: "Ultimo controllo: %@ fa",
-                    .ukrainian: "Остання перевірка: %@ тому"
-                ],
-                .blackHoleInstallation: [
-                    .english: "BlackHole Installation",
-                    .italian: "Installazione BlackHole",
-                    .ukrainian: "Встановлення BlackHole"
-                ],
-                .ago: [
-                    .english: "ago",
-                    .italian: "fa",
-                    .ukrainian: "тому"
-                ],
                 .checkingYourSystem: [
                     .english: "Checking Your System",
                     .italian: "Controllo del Sistema",
@@ -2281,11 +1620,6 @@ private enum LocalizationData {
                     .italian: "Sicuro & Affidabile",
                     .ukrainian: "Безпечний та надійний"
                 ],
-                .canBeRemovedAnytimeDesc: [
-                    .english: "Can be removed anytime from System Settings",
-                    .italian: "Può essere rimosso in qualsiasi momento dalle Impostazioni di Sistema",
-                    .ukrainian: "Можна видалити в будь-який час через Системні налаштування"
-                ],
                 .installationSteps: [
                     .english: "Installation Steps:",
                     .italian: "Passaggi di installazione:",
@@ -2333,11 +1667,6 @@ private enum LocalizationData {
                     .italian: "Ultima occasione per ripensarci!\n\n31 bande è una vera maratona. 🏃‍♂️\nPrepara il caffè ☕️ e sii paziente.\n\nOppure scegli 10 bande e ottieni ottimi risultati in 5 minuti! 😊",
                     .ukrainian: "Останній шанс передумати!\n\n31 смуги - це справжній марафон. 🏃‍♂️\nЗробіть каву ☕️ і будьте терплячими.\n\nАбо просто оберіть 10 смуг і отримайте чудові результати за 5 хвилин! 😊"
                 ],
-                .deleteProfileConfirmation: [
-                    .english: "Are you sure you want to delete '%@'?",
-                    .italian: "Sei sicuro di voler eliminare '%@'?",
-                    .ukrainian: "Ви впевнені, що хочете видалити '%@'?"
-                ],
                 .calibrationTitle: [
                     .english: "Calibration",
                     .italian: "Calibrazione",
@@ -2358,123 +1687,8 @@ private enum LocalizationData {
                     .italian: "Descrizione Calibrazione",
                     .ukrainian: "Опис калібрування"
                 ],
-                .calibrationImportantNote: [
-                    .english: "Important Note",
-                    .italian: "Nota Importante",
-                    .ukrainian: "Важлива примітка"
-                ],
-                .calibrationWillImprove: [
-                    .english: "Calibration will improve:",
-                    .italian: "La calibrazione migliorerà:",
-                    .ukrainian: "Калібрування покращить:"
-                ],
-                .calibrationWillImprove1: [
-                    .english: "• Frequency response accuracy",
-                    .italian: "• Accuratezza risposta in frequenza",
-                    .ukrainian: "• Точність частотної характеристики"
-                ],
-                .calibrationWillImprove2: [
-                    .english: "• Speaker and room interaction",
-                    .italian: "• Interazione altoparlanti e stanza",
-                    .ukrainian: "• Взаємодію колонок та кімнати"
-                ],
-                .calibrationWillImprove3: [
-                    .english: "• Overall sound quality",
-                    .italian: "• Qualità audio generale",
-                    .ukrainian: "• Загальну якість звуку"
-                ],
-                .calibrationWillImprove4: [
-                    .english: "• Listening experience",
-                    .italian: "• Esperienza di ascolto",
-                    .ukrainian: "• Враження від прослуховування"
-                ],
-                .calibrationWontFix: [
-                    .english: "Calibration won't fix:",
-                    .italian: "La calibrazione non risolverà:",
-                    .ukrainian: "Калібрування не виправить:"
-                ],
-                .calibrationWontFix1: [
-                    .english: "• Poor source quality",
-                    .italian: "• Scarsa qualità sorgente",
-                    .ukrainian: "• Погану якість джерела"
-                ],
-                .calibrationWontFix2: [
-                    .english: "• Damaged equipment",
-                    .italian: "• Attrezzatura danneggiata",
-                    .ukrainian: "• Пошкоджене обладнання"
-                ],
-                .calibrationWontFix3: [
-                    .english: "• Room acoustics completely",
-                    .italian: "• Acustica della stanza completamente",
-                    .ukrainian: "• Акустику кімнати повністю"
-                ],
-                .calibrationWontFix4: [
-                    .english: "• Personal preference",
-                    .italian: "• Preferenza personale",
-                    .ukrainian: "• Особисті переваги"
-                ],
-                .calibrationForFullResult: [
-                    .english: "For full results:",
-                    .italian: "Per risultati completi:",
-                    .ukrainian: "Для повного результату:"
-                ],
-                .calibrationMethodPrinciple: [
-                    .english: "Method Principle",
-                    .italian: "Principio del Metodo",
-                    .ukrainian: "Принцип методу"
-                ],
-                .calibrationMethodDescription: [
-                    .english: "Method Description",
-                    .italian: "Descrizione del Metodo",
-                    .ukrainian: "Опис методу"
-                ],
-                .calibrationStep1: [
-                    .english: "Step 1",
-                    .italian: "Passo 1",
-                    .ukrainian: "Крок 1"
-                ],
-                .calibrationStep1Desc: [
-                    .english: "Step 1 Description",
-                    .italian: "Descrizione Passo 1",
-                    .ukrainian: "Опис кроку 1"
-                ],
-                .calibrationStep2: [
-                    .english: "Step 2",
-                    .italian: "Passo 2",
-                    .ukrainian: "Крок 2"
-                ],
-                .calibrationStep2Desc: [
-                    .english: "Step 2 Description",
-                    .italian: "Descrizione Passo 2",
-                    .ukrainian: "Опис кроку 2"
-                ],
-                .calibrationStep3: [
-                    .english: "Step 3",
-                    .italian: "Passo 3",
-                    .ukrainian: "Крок 3"
-                ],
-                .calibrationStep3Desc: [
-                    .english: "Step 3 Description",
-                    .italian: "Descrizione Passo 3",
-                    .ukrainian: "Опис кроку 3"
-                ],
-                .calibrationStep4: [
-                    .english: "Step 4",
-                    .italian: "Passo 4",
-                    .ukrainian: "Крок 4"
-                ],
-                .calibrationStep4Desc: [
-                    .english: "Step 4 Description",
-                    .italian: "Descrizione Passo 4",
-                    .ukrainian: "Опис кроку 4"
-                ],
 
                 // BlackHole Setup
-                .blackHoleNotInstalled: [
-                    .english: "BlackHole is not installed",
-                    .italian: "BlackHole non è installato",
-                    .ukrainian: "BlackHole не встановлено"
-                ],
                 .systemeqRequiresBlackHole: [
                     .english: "SystemEQ requires BlackHole",
                     .italian: "SystemEQ richiede BlackHole",
@@ -2492,16 +1706,6 @@ private enum LocalizationData {
                 ],
 
                 // UI Elements
-                .launchAtLoginEmoji: [
-                    .english: "🚀",
-                    .italian: "🚀",
-                    .ukrainian: "🚀"
-                ],
-                .supportThankYouEmoji: [
-                    .english: "☕",
-                    .italian: "☕",
-                    .ukrainian: "☕"
-                ],
                 .setupNow: [
                     .english: "Setup Now",
                     .italian: "Configura Ora",
@@ -2518,16 +1722,6 @@ private enum LocalizationData {
                     .english: "Find room resonances with sine sweep test",
                     .italian: "Trova le risonanze della stanza con test sine sweep",
                     .ukrainian: "Знайдіть резонанси кімнати за допомогою sine sweep тесту"
-                ],
-                .startSineSweepAndListen: [
-                    .english: "Start sine sweep and listen carefully",
-                    .italian: "Avvia il sine sweep e ascolta attentamente",
-                    .ukrainian: "Запустіть sine sweep та слухайте уважно"
-                ],
-                .markFrequenciesThatBoomOrRing: [
-                    .english: "Mark frequencies that 'boom' or 'ring'",
-                    .italian: "Segna le frequenze che 'booming' o 'ringing'",
-                    .ukrainian: "Позначте частоти, які 'гудуть' або 'дзвенять'"
                 ],
                 .applyNotchFilters: [
                     .english: "Apply notch filters to suppress resonances",
@@ -2579,16 +1773,6 @@ private enum LocalizationData {
                     .italian: "Frequenza",
                     .ukrainian: "Частота"
                 ],
-                .sineSweep: [
-                    .english: "Sine Sweep",
-                    .italian: "Sine Sweep",
-                    .ukrainian: "Sine Sweep"
-                ],
-                .manual: [
-                    .english: "Manual",
-                    .italian: "Manuale",
-                    .ukrainian: "Вручну"
-                ],
                 .tuningTab: [
                     .english: "Tuning",
                     .italian: "Regolazione",
@@ -2608,11 +1792,6 @@ private enum LocalizationData {
                     .english: "Add Resonance",
                     .italian: "Aggiungi Risonanza",
                     .ukrainian: "Додати резонанс"
-                ],
-                .resonanceFrequency: [
-                    .english: "Resonance Frequency",
-                    .italian: "Frequenza Risonanza",
-                    .ukrainian: "Частота резонансу"
                 ],
                 .severity: [
                     .english: "Severity",
@@ -2639,20 +1818,10 @@ private enum LocalizationData {
                     .italian: "Estremo",
                     .ukrainian: "Дуже сильний"
                 ],
-                .addNotchFilter: [
-                    .english: "Add Notch Filter",
-                    .italian: "Aggiungi Filtro Notch",
-                    .ukrainian: "Додати notch фільтр"
-                ],
                 .gain: [
                     .english: "Gain",
                     .italian: "Guadagno",
                     .ukrainian: "Підсилення"
-                ],
-                .qFactor: [
-                    .english: "Q Factor",
-                    .italian: "Fattore Q",
-                    .ukrainian: "Фактор Q"
                 ],
                 .saveProfile: [
                     .english: "Save Profile",
@@ -2673,36 +1842,6 @@ private enum LocalizationData {
                     .english: "Compare Original vs Filtered",
                     .italian: "Confronta Originale vs Filtrato",
                     .ukrainian: "Порівняти оригінал з відфільтрованим"
-                ],
-                .hearingTestDifference: [
-                    .english: "Hearing test - can you notice the difference?",
-                    .italian: "Test uditivo - riesci a notare la differenza?",
-                    .ukrainian: "Слуховий тест - помічаєте різницю?"
-                ],
-                .filtersActive: [
-                    .english: "Filters Active",
-                    .italian: "Filtri Attivi",
-                    .ukrainian: "Фільтри активні"
-                ],
-                .noFiltersAdded: [
-                    .english: "No filters added yet",
-                    .italian: "Nessun filtro aggiunto ancora",
-                    .ukrainian: "Фільтри ще не додано"
-                ],
-                .notchFilterDescription: [
-                    .english: "Notch filters target specific problem frequencies",
-                    .italian: "I filtri notch colpiscono frequenze problematiche specifiche",
-                    .ukrainian: "Notch фільтри націлені на конкретні проблемні частоти"
-                ],
-                .resonanceDescription: [
-                    .english: "Room resonances cause certain frequencies to sound louder",
-                    .italian: "Le risonanze della stanza fanno sembrare alcune frequenze più alte",
-                    .ukrainian: "Резонанси кімнати змушують певні частоти звучати гучніше"
-                ],
-                .roomCalibrationHelp: [
-                    .english: "Room calibration helps identify and reduce room resonances that cause uneven bass response.",
-                    .italian: "La calibrazione della stanza aiuta a identificare e ridurre le risonanze della stanza che causano una risposta dei bassi non uniforme.",
-                    .ukrainian: "Калібрування кімнати допомагає виявити та зменшити резонанси, що викликають нерівномірний бас."
                 ],
                 .detectedResonances: [
                     .english: "Detected Resonances",
@@ -3305,11 +2444,6 @@ private enum LocalizationData {
                 ],
 
                 // CalibrationView - Additional hardcoded strings
-                .calibrationCompensateRoom: [
-                    .english: "Compensate room acoustics, speaker characteristics and your hearing through ear-based calibration",
-                    .italian: "Compensa l'acustica della stanza, le caratteristiche degli altoparlanti e il tuo udito attraverso la calibrazione basata sull'orecchio",
-                    .ukrainian: "Компенсуйте акустику кімнати, характеристики колонок та ваш слух за допомогою калібрування на слух"
-                ],
                 .calibrationCompensateHeadphones: [
                     .english: "Compensate headphone characteristics and your hearing through ear-based calibration",
                     .italian: "Compensa le caratteristiche delle cuffie e il tuo udito attraverso la calibrazione basata sull'orecchio",
@@ -3335,11 +2469,6 @@ private enum LocalizationData {
                     .italian: "• Compensazione per le caratteristiche del tuo udito",
                     .ukrainian: "• Компенсація особливостей вашого слуху"
                 ],
-                .calibrationSpeakerCorrection: [
-                    .english: "• Speaker frequency response correction",
-                    .italian: "• Correzione risposta in frequenza altoparlanti",
-                    .ukrainian: "• Корекція АЧХ колонок"
-                ],
                 .calibrationHeadphoneCorrection: [
                     .english: "• Headphone frequency response correction",
                     .italian: "• Correzione risposta in frequenza cuffie",
@@ -3354,26 +2483,6 @@ private enum LocalizationData {
                     .english: "⚠️ What WON'T be fixed without a microphone:",
                     .italian: "⚠️ Cosa NON verrà risolto senza un microfono:",
                     .ukrainian: "⚠️ Що НЕ виправиться без мікрофона:"
-                ],
-                .calibrationBassResonances: [
-                    .english: "• Bass peaks/dips from standing waves",
-                    .italian: "• Picchi/avvallamenti dei bassi da onde stazionarie",
-                    .ukrainian: "• Басові піки/провали від стоячих хвиль"
-                ],
-                .calibrationEchoReverb: [
-                    .english: "• Echo and room reverberation",
-                    .italian: "• Eco e riverbero della stanza",
-                    .ukrainian: "• Ехо та реверберація кімнати"
-                ],
-                .calibrationRoomUnevenness: [
-                    .english: "• Unevenness at different room positions",
-                    .italian: "• Irregolarità in diverse posizioni della stanza",
-                    .ukrainian: "• Нерівномірність в різних точках кімнати"
-                ],
-                .calibrationNeedsMicrophone: [
-                    .english: "💡 For 100% results you need Room Correction with a measurement microphone",
-                    .italian: "💡 Per risultati al 100% hai bisogno di Room Correction con un microfono di misurazione",
-                    .ukrainian: "💡 Для 100% результату потрібна Room Correction з вимірювальним мікрофоном"
                 ],
                 .calibrationDriverLimitations: [
                     .english: "• Physical driver limitations (distortion at extremes)",
@@ -3460,81 +2569,6 @@ private enum LocalizationData {
                     .italian: "Fai una pausa ogni 10 minuti per riposare il tuo udito",
                     .ukrainian: "Робіть перерву кожні 10 хвилин, щоб слух відпочив"
                 ],
-                .calibrationOptimalConditions: [
-                    .english: "🏠 Optimal Calibration Conditions:",
-                    .italian: "🏠 Condizioni Ottimali di Calibrazione:",
-                    .ukrainian: "🏠 Оптимальні умови для калібрування:"
-                ],
-                .calibrationOptimalCondition1: [
-                    .english: "📍 Always sit in the same place",
-                    .italian: "📍 Siediti sempre nello stesso posto",
-                    .ukrainian: "📍 Сідайте завжди на одному й тому ж місці"
-                ],
-                .calibrationOptimalCondition2: [
-                    .english: "📏 Optimal distance to speakers: 1.5-2.5 meters",
-                    .italian: "📏 Distanza ottimale dagli altoparlanti: 1,5-2,5 metri",
-                    .ukrainian: "📏 Оптимальна відстань до колонок: 1.5-2.5 метри"
-                ],
-                .calibrationOptimalCondition3: [
-                    .english: "🔊 Speakers should be at ear level",
-                    .italian: "🔊 Gli altoparlanti dovrebbero essere all'altezza delle orecchie",
-                    .ukrainian: "🔊 Колонки повинні бути на рівні вух"
-                ],
-                .calibrationOptimalCondition4: [
-                    .english: "🎵 Use 10-band mode for untreated rooms",
-                    .italian: "🎵 Usa la modalità a 10 bande per stanze non trattate",
-                    .ukrainian: "🎵 Використовуйте 10-band режим для необроблених кімнат"
-                ],
-                .calibrationOptimalCondition5: [
-                    .english: "⚠️ Limit bass correction to ±6 dB below 200 Hz",
-                    .italian: "⚠️ Limita la correzione dei bassi a ±6 dB sotto i 200 Hz",
-                    .ukrainian: "⚠️ Обмежте корекцію баса до ±6 дБ нижче 200 Гц"
-                ],
-                .calibrationEqualLoudnessVsRoom: [
-                    .english: "📚 Equal Loudness vs Room Correction:",
-                    .italian: "📚 Equal Loudness vs Room Correction:",
-                    .ukrainian: "📚 Equal Loudness vs Room Correction:"
-                ],
-                .calibrationEqualLoudnessMethod: [
-                    .english: "🎧 Equal Loudness (our method):",
-                    .italian: "🎧 Equal Loudness (il nostro metodo):",
-                    .ukrainian: "🎧 Equal Loudness (наш метод):"
-                ],
-                .calibrationEqualLoudnessDesc1: [
-                    .english: "• Calibrates by ear (subjective, but natural)",
-                    .italian: "• Calibra ad orecchio (soggettivo, ma naturale)",
-                    .ukrainian: "• Калібрує на слух (суб'єктивно, але природно)"
-                ],
-                .calibrationEqualLoudnessDesc2: [
-                    .english: "• Compensates hearing + speakers + partially room",
-                    .italian: "• Compensa udito + altoparlanti + parzialmente stanza",
-                    .ukrainian: "• Компенсує слух + колонки + частково кімнату"
-                ],
-                .calibrationEqualLoudnessDesc3: [
-                    .english: "• Fast and without additional equipment",
-                    .italian: "• Veloce e senza attrezzatura aggiuntiva",
-                    .ukrainian: "• Швидко і без додаткового обладнання"
-                ],
-                .calibrationRoomCorrectionMethod: [
-                    .english: "🎤 Room Correction (with microphone):",
-                    .italian: "🎤 Room Correction (con microfono):",
-                    .ukrainian: "🎤 Room Correction (з мікрофоном):"
-                ],
-                .calibrationRoomCorrectionDesc1: [
-                    .english: "• Measures objectively (accurate data)",
-                    .italian: "• Misura oggettivamente (dati accurati)",
-                    .ukrainian: "• Вимірює об'єктивно (точні дані)"
-                ],
-                .calibrationRoomCorrectionDesc2: [
-                    .english: "• Fixes standing waves and reverberation",
-                    .italian: "• Corregge onde stazionarie e riverbero",
-                    .ukrainian: "• Виправляє стоячі хвилі та реверберацію"
-                ],
-                .calibrationRoomCorrectionDesc3: [
-                    .english: "• Requires measurement microphone",
-                    .italian: "• Richiede microfono di misurazione",
-                    .ukrainian: "• Потрібен вимірювальний мікрофон"
-                ],
 
                 // AutoEQView - Additional hardcoded strings
                 .autoEQTypeModelName: [
@@ -3562,21 +2596,6 @@ private enum LocalizationData {
                     .italian: "Anteprima Mappata",
                     .ukrainian: "Попередній перегляд"
                 ],
-                .autoEQSetupTitle: [
-                    .english: "AutoEQ Setup",
-                    .italian: "Configurazione AutoEQ",
-                    .ukrainian: "Встановлення AutoEQ"
-                ],
-                .autoEQSetupDesc1: [
-                    .english: "For the most accurate results, we recommend installing AutoEQ.",
-                    .italian: "Per i risultati più accurati, consigliamo di installare AutoEQ.",
-                    .ukrainian: "Для найточніших результатів рекомендуємо встановити AutoEQ."
-                ],
-                .autoEQSetupDesc2: [
-                    .english: "This takes ~2 minutes and requires Python 3.",
-                    .italian: "Questo richiede ~2 minuti e richiede Python 3.",
-                    .ukrainian: "Це займе ~2 хвилини та вимагає Python 3."
-                ],
                 .quickImportHelp: [
                     .english: "Import directly from database (instant!)",
                     .italian: "Importa direttamente dal database (istantaneo!)",
@@ -3597,20 +2616,10 @@ private enum LocalizationData {
                     .italian: "Formato preset non riconosciuto",
                     .ukrainian: "Невідомий формат пресету"
                 ],
-                .autoEQImportFileSuccess: [
-                    .english: "Imported %d filters",
-                    .italian: "Importati %d filtri",
-                    .ukrainian: "Імпортовано %d фільтрів"
-                ],
                 .autoEQSaveToFavorites: [
                     .english: "Save to favorites",
                     .italian: "Salva nei preferiti",
                     .ukrainian: "Зберегти в обране"
-                ],
-                .autoEQShowSaved: [
-                    .english: "Show saved presets",
-                    .italian: "Mostra preset salvati",
-                    .ukrainian: "Показати збережені пресети"
                 ],
                 .removeFromFavorites: [
                     .english: "Remove from favorites",
@@ -3679,35 +2688,10 @@ private enum LocalizationData {
                     .italian: "Stile • Colori • Sensibilità",
                     .ukrainian: "Стиль • Кольори • Чутливість"
                 ],
-                .spectrum: [
-                    .english: "Spectrum",
-                    .italian: "Spettro",
-                    .ukrainian: "Спектр"
-                ],
                 .waveform: [
                     .english: "Waveform",
                     .italian: "Forma d'onda",
                     .ukrainian: "Форма хвилі"
-                ],
-                .particles: [
-                    .english: "Particles",
-                    .italian: "Particelle",
-                    .ukrainian: "Частинки"
-                ],
-                .psychedelic: [
-                    .english: "Psychedelic",
-                    .italian: "Psichedelico",
-                    .ukrainian: "Психоделічний"
-                ],
-                .intensity: [
-                    .english: "Intensity",
-                    .italian: "Intensità",
-                    .ukrainian: "Інтенсивність"
-                ],
-                .preview: [
-                    .english: "Preview",
-                    .italian: "Anteprima",
-                    .ukrainian: "Попередній перегляд"
                 ],
 
                 // AudioRouter - Alert messages
@@ -3983,21 +2967,6 @@ private enum LocalizationData {
                 ],
 
                 // AutoEQ Setup Prompt
-                .neverAsk: [
-                    .english: "Never ask again",
-                    .italian: "Non chiedere più",
-                    .ukrainian: "Ніколи не питати"
-                ],
-                .later: [
-                    .english: "Later",
-                    .italian: "Più tardi",
-                    .ukrainian: "Пізніше"
-                ],
-                .installNow: [
-                    .english: "Install now",
-                    .italian: "Installa ora",
-                    .ukrainian: "Встановити зараз"
-                ],
 
                 // Glass Design Section (Settings)
                 .glassDesignTitle: [
@@ -4009,31 +2978,6 @@ private enum LocalizationData {
                     .english: "Customize the appearance of glass UI elements",
                     .italian: "Personalizza l'aspetto degli elementi dell'interfaccia in vetro",
                     .ukrainian: "Налаштуйте вигляд скляних елементів інтерфейсу"
-                ],
-                .glassDesignStyle: [
-                    .english: "Style",
-                    .italian: "Stile",
-                    .ukrainian: "Стиль"
-                ],
-                .glassDesignCustomOpacity: [
-                    .english: "Custom Opacity",
-                    .italian: "Opacità Personalizzata",
-                    .ukrainian: "Власна прозорість"
-                ],
-                .glassDesignOpacity: [
-                    .english: "Opacity",
-                    .italian: "Opacità",
-                    .ukrainian: "Прозорість"
-                ],
-                .glassDesignPreview: [
-                    .english: "Preview",
-                    .italian: "Anteprima",
-                    .ukrainian: "Попередній перегляд"
-                ],
-                .glassDesignPreviewLabel: [
-                    .english: "Glass Effect Preview",
-                    .italian: "Anteprima Effetto Vetro",
-                    .ukrainian: "Попередній перегляд ефекту скла"
                 ],
 
                 // Calibration Mode Selector
