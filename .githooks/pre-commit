@@ -13,6 +13,43 @@ set -uo pipefail
 
 echo "🔍 Running pre-commit checks..."
 
+echo "🧹 Checking staged diff for whitespace errors..."
+if ! git diff --cached --check; then
+    echo "❌ Staged diff contains whitespace errors."
+    exit 1
+fi
+echo "✅ Staged diff clean"
+
+PYTHON_FILES=()
+while IFS= read -r -d '' file; do
+    PYTHON_FILES+=("$file")
+done < <(git diff --cached --no-renames --name-only --diff-filter=ACMT -z -- '*.py')
+
+if [ ${#PYTHON_FILES[@]} -gt 0 ]; then
+    echo "🐍 Compiling ${#PYTHON_FILES[@]} staged Python file(s)..."
+    if ! python3 - "${PYTHON_FILES[@]}" <<'PYTHON'
+import subprocess
+import sys
+
+failed = False
+for path in sys.argv[1:]:
+    try:
+        source = subprocess.run(
+            ["git", "show", ":" + path], check=True, stdout=subprocess.PIPE
+        ).stdout
+        compile(source, path, "exec", dont_inherit=True)
+    except (subprocess.CalledProcessError, SyntaxError, ValueError) as error:
+        print(f"{path}: {error}", file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)
+PYTHON
+    then
+        echo "❌ Python syntax check failed."
+        exit 1
+    fi
+    echo "✅ Python syntax clean"
+fi
+
 # Must match `excluded` in .swiftlint.yml and `--exclude` in .swiftformat,
 # otherwise the hook blocks commits that CI would accept.
 EXCLUDED_DIRS=(.build DerivedData .swiftpm Pods Carthage Scripts)
@@ -36,6 +73,7 @@ done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.swift')
 
 if [ ${#FILES[@]} -eq 0 ]; then
     echo "✅ No Swift files to check"
+    echo "✅ All pre-commit checks passed!"
     exit 0
 fi
 

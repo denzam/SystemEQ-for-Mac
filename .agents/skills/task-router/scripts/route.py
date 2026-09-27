@@ -2,7 +2,7 @@
 """
 Task Router — Local, zero-key, zero-hallucination task and risk classifier.
 Analyzes user task prompts, git changes, and file paths to determine:
-- Model Tier: flash_lite | flash | pro
+- Model Tier: fast | standard | reasoning
 - Risk Level: low | medium | critical
 - Strategy: direct | review | plan_required
 """
@@ -45,18 +45,37 @@ DEFAULT_LOW_PATH_PATTERNS = [
 ]
 
 DEFAULT_CRITICAL_KEYWORDS = [
+    # Architecture & Refactoring
     r"\barchitecture\b",
+    r"\bархітектур\w*",
     r"\brefactor\b",
+    r"\bрефакторинг\w*",
+    r"\brewrite\b",
+    r"\bпереписати\b",
+    # Concurrency & Low-level
     r"\block-free\b",
     r"\brace condition\b",
+    r"\bстан\w*\s+гонк\w*",
     r"\bdeadlock\b",
+    r"\bвзаємн\w*\s+блокуванн\w*",
+    r"\bдедлок\w*",
     r"\bhot path\b",
+    r"\bгаряч\w*\s+шлях\w*",
     r"\bmemory leak\b",
+    r"\bвит[ііоo]к\w*\s+пам['’]ят\w*",
+    r"\batomic\b",
+    r"\bатом\w*",
+    # Audio & Realtime
     r"\brender callback\b",
     r"\bcoreaudio\b",
     r"\bvdsp\b",
-    r"\batomic\b",
+    r"аудіо-?буфер\w*",
+    r"кільцев\w* буфер\w*",
+    r"\bring buffer\b",
+    # Stability
     r"\bcrash\b",
+    r"\bкраш\w*",
+    r"\bпадінн\w*",
     r"\bsegfault\b",
 ]
 
@@ -70,9 +89,11 @@ DEFAULT_LOW_KEYWORDS = [
     r"\breadme\b",
     r"\btranslation\b",
     r"\btranslate\b",
-    r"\bпереклад\b",
-    r"\bодрук\b",
-    r"\bкоментар\b",
+    r"\bпереклад\w*",
+    r"\bодрук\w*",
+    r"\bкоментар\w*",
+    r"\bдокументаці\w*",
+    r"\bформатуванн\w*",
 ]
 
 
@@ -145,7 +166,7 @@ def classify(prompt="", explicit_files=None, ignore_git=False):
 
     # If explicit files not given, check prompt for mentioned files
     prompt_mentioned_files = extract_paths_from_text(prompt)
-    
+
     if explicit_files is not None:
         files_to_check = explicit_files
     elif prompt_mentioned_files:
@@ -188,13 +209,13 @@ def classify(prompt="", explicit_files=None, ignore_git=False):
 
     # Decision Matrix
     if has_critical_file or prompt_crit_matches:
-        tier = "pro"
+        tier = "reasoning"
         risk = "critical"
         score = 5 if (has_critical_file and prompt_crit_matches) else 4
         strategy = "plan_required"
         confidence = 0.98 if has_critical_file else 0.92
     elif (has_only_low_files and not prompt_crit_matches) or (prompt_low_matches and not files_to_check):
-        tier = "flash_lite"
+        tier = "fast"
         risk = "low"
         score = 1
         strategy = "direct"
@@ -205,7 +226,7 @@ def classify(prompt="", explicit_files=None, ignore_git=False):
             reasons.append(f"Низькоризиковий запит: {', '.join(prompt_low_matches)}")
     else:
         # Default standard tier (fail-safe middle ground)
-        tier = "flash"
+        tier = "standard"
         risk = "medium"
         score = 3
         strategy = "review"
@@ -218,7 +239,6 @@ def classify(prompt="", explicit_files=None, ignore_git=False):
         "risk": risk,
         "confidence": confidence,
         "strategy": strategy,
-        "suggested_subagent_model": tier,
         "detected_files": files_to_check,
         "reasons": reasons
     }

@@ -1,6 +1,6 @@
 ---
 name: task-router
-description: "Local, zero-key task complexity and risk classifier. Evaluates user tasks and git changes to assign model tiers (flash_lite, flash, pro), risk levels (low, medium, critical), and execution strategies (direct, review, plan_required). Reusable across projects."
+description: "Local, zero-key task complexity and risk classifier. Evaluates user tasks and git changes to assign model tiers (fast, standard, reasoning), risk levels (low, medium, critical), and execution strategies (direct, review, plan_required). Reusable across projects."
 ---
 
 # Task Router — Локальний класифікатор задач і ризиків
@@ -12,7 +12,7 @@ description: "Local, zero-key task complexity and risk classifier. Evaluates use
 ## 1. Коли використовувати
 
 - **Перед внесенням змін до коду:** запустити роутер для визначення рівня ризику задачі.
-- **Перед делегуванням субагенту (`invoke_subagent`):** визначити оптимальний рівень моделі (`flash_lite`, `flash`, `pro`).
+- **Перед делегуванням субагенту:** зіставити рівень задачі (`fast`, `standard`, `reasoning`) з моделлю цільового середовища.
 - **Перед початком рефакторингу чи виправлення багів:** перевірити, чи потрібен повноцінний план реалізації (`plan_required`).
 
 ---
@@ -39,11 +39,11 @@ python3 .agents/skills/task-router/scripts/route.py "рефакторинг ау
 
 ## 3. Матриця рішень та дії агента
 
-| Рівень (`tier`) | Ризик (`risk`) | Стратегія (`strategy`) | Дія для Antigravity | Дія для Codex / Claude Code |
+| Рівень (`tier`) | Ризик (`risk`) | Стратегія (`strategy`) | Дія для Antigravity (`invoke_subagent`) | Дія для Codex / Claude Code |
 |---|---|---|---|---|
-| **`flash_lite`** | `low` | `direct` | Виконувати правку одразу без планування | Робити правку одразу (швидкий режим) |
-| **`flash`** | `medium` | `review` | Звичайний режим розробки; при делегуванні — модель `flash` | Виконати зміни та запустити тести/валідацію |
-| **`pro`** | `critical` | `plan_required` | **Обов'язковий Planning Mode** (`implementation_plan.md`) перед будь-якими змінами; при делегуванні — модель `pro` | Зупинитися, скласти покроковий план і погодити з користувачем |
+| **`fast`** | `low` | `direct` | Виконувати правку одразу без планування; модель `flash_lite` | Робити правку одразу (швидкий режим: `gpt-4o-mini`, `haiku`) |
+| **`standard`** | `medium` | `review` | Звичайний режим розробки; при делегуванні — модель `flash` | Виконати зміни та запустити тести/валідацію (`gpt-4o`, `sonnet`) |
+| **`reasoning`** | `critical` | `plan_required` | **Обов'язковий Planning Mode** (`implementation_plan.md`); при делегуванні — модель `pro` | Зупинитися, скласти покроковий план і погодити з користувачем (`o3-mini`, `o1`, `opus`) |
 
 ---
 

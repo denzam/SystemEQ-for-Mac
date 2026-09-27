@@ -167,7 +167,7 @@ Temporary Items
 .apdisk
 
 # AutoEQ database (large dataset - optional, uncomment if you want to ignore)
-AutoEq/
+/AutoEq/
 
 # Backup files
 *.bak
@@ -192,6 +192,8 @@ Docs/internal/
 .agents/*
 !.agents/skills/
 !.agents/skills/**
+.agents/skills/**/__pycache__/
+.agents/skills/**/*.pyc
 
 # Coverage artifacts
 default.profraw

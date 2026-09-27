@@ -10,10 +10,24 @@ echo ""
 
 cd "$(dirname "$0")/.." || exit 1
 
+MODE="${1:-build}"
+if [ "$MODE" != "build" ] && [ "$MODE" != "--full" ]; then
+    echo "Usage: $0 [--full]"
+    exit 2
+fi
+
 ERRORS=0
 
-# 1. SwiftFormat
-echo "🎨 [1/3] SwiftFormat..."
+echo "🧹 [1/5] Git whitespace..."
+if git diff --check && git diff --cached --check; then
+    echo "   ✅ No whitespace errors"
+else
+    echo "   ❌ Whitespace errors found"
+    ERRORS=$((ERRORS + 1))
+fi
+echo ""
+
+echo "🎨 [2/5] SwiftFormat..."
 if command -v swiftformat &> /dev/null; then
     # Gate on --lint's exit code, the same check CI runs. The old --dryrun grep
     # matched the summary line ("0/60 files would have been formatted"), so it
@@ -31,8 +45,7 @@ else
 fi
 echo ""
 
-# 2. SwiftLint
-echo "🔎 [2/3] SwiftLint..."
+echo "🔎 [3/5] SwiftLint..."
 if command -v swiftlint &> /dev/null; then
     LINT_OUT=$(swiftlint lint --config .swiftlint.yml --quiet 2>/dev/null)
     LINT_ERRORS=$(printf '%s\n' "$LINT_OUT" | grep -c "error:")
@@ -50,13 +63,65 @@ else
 fi
 echo ""
 
-# 3. Build check
-echo "🔨 [3/3] Build check..."
-if xcodebuild -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" \
-    -configuration Debug build -quiet 2>/dev/null; then
-    echo "   ✅ Build successful"
+echo "🐍 [4/5] Python checks..."
+PYTHON_FILES=()
+while IFS= read -r -d '' file; do
+    PYTHON_FILES+=("$file")
+done < <(git ls-files -z -co --exclude-standard -- '*.py')
+
+if [ "${#PYTHON_FILES[@]}" -eq 0 ]; then
+    echo "   ✅ No Python files found"
+elif python3 - "${PYTHON_FILES[@]}" <<'PYTHON'
+from pathlib import Path
+import sys
+
+failed = False
+for path in sys.argv[1:]:
+    try:
+        compile(Path(path).read_bytes(), path, "exec", dont_inherit=True)
+    except (OSError, SyntaxError, ValueError) as error:
+        print(f"{path}: {error}", file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)
+PYTHON
+then
+    echo "   ✅ Python syntax is valid"
 else
-    echo "   ❌ Build failed"
+    echo "   ❌ Python syntax check failed"
+    ERRORS=$((ERRORS + 1))
+fi
+if [ -f ".agents/skills/task-router/scripts/test_route.py" ]; then
+    if python3 ".agents/skills/task-router/scripts/test_route.py"; then
+        echo "   ✅ Task-router tests passed"
+    else
+        echo "   ❌ Task-router tests failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+echo ""
+
+if [ "$MODE" = "--full" ]; then
+    echo "🧪 [5/5] Test check..."
+    XCODE_ACTION="test"
+else
+    echo "🔨 [5/5] Build check..."
+    XCODE_ACTION="build"
+fi
+if xcodebuild -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" \
+    -configuration Debug "$XCODE_ACTION" -destination "platform=macOS" \
+    -derivedDataPath "${TMPDIR:-/tmp}/systemeq-derived-data" \
+    CODE_SIGNING_ALLOWED=NO -quiet 2>/dev/null; then
+    if [ "$MODE" = "--full" ]; then
+        echo "   ✅ Tests passed"
+    else
+        echo "   ✅ Build successful"
+    fi
+else
+    if [ "$MODE" = "--full" ]; then
+        echo "   ❌ Tests failed"
+    else
+        echo "   ❌ Build failed"
+    fi
     ERRORS=$((ERRORS + 1))
 fi
 echo ""
