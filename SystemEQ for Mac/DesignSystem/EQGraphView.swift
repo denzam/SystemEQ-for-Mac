@@ -6,6 +6,17 @@ struct EQGraphView: View {
 
     private let hPad: CGFloat = 36
 
+    private var accessibilitySummary: String {
+        let activeBands = bands.filter { abs($0.gain) >= 0.1 }
+        if activeBands.isEmpty {
+            return "Flat (all bands at 0 dB)"
+        }
+        return activeBands.map {
+            let freqStr = $0.frequency >= 1000 ? String(format: "%.1fkHz", $0.frequency / 1000) : "\(Int($0.frequency))Hz"
+            return "\(freqStr): \(String(format: "%+.1f", $0.gain)) dB"
+        }.joined(separator: ", ")
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -26,6 +37,9 @@ struct EQGraphView: View {
         }
         .frame(minHeight: 280)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Equalizer Curve")
+        .accessibilityValue(accessibilitySummary)
     }
 }
 
