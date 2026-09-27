@@ -68,6 +68,14 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
       
+      - name: Verify Unique Database Resource
+        run: |
+          count=$(find . -name "EQDatabase.db" -not -path "./DerivedData/*" -not -path "./build/*" -not -path "./LocalArtifacts/*" | wc -l | tr -d ' ')
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly 1 EQDatabase.db in repository, found $count"
+            exit 1
+          fi
+
       - name: Run Tests
         run: |
           xcodebuild -project "SystemEQ for Mac.xcodeproj" \
