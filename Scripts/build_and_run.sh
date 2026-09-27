@@ -8,7 +8,7 @@ case "$MODE" in
 esac
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DERIVED_DATA="$ROOT_DIR/DerivedData/EQProcessorMove"
+DERIVED_DATA="$ROOT_DIR/DerivedData"
 APP_NAME="SystemEQ for Mac"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 INSTALLED_APP="/Applications/$APP_NAME.app"
