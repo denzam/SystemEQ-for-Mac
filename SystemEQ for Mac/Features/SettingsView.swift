@@ -126,9 +126,21 @@ struct SettingsView: View {
         Button(action: {
             localization.setLanguage(language)
         }) {
-            VStack(spacing: 12) {
-                Text(language.flag)
-                    .font(.system(size: 32))
+            VStack(spacing: 10) {
+                if let icon = AppIconManager.shared.icon(for: language) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 44, height: 44)
+                        .overlay(alignment: .bottomTrailing) {
+                            Text(language.flag)
+                                .font(.system(size: 13))
+                                .offset(x: 4, y: 4)
+                        }
+                } else {
+                    Text(language.flag)
+                        .font(.system(size: 32))
+                }
 
                 VStack(spacing: 2) {
                     Text(language.displayName)
@@ -333,6 +345,9 @@ struct SettingsView: View {
                         showMenuBarIcon = true
                     }
                     NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                    if !hidden {
+                        AppIconManager.shared.applyIcon(for: localization.currentLanguage)
+                    }
                     // Повернути фокус вікну Налаштувань після зміни політики
                     NSApp.activate(ignoringOtherApps: true)
                 }

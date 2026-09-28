@@ -148,6 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         StatusItemController.shared.install()
 
+        // Застосувати іконку для поточної мови (Dock, App Switcher)
+        AppIconManager.shared.applyIcon(for: LocalizationManager.shared.currentLanguage)
+
         // Логін-айтем може стартувати без жодного вікна — тоді .task головного
         // вікна не виконається, і відновлення EQ не мало б звідки запуститись.
         Task { await AppStartup.run() }

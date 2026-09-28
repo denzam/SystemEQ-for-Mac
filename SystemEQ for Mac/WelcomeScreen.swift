@@ -112,7 +112,13 @@ public struct WelcomeScreen: View {
                     Button(action: {
                         localization.setLanguage(lang)
                     }) {
-                        HStack {
+                        HStack(spacing: 12) {
+                            if let icon = AppIconManager.shared.icon(for: lang) {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 32, height: 32)
+                            }
                             Text(lang.flag).font(.title)
                             Text(lang.displayName).font(.title3)
                             Spacer()
@@ -139,10 +145,18 @@ public struct WelcomeScreen: View {
 
     private var welcomeSlide: some View {
         VStack(spacing: 24) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 80))
-                .foregroundColor(.blue)
-                .padding(.top, 40)
+            if let icon = AppIconManager.shared.icon(for: localization.currentLanguage) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
+                    .padding(.top, 40)
+            } else {
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 80))
+                    .foregroundColor(.blue)
+                    .padding(.top, 40)
+            }
 
             VStack(spacing: 12) {
                 Text(localization.localized(.welcomeTitle))
