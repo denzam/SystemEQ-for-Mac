@@ -116,7 +116,7 @@ public struct WelcomeScreen: View {
                             if let icon = AppIconManager.shared.icon(for: lang) {
                                 Image(nsImage: icon)
                                     .resizable()
-                                    .aspectRatio(contentMode: .fit)
+                                    .scaledToFit()
                                     .frame(width: 32, height: 32)
                             }
                             Text(lang.flag).font(.title)
@@ -148,7 +148,7 @@ public struct WelcomeScreen: View {
             if let icon = AppIconManager.shared.icon(for: localization.currentLanguage) {
                 Image(nsImage: icon)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .scaledToFit()
                     .frame(width: 80, height: 80)
                     .padding(.top, 40)
             } else {

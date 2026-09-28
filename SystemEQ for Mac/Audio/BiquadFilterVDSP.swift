@@ -445,10 +445,8 @@ public final class BiquadFilterVDSP {
         var maxMag: Float = 0
         vDSP_maxmgv(buffer, 1, &maxMag, vDSP_Length(count))
         guard !maxMag.isFinite else { return }
-        for i in 0..<count {
-            if !buffer[i].isFinite {
-                buffer[i] = 0.0
-            }
+        for i in 0..<count where !buffer[i].isFinite {
+            buffer[i] = 0.0
         }
     }
 

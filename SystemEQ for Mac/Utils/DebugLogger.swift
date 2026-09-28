@@ -243,6 +243,7 @@ nonisolated final class DiagnosticEventStore: @unchecked Sendable {
         while String(bytes: prefix, encoding: .utf8) == nil {
             prefix = prefix.dropLast()
         }
+        // swiftlint:disable:next optional_data_string_conversion
         return String(decoding: prefix, as: UTF8.self)
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")

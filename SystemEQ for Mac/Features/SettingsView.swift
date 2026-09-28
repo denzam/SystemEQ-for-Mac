@@ -130,7 +130,7 @@ struct SettingsView: View {
                 if let icon = AppIconManager.shared.icon(for: language) {
                     Image(nsImage: icon)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .scaledToFit()
                         .frame(width: 44, height: 44)
                         .overlay(alignment: .bottomTrailing) {
                             Text(language.flag)
