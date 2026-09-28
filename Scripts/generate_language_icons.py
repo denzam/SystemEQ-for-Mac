@@ -11,7 +11,7 @@ supersampled macOS squircle mask, and exported in Retina and standard resolution
 
 import os
 import json
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS_DIR = os.path.join(PROJECT_ROOT, "Docs")
@@ -45,27 +45,62 @@ APPICON_SIZES = [
     ("icon_512x512@2x.png", 1024),
 ]
 
-def make_squircle_mask(size: int) -> Image.Image:
+def make_squircle_mask(size: int, radius: int) -> Image.Image:
     # 4x supersampled mask for sub-pixel anti-aliasing
     hi_size = size * 4
     mask_hi = Image.new("L", (hi_size, hi_size), 0)
     draw = ImageDraw.Draw(mask_hi)
-    radius = int(hi_size * 0.224)
-    draw.rounded_rectangle([(0, 0), (hi_size - 1, hi_size - 1)], radius=radius, fill=255)
+    draw.rounded_rectangle([(0, 0), (hi_size - 1, hi_size - 1)], radius=radius * 4, fill=255)
     return mask_hi.resize((size, size), Image.Resampling.LANCZOS)
 
 def process_master_image(config: dict) -> Image.Image:
+    """
+    Produce standard macOS Xcode-like 1024x1024 icon canvas:
+    - 864x864 squircle body (84.4% presence, matching Xcode / developer tools)
+    - Squarer corners (radius=160px)
+    - Ambient drop shadow (dy=12px, blur=20px, 38% black)
+    """
     src_path = config["file"]
     crop_box = config["crop"]
 
     img = Image.open(src_path)
     cropped = img.crop(crop_box)
-    resized = cropped.resize((1024, 1024), Image.Resampling.LANCZOS)
 
-    mask = make_squircle_mask(1024)
-    rgba = resized.convert("RGBA")
-    rgba.putalpha(mask)
-    return rgba
+    canvas_size = 1024
+    body_size = 864
+    radius = 160
+
+    # 1. Mask and resize body squircle
+    mask = make_squircle_mask(body_size, radius)
+    body_img = cropped.resize((body_size, body_size), Image.Resampling.LANCZOS).convert("RGBA")
+    body_img.putalpha(mask)
+
+    # 2. Compute placement (centered horizontally, top margin 72px)
+    x_pos = (canvas_size - body_size) // 2  # 80px margin left/right
+    y_pos = 72
+    dy = 12
+
+    # 3. Create drop shadow layer
+    shadow_color = (0, 0, 0, int(255 * 0.38))
+    shadow_hi = Image.new("RGBA", (canvas_size * 2, canvas_size * 2), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow_hi)
+    shadow_draw.rounded_rectangle(
+        [
+            (x_pos * 2, (y_pos + dy) * 2),
+            ((x_pos + body_size - 1) * 2, (y_pos + dy + body_size - 1) * 2)
+        ],
+        radius=radius * 2,
+        fill=shadow_color
+    )
+    shadow_layer = shadow_hi.resize((canvas_size, canvas_size), Image.Resampling.LANCZOS)
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=20))
+
+    # 4. Composite final icon: canvas -> shadow -> squircle
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    canvas.alpha_composite(shadow_layer)
+    canvas.alpha_composite(body_img, dest=(x_pos, y_pos))
+
+    return canvas
 
 def generate_appiconset(master_en: Image.Image, out_dir: str):
     os.makedirs(out_dir, exist_ok=True)
