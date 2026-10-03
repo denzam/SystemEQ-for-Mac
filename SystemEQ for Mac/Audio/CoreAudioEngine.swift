@@ -193,8 +193,10 @@ public final class CoreAudioEngine: ObservableObject {
     /// pointer, release-store on swap, 100 ms grace period before release.
     fileprivate final class VisualizerCallbackBox {
         let callback: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void
-        init(_ callback: @escaping (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void) {
+        let owner: AnyObject?
+        init(_ callback: @escaping (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void, owner: AnyObject?) {
             self.callback = callback
+            self.owner = owner
         }
     }
 
@@ -234,9 +236,12 @@ public final class CoreAudioEngine: ObservableObject {
         set { setVisualizerCallback(newValue) }
     }
 
-    private func setVisualizerCallback(_ callback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?) {
+    func setVisualizerCallback(
+        _ callback: ((UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void)?,
+        owner: AnyObject? = nil
+    ) {
         let previous = _visualizerCallbackStrong
-        let box = callback.map { VisualizerCallbackBox($0) }
+        let box = callback.map { VisualizerCallbackBox($0, owner: owner) }
         _visualizerCallbackStrong = box
         let newPtr: UnsafeMutableRawPointer? = box.map { Unmanaged.passUnretained($0).toOpaque() }
         seq_atomic_ptr_store_seq_cst(_visualizerCallbackAtomic, newPtr)
@@ -244,6 +249,11 @@ public final class CoreAudioEngine: ObservableObject {
             retiredVisualizerCallbacks.append(previous)
             scheduleRetiredObjectReclamation()
         }
+    }
+
+    func removeVisualizerCallback(owner: AnyObject) {
+        guard _visualizerCallbackStrong?.owner === owner else { return }
+        setVisualizerCallback(nil)
     }
 
     private func scheduleRetiredObjectReclamation() {

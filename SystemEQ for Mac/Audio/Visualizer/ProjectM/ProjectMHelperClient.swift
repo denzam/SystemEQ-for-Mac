@@ -99,6 +99,7 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Private Properties
 
     private var helperProcess: Process?
+    private var helperOutputHandle: FileHandle?
     private var helperGeneration: UInt64 = 0
     private var socketPath: String?
     private var readSource: DispatchSourceRead?
@@ -236,34 +237,61 @@ final class ProjectMHelperClient: ObservableObject {
         }
     }
 
-    private var statusUpdateTimer: Timer?
+    private(set) var statusUpdateTimer: Timer?
 
     // Lock-free ring buffer for audio (written on real-time audio thread, read on ipcQueue)
-    private let audioRingCapacity = 8192 // must be power of 2
-    nonisolated(unsafe) private var _audioRingBuffer: UnsafeMutablePointer<Float>
-    nonisolated(unsafe) private let _audioWriteIdx: UnsafeMutablePointer<SEQAtomicInt32> = {
-        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
-        seq_atomic_int32_init(p, 0)
-        return p
-    }()
-    nonisolated(unsafe) private let _audioReadIdx: UnsafeMutablePointer<SEQAtomicInt32> = {
-        let p = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
-        seq_atomic_int32_init(p, 0)
-        return p
-    }()
+    private final class AudioRingStorage: @unchecked Sendable {
+        nonisolated let capacity = 8192
+        nonisolated(unsafe) let samples: UnsafeMutablePointer<Float>
+        nonisolated(unsafe) let writeIndex: UnsafeMutablePointer<SEQAtomicInt32>
+        nonisolated(unsafe) let readIndex: UnsafeMutablePointer<SEQAtomicInt32>
+
+        init() {
+            samples = .allocate(capacity: capacity)
+            samples.initialize(repeating: 0, count: capacity)
+            writeIndex = .allocate(capacity: 1)
+            readIndex = .allocate(capacity: 1)
+            seq_atomic_int32_init(writeIndex, 0)
+            seq_atomic_int32_init(readIndex, 0)
+        }
+
+        deinit {
+            samples.deallocate()
+            writeIndex.deallocate()
+            readIndex.deallocate()
+        }
+    }
+
+    nonisolated private let audioRing = AudioRingStorage()
     private var audioSendTimer: DispatchSourceTimer?
 
     init(ipcQueue: DispatchQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)) {
         self.ipcQueue = ipcQueue
-        _audioRingBuffer = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
-        _audioRingBuffer.initialize(repeating: 0, count: 8192)
     }
 
     deinit {
+        let storage = audioRing
+        let timer = statusUpdateTimer
+        if Thread.isMainThread {
+            CoreAudioEngine.shared.removeVisualizerCallback(owner: storage)
+            timer?.invalidate()
+        } else {
+            DispatchQueue.main.async {
+                CoreAudioEngine.shared.removeVisualizerCallback(owner: storage)
+                timer?.invalidate()
+            }
+        }
         audioSendTimer?.cancel()
-        _audioRingBuffer.deallocate()
-        _audioWriteIdx.deallocate()
-        _audioReadIdx.deallocate()
+        helperOutputHandle?.readabilityHandler = nil
+        let socket = invalidateSocket()
+        if socket >= 0 { shutdown(socket, SHUT_RDWR) }
+        if let readSource {
+            readSource.cancel()
+        } else if socket >= 0 {
+            close(socket)
+        }
+        helperProcess?.terminationHandler = nil
+        if let helperProcess, helperProcess.isRunning { helperProcess.terminate() }
     }
 
     // MARK: - Lifecycle
@@ -278,7 +306,6 @@ final class ProjectMHelperClient: ObservableObject {
             "weight": selectedWeight
         ])
         helperGeneration &+= 1
-        let generation = helperGeneration
 
         // Find helper app in bundle
         guard let helperURL = findHelperApp() else {
@@ -304,33 +331,10 @@ final class ProjectMHelperClient: ObservableObject {
 
         do {
             try process.run()
-            helperProcess = process
-            isRunning = true
+            monitorHelperProcess(process, output: pipe)
 
             dlog("✅ ProjectMHelper launched (PID: \(process.processIdentifier))", category: .audio)
             DiagnosticEventStore.shared.record("visualizer.helper.launched")
-
-            // Monitor process termination (user closes window).
-            process.terminationHandler = { [weak self] terminatedProcess in
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.helperGeneration == generation,
-                          self.helperProcess === terminatedProcess else { return }
-                    let reason = terminatedProcess.terminationReason == .exit ? "exit" : "signal"
-                    dlog(
-                        "🛑 ProjectMHelper terminated (\(reason), status \(terminatedProcess.terminationStatus))",
-                        category: .audio
-                    )
-                    DiagnosticEventStore.shared.record("visualizer.helper.terminated", details: [
-                        "reason": reason,
-                        "status": "\(terminatedProcess.terminationStatus)"
-                    ])
-                    self.cleanupAfterTermination()
-                }
-            }
-
-            // Read socket path from helper's stdout
-            readSocketPath(from: pipe, generation: generation)
 
             // Connect to audio engine
             connectToAudioEngine()
@@ -344,6 +348,30 @@ final class ProjectMHelperClient: ObservableObject {
         }
     }
 
+    func monitorHelperProcess(_ process: Process, output: Pipe) {
+        let generation = helperGeneration
+        helperProcess = process
+        isRunning = true
+        process.terminationHandler = { [weak self] terminatedProcess in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.helperGeneration == generation,
+                      self.helperProcess === terminatedProcess else { return }
+                let reason = terminatedProcess.terminationReason == .exit ? "exit" : "signal"
+                dlog(
+                    "🛑 ProjectMHelper terminated (\(reason), status \(terminatedProcess.terminationStatus))",
+                    category: .audio
+                )
+                DiagnosticEventStore.shared.record("visualizer.helper.terminated", details: [
+                    "reason": reason,
+                    "status": "\(terminatedProcess.terminationStatus)"
+                ])
+                self.cleanupAfterTermination()
+            }
+        }
+        readSocketPath(from: output, generation: generation)
+    }
+
     private func cleanupAfterTermination() {
         helperGeneration &+= 1
         // Stop audio sending
@@ -352,6 +380,8 @@ final class ProjectMHelperClient: ObservableObject {
         // Stop status polling
         statusUpdateTimer?.invalidate()
         statusUpdateTimer = nil
+        helperOutputHandle?.readabilityHandler = nil
+        helperOutputHandle = nil
 
         // Disconnect from audio
         disconnectFromAudioEngine()
@@ -364,7 +394,7 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     func stop() {
-        guard isRunning else { return }
+        let wasRunning = isRunning
         helperGeneration &+= 1
 
         // Stop audio sending
@@ -373,6 +403,8 @@ final class ProjectMHelperClient: ObservableObject {
         // Stop status polling
         statusUpdateTimer?.invalidate()
         statusUpdateTimer = nil
+        helperOutputHandle?.readabilityHandler = nil
+        helperOutputHandle = nil
 
         // Disconnect from audio
         disconnectFromAudioEngine()
@@ -391,6 +423,7 @@ final class ProjectMHelperClient: ObservableObject {
         isRunning = false
         socketPath = nil
 
+        guard wasRunning else { return }
         dlog("🛑 ProjectMHelper stopped", category: .audio)
         DiagnosticEventStore.shared.record("visualizer.stop")
     }
@@ -446,6 +479,7 @@ final class ProjectMHelperClient: ObservableObject {
 
     private func readSocketPath(from pipe: Pipe, generation: UInt64) {
         let fileHandle = pipe.fileHandleForReading
+        helperOutputHandle = fileHandle
         let accumulator = SocketPathBuffer()
 
         // Use async reading with notification - don't block with readDataToEndOfFile
@@ -732,14 +766,15 @@ final class ProjectMHelperClient: ObservableObject {
 
     // MARK: - Audio
 
-    private func connectToAudioEngine() {
-        let ringBuffer = _audioRingBuffer
-        let writePtr = _audioWriteIdx
-        let readPtr = _audioReadIdx
-        let capacity = audioRingCapacity
+    func connectToAudioEngine() {
+        let storage = audioRing
 
-        CoreAudioEngine.shared.visualizerCallback = { left, right, frameCount in
-            let maxSamples = min(frameCount, 1024)
+        CoreAudioEngine.shared.setVisualizerCallback({ left, right, frameCount in
+            let ringBuffer = storage.samples
+            let writePtr = storage.writeIndex
+            let readPtr = storage.readIndex
+            let capacity = storage.capacity
+            let maxSamples = min(max(frameCount, 0), 1024)
             let mask = Int32(capacity - 1)
             let sampleCount = Int32(2 * maxSamples)
             let write = seq_atomic_int32_load(writePtr)
@@ -753,11 +788,11 @@ final class ProjectMHelperClient: ObservableObject {
                 ringBuffer[Int((idx &+ 1) & mask)] = right[i]
             }
             _ = seq_atomic_int32_fetch_add(writePtr, sampleCount)
-        }
+        }, owner: storage)
     }
 
     private func disconnectFromAudioEngine() {
-        CoreAudioEngine.shared.visualizerCallback = nil
+        CoreAudioEngine.shared.removeVisualizerCallback(owner: audioRing)
     }
 
     func stopAudioSending() {
@@ -794,14 +829,14 @@ final class ProjectMHelperClient: ObservableObject {
         guard let connection = socketLease() else { return }
         defer { close(connection.socket) }
 
-        let write = seq_atomic_int32_load(_audioWriteIdx)
-        let read = seq_atomic_int32_load(_audioReadIdx)
+        let write = seq_atomic_int32_load(audioRing.writeIndex)
+        let read = seq_atomic_int32_load(audioRing.readIndex)
         let available = Int(UInt32(bitPattern: write) &- UInt32(bitPattern: read))
 
         guard available >= 512 else { return }
 
         let toRead = min(available, 4096)
-        let mask = Int32(audioRingCapacity - 1)
+        let mask = Int32(audioRing.capacity - 1)
         let payloadBytes = toRead * MemoryLayout<Float>.size
         let totalBytes = 1 + 4 + payloadBytes
         guard totalBytes <= capacity else { return }
@@ -818,10 +853,10 @@ final class ProjectMHelperClient: ObservableObject {
         let payloadBase = UnsafeMutableRawPointer(sendBuf.advanced(by: 5))
         let floatSize = MemoryLayout<Float>.size
         for i in 0..<toRead {
-            var sample = _audioRingBuffer[Int((read &+ Int32(i)) & mask)]
+            var sample = audioRing.samples[Int((read &+ Int32(i)) & mask)]
             payloadBase.advanced(by: i * floatSize).copyMemory(from: &sample, byteCount: floatSize)
         }
-        _ = seq_atomic_int32_fetch_add(_audioReadIdx, Int32(toRead))
+        _ = seq_atomic_int32_fetch_add(audioRing.readIndex, Int32(toRead))
 
         guard socketIsCurrent(connection.original, generation: connection.generation),
               Self.writeAll(
@@ -840,7 +875,8 @@ final class ProjectMHelperClient: ObservableObject {
 
     // MARK: - Status Polling
 
-    private func startStatusPolling() {
+    func startStatusPolling() {
+        statusUpdateTimer?.invalidate()
         statusUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.sendCommand("STATUS")
         }
