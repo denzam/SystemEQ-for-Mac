@@ -9,6 +9,8 @@
 import Foundation
 
 public enum PresetPersistence {
+    private static let snapshotKey = "lastPreset.snapshot"
+    private static let playbackSnapshotKey = "lastPlayback.snapshot"
     private static let modeKey = "lastPreset.mode"
     private static let gainsKey = "lastPreset.gains"
     private static let preampKey = "lastPreset.preamp"
@@ -23,25 +25,38 @@ public enum PresetPersistence {
         public let preamp: Float
     }
 
+    private struct Snapshot: Codable {
+        let mode: EQBandMode
+        let gains: [Float]
+        let preamp: Float
+        let bassBoost: Float
+
+        var isValid: Bool {
+            gains.count == mode.bandCount && gains.allSatisfy(\.isFinite) && preamp.isFinite && bassBoost.isFinite
+        }
+    }
+
     // 🔧 Тести підміняють на ізольований suite: запис у .standard у тест-хості
     // стирає реальний збережений пресет користувача.
     nonisolated(unsafe) static var defaults: UserDefaults = .standard
 
     public static func save(mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float = 0.0) {
-        defaults.set(mode.rawValue, forKey: modeKey)
-        if let data = try? JSONEncoder().encode(gains) {
-            defaults.set(data, forKey: gainsKey)
-        }
-        defaults.set(Double(preamp), forKey: preampKey)
-        defaults.set(Double(bassBoost), forKey: bassBoostKey)
+        let snapshot = Snapshot(mode: mode, gains: gains, preamp: preamp, bassBoost: bassBoost)
+        guard snapshot.isValid, let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: snapshotKey)
     }
 
     public static func load() -> (mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float)? {
+        if let snapshot = loadSnapshot(key: snapshotKey, from: defaults) {
+            return (snapshot.mode, snapshot.gains, snapshot.preamp, snapshot.bassBoost)
+        }
         guard let raw = defaults.string(forKey: modeKey), let mode = EQBandMode(rawValue: raw) else { return nil }
         guard let data = defaults.data(forKey: gainsKey),
-              let gains = try? JSONDecoder().decode([Float].self, from: data) else { return nil }
+              let gains = try? JSONDecoder().decode([Float].self, from: data),
+              gains.count == mode.bandCount, gains.allSatisfy(\.isFinite) else { return nil }
         let preamp = Float(defaults.double(forKey: preampKey))
         let bassBoost = Float(defaults.double(forKey: bassBoostKey))
+        guard preamp.isFinite, bassBoost.isFinite else { return nil }
         return (mode, gains, preamp, bassBoost)
     }
 
@@ -52,15 +67,16 @@ public enum PresetPersistence {
         in targetDefaults: UserDefaults? = nil
     ) {
         let target = targetDefaults ?? defaults
-        target.set(mode.rawValue, forKey: playbackModeKey)
-        if let data = try? JSONEncoder().encode(gains) {
-            target.set(data, forKey: playbackGainsKey)
-        }
-        target.set(Double(preamp), forKey: playbackPreampKey)
+        let snapshot = Snapshot(mode: mode, gains: gains, preamp: preamp, bassBoost: 0)
+        guard snapshot.isValid, let data = try? JSONEncoder().encode(snapshot) else { return }
+        target.set(data, forKey: playbackSnapshotKey)
     }
 
     public static func loadPlaybackState(in targetDefaults: UserDefaults? = nil) -> PlaybackState? {
         let target = targetDefaults ?? defaults
+        if let snapshot = loadSnapshot(key: playbackSnapshotKey, from: target) {
+            return PlaybackState(mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp)
+        }
         guard let raw = target.string(forKey: playbackModeKey), let mode = EQBandMode(rawValue: raw) else {
             return loadLegacyPlaybackState(in: target)
         }
@@ -78,6 +94,8 @@ public enum PresetPersistence {
     }
 
     public static func clear() {
+        defaults.removeObject(forKey: snapshotKey)
+        defaults.removeObject(forKey: playbackSnapshotKey)
         defaults.removeObject(forKey: modeKey)
         defaults.removeObject(forKey: gainsKey)
         defaults.removeObject(forKey: preampKey)
@@ -88,10 +106,20 @@ public enum PresetPersistence {
     }
 
     public static var hasSavedPreset: Bool {
-        defaults.string(forKey: modeKey) != nil && defaults.data(forKey: gainsKey) != nil
+        load() != nil
+    }
+
+    private static func loadSnapshot(key: String, from target: UserDefaults) -> Snapshot? {
+        guard let data = target.data(forKey: key),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+              snapshot.isValid else { return nil }
+        return snapshot
     }
 
     private static func loadLegacyPlaybackState(in target: UserDefaults) -> PlaybackState? {
+        if let snapshot = loadSnapshot(key: snapshotKey, from: target) {
+            return PlaybackState(mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp)
+        }
         guard let raw = target.string(forKey: modeKey), let mode = EQBandMode(rawValue: raw) else { return nil }
         guard let data = target.data(forKey: gainsKey),
               let gains = try? JSONDecoder().decode([Float].self, from: data),

@@ -65,10 +65,15 @@ class EQDatabase {
         db != nil
     }
 
-    private init() {
+    private convenience init() {
         // Database is embedded in app bundle (Resources folder)
-        guard let bundleURL = Bundle.main.url(forResource: "EQDatabase", withExtension: "db", subdirectory: "Resources")
-            ?? Bundle.main.url(forResource: "EQDatabase", withExtension: "db") else {
+        let bundleURL = Bundle.main.url(forResource: "EQDatabase", withExtension: "db", subdirectory: "Resources")
+            ?? Bundle.main.url(forResource: "EQDatabase", withExtension: "db")
+        self.init(databaseURL: bundleURL)
+    }
+
+    init(databaseURL: URL?) {
+        guard let bundleURL = databaseURL else {
             dlog("⚠️ EQDatabase.db not found in bundle - AutoEQ features disabled", level: .warning, category: .database)
             self.dbURL = nil
             self.db = nil
@@ -256,9 +261,7 @@ class EQDatabase {
     private func parseHeadphoneRow(_ statement: OpaquePointer?) -> DatabaseHeadphone? {
         guard let statement,
               let brandPtr = sqlite3_column_text(statement, 1),
-              let modelPtr = sqlite3_column_text(statement, 2),
-              let typePtr = sqlite3_column_text(statement, 3),
-              let sourcePtr = sqlite3_column_text(statement, 4) else {
+              let modelPtr = sqlite3_column_text(statement, 2) else {
             return nil
         }
 
@@ -266,8 +269,8 @@ class EQDatabase {
             id: Int(sqlite3_column_int(statement, 0)),
             brand: String(cString: brandPtr),
             model: String(cString: modelPtr),
-            type: String(cString: typePtr),
-            source: String(cString: sourcePtr)
+            type: columnText(statement, 3),
+            source: columnText(statement, 4)
         )
     }
 

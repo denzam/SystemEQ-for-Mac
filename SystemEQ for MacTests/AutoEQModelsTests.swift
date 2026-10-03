@@ -5,8 +5,96 @@
 //  Unit tests for AutoEQ data models
 //
 
+import SQLite3
 @testable import SystemEQ_for_Mac
 import XCTest
+
+@MainActor
+final class EQDatabaseFixtureTests: XCTestCase {
+    private func withFixture(
+        fts: Bool = false, bands10: Int = 10, bands31: Int = 31,
+        gain: String = "0", preamp: String = "-3", body: (EQDatabase) -> Void
+    ) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("fixture.sqlite")
+        var writer: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
+        defer { if let writer { sqlite3_close(writer) } }
+        var sql = """
+        CREATE TABLE headphones(id INTEGER PRIMARY KEY, brand TEXT, model TEXT, type TEXT, source TEXT);
+        CREATE TABLE presets(id INTEGER PRIMARY KEY, headphone_id INTEGER, source TEXT, author TEXT, target_curve TEXT, preamp_gain REAL, is_hand_crafted INTEGER, is_recommended INTEGER);
+        CREATE TABLE fixed_band_10(preset_id INTEGER, band_index INTEGER, gain REAL);
+        CREATE TABLE graphic_eq_31(preset_id INTEGER, band_index INTEGER, gain REAL);
+        CREATE TABLE metadata(key TEXT, value TEXT);
+        INSERT INTO metadata VALUES('version', '2026-10-03');
+        INSERT INTO headphones VALUES(1, 'Apple', 'AirPods Pro (2nd gen)', NULL, 'fixture');
+        INSERT INTO presets VALUES(1, 1, NULL, NULL, NULL, \(preamp), 0, 1);
+        """
+        for index in 0..<bands10 {
+            sql += "INSERT INTO fixed_band_10 VALUES(1, \(index), \(gain));\n"
+        }
+        for index in 0..<bands31 {
+            sql += "INSERT INTO graphic_eq_31 VALUES(1, \(index), \(gain));\n"
+        }
+        if fts {
+            sql += """
+            CREATE VIRTUAL TABLE headphones_fts USING fts5(brand, model, type, content='headphones', content_rowid='id');
+            INSERT INTO headphones_fts(headphones_fts) VALUES('rebuild');
+            """
+        }
+        var error: UnsafeMutablePointer<CChar>?
+        let status = sqlite3_exec(writer, sql, nil, nil, &error)
+        let message = error.map { String(cString: $0) } ?? "SQLite fixture failed"
+        sqlite3_free(error)
+        XCTAssertEqual(status, SQLITE_OK, message)
+        guard status == SQLITE_OK else { return }
+        sqlite3_close(writer)
+        writer = nil
+        let database = EQDatabase(databaseURL: url)
+        XCTAssertTrue(database.isAvailable)
+        body(database)
+    }
+
+    func testPunctuationSearchAndNullableMetadata() throws {
+        try withFixture(fts: true) { database in
+            XCTAssertEqual(database.searchHeadphones("AirPods Pro (2nd gen)").first?.id, 1)
+            XCTAssertEqual(database.searchHeadphones("\"AirPods\" - Pro^").first?.id, 1)
+            let loaded = AutoEQDatabaseService(database: database).load(headphoneID: 1)
+            XCTAssertEqual(loaded?.preset.author, "fixture")
+            XCTAssertEqual(loaded?.preset.source, "fixture")
+            XCTAssertEqual(loaded?.preset.targetCurve, AppConstants.EQ.defaultTarget)
+            XCTAssertEqual(loaded?.gains10.count, 10)
+            XCTAssertEqual(loaded?.gains31.count, 31)
+        }
+    }
+
+    func testMissingFTSTableFallsBackToLike() throws {
+        try withFixture { database in
+            XCTAssertEqual(database.searchHeadphones("AirPods Pro").first?.id, 1)
+            XCTAssertEqual(database.readVersion(), "2026-10-03")
+        }
+    }
+
+    func testIncompleteAndNonFinitePresetsAreRejected() throws {
+        for counts in [(9, 31), (10, 30)] {
+            try withFixture(bands10: counts.0, bands31: counts.1) { database in
+                XCTAssertNil(AutoEQDatabaseService(database: database).load(headphoneID: 1))
+            }
+        }
+        try withFixture(gain: "1e999") { database in
+            XCTAssertNil(AutoEQDatabaseService(database: database).load(headphoneID: 1))
+        }
+        try withFixture(preamp: "1e999") { database in
+            XCTAssertNil(AutoEQDatabaseService(database: database).load(headphoneID: 1))
+        }
+    }
+
+    func testMissingDatabaseIsUnavailable() {
+        XCTAssertFalse(EQDatabase(databaseURL: nil).isAvailable)
+    }
+}
 
 @MainActor
 final class AutoEQModelsTests: XCTestCase {
