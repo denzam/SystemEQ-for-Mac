@@ -153,6 +153,80 @@ final class CoreAudioOutputTests: XCTestCase {
 
 @MainActor
 final class RoutingWakeRecoveryTests: XCTestCase {
+    func testRoutingStartSelectsBackendAndPreservesFailurePersistence() {
+        typealias Scenario = (AudioRoutingBackendPreference, Bool, Bool, Bool, Bool, [String])
+        let scenarios: [Scenario] = [
+            (.automatic, true, false, true, true, ["native:false"]),
+            (.automatic, false, true, true, true, ["native:false", "fallback", "blackHole:true"]),
+            (.automatic, false, false, true, false, ["native:false", "fallback", "blackHole:true"]),
+            (.automatic, false, false, false, false, ["native:false", "fallback", "blackHole:false"]),
+            (.native, false, true, true, false, ["native:true"]),
+            (.native, false, true, false, false, ["native:false"]),
+            (.blackHole, true, true, true, true, ["blackHole:true"]),
+            (.blackHole, true, false, false, false, ["blackHole:false"])
+        ]
+        for (preference, nativeSucceeds, blackHoleSucceeds, persist, expectedResult, expectedCalls) in scenarios {
+            var calls: [String] = []
+            let result = AudioRoutingStartPolicy.start(
+                preference: preference,
+                persistEnabledStateOnFailure: persist,
+                native: { calls.append("native:\($0)"); return nativeSucceeds },
+                blackHole: { calls.append("blackHole:\($0)"); return blackHoleSucceeds },
+                onFallback: { calls.append("fallback") }
+            )
+            XCTAssertEqual(result, expectedResult)
+            XCTAssertEqual(calls, expectedCalls)
+        }
+    }
+
+    func testNativeTapPermissionFailureFallsBackWithoutClearingEnabledIntent() throws {
+        guard #available(macOS 14.4, *) else { throw XCTSkip("Process Tap requires macOS 14.4") }
+        let suite = "RoutingWakeRecoveryTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "eqWasEnabled")
+        let denied = OSStatus(0x7065_726D)
+        var tapAttempts = 0
+        let engine = ProcessTapEngine(deviceUIDProvider: { _ in "test-output" }, createTap: { _, tapID in
+            XCTAssertEqual(tapID, kAudioObjectUnknown)
+            tapAttempts += 1
+            return denied
+        })
+        var attempts: [String] = []
+        var activeBackend: ActiveAudioRoutingBackend = .none
+        var processingPrepared = false
+        let result = AudioRoutingStartPolicy.start(
+            preference: .automatic,
+            persistEnabledStateOnFailure: true,
+            native: { persistFailure in
+                attempts.append("native")
+                let start = engine.start(outputDeviceID: 1) { _, _ in processingPrepared = true }
+                guard case let .failure(error) = start else {
+                    XCTFail("Expected permission failure")
+                    return true
+                }
+                XCTAssertEqual(error, .createTap(denied))
+                engine.stop()
+                if persistFailure { defaults.set(false, forKey: "eqWasEnabled") }
+                return false
+            },
+            blackHole: { _ in
+                attempts.append("blackHole")
+                XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+                activeBackend = .blackHole
+                return true
+            },
+            onFallback: { attempts.append("fallback") }
+        )
+        engine.stop()
+        XCTAssertTrue(result)
+        XCTAssertEqual(attempts, ["native", "fallback", "blackHole"])
+        XCTAssertEqual(activeBackend, .blackHole)
+        XCTAssertEqual(tapAttempts, 1)
+        XCTAssertFalse(processingPrepared)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+    }
+
     private final class Gate {
         let entered: XCTestExpectation
         private var continuation: CheckedContinuation<Void, Never>?

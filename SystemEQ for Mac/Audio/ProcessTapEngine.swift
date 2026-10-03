@@ -74,7 +74,7 @@ final class ProcessTapEngine {
         let bufferFrames: UInt32
     }
 
-    enum StartError: Error {
+    enum StartError: Error, Equatable {
         case deviceUID
         case createTap(OSStatus)
         case createAggregate(OSStatus)
@@ -84,6 +84,8 @@ final class ProcessTapEngine {
     }
 
     private let processor: CoreAudioEngine
+    private let createTap: (CATapDescription, inout AudioObjectID) -> OSStatus
+    private let deviceUIDProvider: ((AudioDeviceID) -> String?)?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
@@ -95,8 +97,16 @@ final class ProcessTapEngine {
     private let scratchCapacity = 4096
     var onSampleRateChange: (() -> Void)?
 
-    init(processor: CoreAudioEngine = .shared) {
+    init(
+        processor: CoreAudioEngine = .shared,
+        deviceUIDProvider: ((AudioDeviceID) -> String?)? = nil,
+        createTap: @escaping (CATapDescription, inout AudioObjectID) -> OSStatus = {
+            AudioHardwareCreateProcessTap($0, &$1)
+        }
+    ) {
         self.processor = processor
+        self.deviceUIDProvider = deviceUIDProvider
+        self.createTap = createTap
     }
 
     deinit {
@@ -112,7 +122,12 @@ final class ProcessTapEngine {
         stop()
         self.outputDeviceID = outputDeviceID
 
-        guard let deviceUID = stringProperty(outputDeviceID, selector: kAudioDevicePropertyDeviceUID) else {
+        let outputUID: String? = if let deviceUIDProvider {
+            deviceUIDProvider(outputDeviceID)
+        } else {
+            stringProperty(outputDeviceID, selector: kAudioDevicePropertyDeviceUID)
+        }
+        guard let deviceUID = outputUID else {
             return .failure(.deviceUID)
         }
 
@@ -124,7 +139,7 @@ final class ProcessTapEngine {
         description.isPrivate = true
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
-        var status = AudioHardwareCreateProcessTap(description, &newTapID)
+        var status = createTap(description, &newTapID)
         guard status == noErr, newTapID != kAudioObjectUnknown else {
             return .failure(.createTap(status))
         }

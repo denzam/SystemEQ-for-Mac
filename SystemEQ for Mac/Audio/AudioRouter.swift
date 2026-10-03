@@ -213,6 +213,27 @@ enum BlackHoleVolumeChangePolicy {
     }
 }
 
+enum AudioRoutingStartPolicy {
+    static func start(
+        preference: AudioRoutingBackendPreference,
+        persistEnabledStateOnFailure: Bool,
+        native: (Bool) -> Bool,
+        blackHole: (Bool) -> Bool,
+        onFallback: () -> Void
+    ) -> Bool {
+        switch preference {
+        case .native:
+            return native(persistEnabledStateOnFailure)
+        case .blackHole:
+            return blackHole(persistEnabledStateOnFailure)
+        case .automatic:
+            if native(false) { return true }
+            onFallback()
+            return blackHole(persistEnabledStateOnFailure)
+        }
+    }
+}
+
 private struct AudioPropertyListenerRegistration {
     let deviceID: AudioDeviceID
     let address: AudioObjectPropertyAddress
@@ -701,27 +722,21 @@ public final class AudioRouter: ObservableObject {
 
         stopActiveBackendForRestart()
 
-        switch backendPreference {
-        case .native:
-            return startNativeRouting(
+        return AudioRoutingStartPolicy.start(
+            preference: backendPreference,
+            persistEnabledStateOnFailure: persistEnabledStateOnFailure,
+            native: { persistFailure in self.startNativeRouting(
                 output: physicalOutput,
-                persistEnabledStateOnFailure: persistEnabledStateOnFailure
-            )
-        case .blackHole:
-            return startBlackHoleRouting(
+                persistEnabledStateOnFailure: persistFailure
+            ) },
+            blackHole: { persistFailure in self.startBlackHoleRouting(
                 output: physicalOutput,
-                persistEnabledStateOnFailure: persistEnabledStateOnFailure
-            )
-        case .automatic:
-            if startNativeRouting(output: physicalOutput, persistEnabledStateOnFailure: false) {
-                return true
+                persistEnabledStateOnFailure: persistFailure
+            ) },
+            onFallback: {
+                DiagnosticEventStore.shared.record("routing.native.fallback", details: ["reason": "startFailed"])
             }
-            DiagnosticEventStore.shared.record("routing.native.fallback", details: ["reason": "startFailed"])
-            return startBlackHoleRouting(
-                output: physicalOutput,
-                persistEnabledStateOnFailure: persistEnabledStateOnFailure
-            )
-        }
+        )
     }
 
     private func startNativeRouting(
