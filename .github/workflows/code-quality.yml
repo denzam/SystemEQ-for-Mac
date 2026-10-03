@@ -89,6 +89,9 @@ jobs:
       
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Verify CPU measurement and IPC lifecycle
+        run: python3 Scripts/test_runtime_tools.py
       
       - name: Verify Unique Database Resource
         run: |
