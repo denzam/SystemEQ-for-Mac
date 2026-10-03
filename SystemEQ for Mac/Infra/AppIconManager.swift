@@ -15,9 +15,24 @@ public final class AppIconManager: ObservableObject {
     public static let shared = AppIconManager()
 
     private var cancellables = Set<AnyCancellable>()
+    private let imageProvider: (String) -> NSImage?
+    private let iconSetter: (NSImage?) -> Void
 
-    private init() {
-        bindLanguageChanges()
+    private convenience init() {
+        self.init(imageProvider: { name in
+            NSImage(named: NSImage.Name(name)) ?? Bundle(for: AppIconManager.self)
+                .image(forResource: NSImage.Name(name))
+        }, iconSetter: { NSApp.applicationIconImage = $0 })
+    }
+
+    init(
+        imageProvider: @escaping (String) -> NSImage?,
+        iconSetter: @escaping (NSImage?) -> Void,
+        observesLanguageChanges: Bool = true
+    ) {
+        self.imageProvider = imageProvider
+        self.iconSetter = iconSetter
+        if observesLanguageChanges { bindLanguageChanges() }
     }
 
     /// Підписка на зміну мови для автоматичного оновлення іконки Dock
@@ -33,19 +48,21 @@ public final class AppIconManager: ObservableObject {
 
     /// Застосовує іконку обраної мови до Dock (NSApp.applicationIconImage)
     public func applyIcon(for language: AppLanguage) {
-        guard !ProcessInfo.processInfo.environment.keys.contains("XCTestConfigurationFilePath") else { return }
-
         if let image = icon(for: language) {
-            NSApp.applicationIconImage = image
+            iconSetter(image)
             dlog("🎨 Applied Dock icon for language: \(language.displayName)", category: .general)
         } else {
-            NSApp.applicationIconImage = nil
+            iconSetter(nil)
             dlog("🎨 Reset Dock icon to default for language: \(language.displayName)", category: .general)
         }
     }
 
     /// Повертає NSImage для вказаної мови
     public func icon(for language: AppLanguage) -> NSImage? {
+        localizedIcon(for: language) ?? imageProvider(NSImage.applicationIconName)
+    }
+
+    func localizedIcon(for language: AppLanguage) -> NSImage? {
         let name = switch language {
         case .english:
             "AppIcon_EN"
@@ -55,18 +72,6 @@ public final class AppIconManager: ObservableObject {
             "AppIcon_UK"
         }
 
-        // Спершу шукаємо в Asset Catalog
-        if let image = NSImage(named: NSImage.Name(name)) {
-            return image
-        }
-
-        // Перевіряємо бандл класу (корисно для тестів та кастомних середовищ)
-        let bundle = Bundle(for: Self.self)
-        if let image = bundle.image(forResource: NSImage.Name(name)) {
-            return image
-        }
-
-        // Fallback до стандартної іконки програми
-        return NSImage(named: NSImage.applicationIconName)
+        return imageProvider(name)
     }
 }

@@ -11,23 +11,26 @@ supersampled macOS squircle mask, and exported in Retina and standard resolution
 
 import os
 import json
+import argparse
+from pathlib import Path
+import tempfile
 from PIL import Image, ImageDraw, ImageFilter
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOCS_DIR = os.path.join(PROJECT_ROOT, "Docs")
+SOURCE_DIR = os.path.join(PROJECT_ROOT, "Scripts", "icon-sources")
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "SystemEQ for Mac", "Assets.xcassets")
 
 SOURCES = {
     "uk": {
-        "file": os.path.join(DOCS_DIR, "Immagine ChatGPT 28 set 2026, 21_14_55.png"),
+        "file": os.path.join(SOURCE_DIR, "uk.png"),
         "crop": (12, 8, 12 + 1228, 8 + 1228),
     },
     "it": {
-        "file": os.path.join(DOCS_DIR, "Immagine ChatGPT 28 set 2026, 21_16_19.png"),
+        "file": os.path.join(SOURCE_DIR, "it.png"),
         "crop": (12, 7, 12 + 1228, 7 + 1228),
     },
     "en": {
-        "file": os.path.join(DOCS_DIR, "Immagine ChatGPT 28 set 2026, 21_20_03.png"),
+        "file": os.path.join(SOURCE_DIR, "en.png"),
         "crop": (12, 8, 12 + 1228, 8 + 1228),
     }
 }
@@ -143,7 +146,7 @@ def generate_imageset(master_img: Image.Image, out_dir: str, prefix: str):
         json.dump(contents, f, indent=2)
     print(f"  ✓ {out_dir} generated")
 
-def main():
+def generate_all(output_dir):
     print("🎨 Processing icons for EN, IT, UK...")
     masters = {}
     for lang, cfg in SOURCES.items():
@@ -152,16 +155,38 @@ def main():
 
     # 1. Update AppIcon.appiconset with English (default)
     print("\n📦 Updating AppIcon.appiconset (Default / EN)...")
-    appiconset_dir = os.path.join(ASSETS_DIR, "AppIcon.appiconset")
+    appiconset_dir = os.path.join(output_dir, "AppIcon.appiconset")
     generate_appiconset(masters["en"], appiconset_dir)
 
     # 2. Update language-specific imagesets
     for lang in ["en", "it", "uk"]:
         print(f"\n📦 Updating AppIcon_{lang.upper()}.imageset...")
-        imageset_dir = os.path.join(ASSETS_DIR, f"AppIcon_{lang.upper()}.imageset")
+        imageset_dir = os.path.join(output_dir, f"AppIcon_{lang.upper()}.imageset")
         generate_imageset(masters[lang], imageset_dir, f"icon_{lang}")
 
     print("\n✅ All icons successfully created and placed in Assets.xcassets!")
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--output-dir", default=ASSETS_DIR)
+    arguments = parser.parse_args()
+    if arguments.check:
+        with tempfile.TemporaryDirectory() as directory:
+            generate_all(directory)
+            for generated in Path(directory).rglob("*"):
+                if not generated.is_file():
+                    continue
+                expected = Path(arguments.output_dir) / generated.relative_to(directory)
+                if generated.suffix == ".png":
+                    with Image.open(generated) as actual_image, Image.open(expected) as expected_image:
+                        if actual_image.size != expected_image.size or actual_image.convert("RGBA").tobytes() != expected_image.convert("RGBA").tobytes():
+                            raise SystemExit(f"Icon differs: {expected}")
+                elif json.loads(generated.read_text()) != json.loads(expected.read_text()):
+                    raise SystemExit(f"Asset metadata differs: {expected}")
+        print("All committed language icons match their sources.")
+    else:
+        generate_all(arguments.output_dir)
 
 if __name__ == "__main__":
     main()
