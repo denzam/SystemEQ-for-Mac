@@ -104,12 +104,47 @@ final class ProjectMHelperClient: ObservableObject {
     private var readSource: DispatchSourceRead?
 
     final class ResponseBuffer {
-        var data = Data()
+        private(set) var data = Data()
+        private let maximumBytes: Int
+        private var scannedByteCount = 0
+
+        init(maximumBytes: Int = 4 * 1024 * 1024) {
+            precondition(maximumBytes > 0)
+            self.maximumBytes = maximumBytes
+        }
+
+        func append(_ chunk: Data) -> Bool {
+            guard chunk.count <= maximumBytes - data.count else {
+                data.removeAll(keepingCapacity: false)
+                scannedByteCount = 0
+                return false
+            }
+            data.append(chunk)
+            return true
+        }
+
+        func receive(_ chunk: Data, onLine: (Data) -> Void) -> Bool {
+            var offset = chunk.startIndex
+            while offset < chunk.endIndex {
+                let end = chunk[offset...].firstIndex(of: 0x0A).map { $0 + 1 } ?? chunk.endIndex
+                guard append(Data(chunk[offset..<end])) else { return false }
+                while let line = nextLine() {
+                    onLine(line)
+                }
+                offset = end
+            }
+            return true
+        }
 
         func nextLine() -> Data? {
-            guard let newline = data.firstIndex(of: 0x0A) else { return nil }
+            let unscanned = data[(data.startIndex + scannedByteCount)...]
+            guard let newline = unscanned.firstIndex(of: 0x0A) else {
+                scannedByteCount = data.count
+                return nil
+            }
             let line = Data(data[data.startIndex..<newline])
             data.removeSubrange(data.startIndex...newline)
+            scannedByteCount = 0
             return line
         }
     }
@@ -119,7 +154,7 @@ final class ProjectMHelperClient: ObservableObject {
         nonisolated(unsafe) var foundPath = false
     }
 
-    private let ipcQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)
+    private let ipcQueue: DispatchQueue
     /// Окрема черга для читання відповідей: інакше безперервний потік аудіо-фреймів на ipcQueue
     /// не дає read-handler'у слот, буфер сокета переповнюється і великий LIST (~1 МБ) губиться.
     private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
@@ -218,23 +253,14 @@ final class ProjectMHelperClient: ObservableObject {
     }()
     private var audioSendTimer: DispatchSourceTimer?
 
-    // Pre-allocated send buffer (only touched from ipcQueue inside audioSendTimer handler)
-    private var _sendBuffer: UnsafeMutablePointer<UInt8>?
-    private var _sendBufferCapacity: Int = 0
-
-    init() {
+    init(ipcQueue: DispatchQueue = DispatchQueue(label: "com.systemeq.projectm.ipc", qos: .userInitiated)) {
+        self.ipcQueue = ipcQueue
         _audioRingBuffer = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
         _audioRingBuffer.initialize(repeating: 0, count: 8192)
     }
 
     deinit {
-        if let timer = audioSendTimer {
-            timer.cancel()
-            audioSendTimer = nil
-        } else {
-            _sendBuffer?.deallocate()
-            _sendBuffer = nil
-        }
+        audioSendTimer?.cancel()
         _audioRingBuffer.deallocate()
         _audioWriteIdx.deallocate()
         _audioReadIdx.deallocate()
@@ -321,8 +347,7 @@ final class ProjectMHelperClient: ObservableObject {
     private func cleanupAfterTermination() {
         helperGeneration &+= 1
         // Stop audio sending
-        audioSendTimer?.cancel()
-        audioSendTimer = nil
+        stopAudioSending()
 
         // Stop status polling
         statusUpdateTimer?.invalidate()
@@ -343,8 +368,7 @@ final class ProjectMHelperClient: ObservableObject {
         helperGeneration &+= 1
 
         // Stop audio sending
-        audioSendTimer?.cancel()
-        audioSendTimer = nil
+        stopAudioSending()
 
         // Stop status polling
         statusUpdateTimer?.invalidate()
@@ -406,7 +430,7 @@ final class ProjectMHelperClient: ObservableObject {
 
     // MARK: - Socket Connection
 
-    private func disconnectSocket() {
+    func disconnectSocket() {
         let source = readSource
         readSource = nil
         let socket = invalidateSocket()
@@ -531,7 +555,7 @@ final class ProjectMHelperClient: ObservableObject {
         }
     }
 
-    private func startReadingResponses(socket: Int32, generation: UInt64) {
+    func startReadingResponses(socket: Int32, generation: UInt64) {
         let accumulator = ResponseBuffer()
         let source = DispatchSource.makeReadSource(fileDescriptor: socket, queue: readQueue)
         readSource = source
@@ -550,6 +574,7 @@ final class ProjectMHelperClient: ObservableObject {
     private func readResponse(socket: Int32, generation: UInt64, accumulator: ResponseBuffer) {
         guard socketIsCurrent(socket, generation: generation) else { return }
         var connectionClosed = false
+        var closeReason = "peerClosed"
         defer {
             if connectionClosed {
                 Task { @MainActor [weak self] in
@@ -557,7 +582,7 @@ final class ProjectMHelperClient: ObservableObject {
                           self.socketIsCurrent(socket, generation: generation) else { return }
                     DiagnosticEventStore.shared.record(
                         "visualizer.ipc.disconnected",
-                        details: ["reason": "peerClosed"]
+                        details: ["reason": closeReason]
                     )
                     self.disconnectSocket()
                 }
@@ -579,17 +604,16 @@ final class ProjectMHelperClient: ObservableObject {
                 connectionClosed = true
                 break
             }
-            accumulator.data.append(contentsOf: buffer[0..<bytesRead])
-            if bytesRead < buffer.count { break }
-        }
-
-        guard !accumulator.data.isEmpty else { return }
-
-        // Обробляємо лише завершені рядки (до \n); хвіст лишаємо в буфері.
-        while let lineData = accumulator.nextLine() {
-            if let line = String(data: lineData, encoding: .utf8) {
-                processLine(line, socket: socket, generation: generation)
+            guard accumulator.receive(Data(buffer[0..<bytesRead]), onLine: { lineData in
+                if let line = String(data: lineData, encoding: .utf8) {
+                    processLine(line, socket: socket, generation: generation)
+                }
+            }) else {
+                connectionClosed = true
+                closeReason = "responseTooLarge"
+                break
             }
+            if bytesRead < buffer.count { break }
         }
     }
 
@@ -736,31 +760,28 @@ final class ProjectMHelperClient: ObservableObject {
         CoreAudioEngine.shared.visualizerCallback = nil
     }
 
-    private func startAudioSending() {
+    func stopAudioSending() {
         audioSendTimer?.cancel()
         audioSendTimer = nil
+    }
+
+    func startAudioSending() {
+        stopAudioSending()
 
         // Pre-allocate reusable send buffer: 1 byte marker + 4 bytes length + up to 4096 floats
         let maxFrameBytes = 1 + 4 + 4096 * MemoryLayout<Float>.size
         let sendBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: maxFrameBytes)
-        _sendBuffer = sendBuffer
-        _sendBufferCapacity = maxFrameBytes
 
         audioSendTimer = DispatchSource.makeTimerSource(queue: ipcQueue)
         audioSendTimer?.schedule(deadline: .now(), repeating: .milliseconds(16)) // ~60 Hz
 
         audioSendTimer?.setEventHandler { [weak self] in
-            self?.sendAudioBuffer()
+            self?.sendAudioBuffer(sendBuffer: sendBuffer, capacity: maxFrameBytes)
         }
 
         // Deallocate send buffer on ipcQueue after the timer fully stops — guarantees the handler isn't mid-flight.
-        audioSendTimer?.setCancelHandler { [weak self] in
+        audioSendTimer?.setCancelHandler {
             sendBuffer.deallocate()
-            guard let self else { return }
-            if self._sendBuffer == sendBuffer {
-                self._sendBuffer = nil
-                self._sendBufferCapacity = 0
-            }
         }
 
         audioSendTimer?.resume()
@@ -769,10 +790,9 @@ final class ProjectMHelperClient: ObservableObject {
     /// Binary audio frame format (zero-copy, no base64):
     ///   [0x00 marker][UInt32 LE length in bytes][raw Float samples]
     /// Marker 0x00 cannot appear in UTF-8 text commands so it is unambiguous at the stream level.
-    private func sendAudioBuffer() {
+    private func sendAudioBuffer(sendBuffer sendBuf: UnsafeMutablePointer<UInt8>, capacity: Int) {
         guard let connection = socketLease() else { return }
         defer { close(connection.socket) }
-        guard let sendBuf = _sendBuffer else { return }
 
         let write = seq_atomic_int32_load(_audioWriteIdx)
         let read = seq_atomic_int32_load(_audioReadIdx)
@@ -784,7 +804,7 @@ final class ProjectMHelperClient: ObservableObject {
         let mask = Int32(audioRingCapacity - 1)
         let payloadBytes = toRead * MemoryLayout<Float>.size
         let totalBytes = 1 + 4 + payloadBytes
-        guard totalBytes <= _sendBufferCapacity else { return }
+        guard totalBytes <= capacity else { return }
 
         // Header
         sendBuf[0] = 0x00

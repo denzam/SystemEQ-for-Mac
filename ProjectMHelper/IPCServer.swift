@@ -46,6 +46,30 @@ class IPCServer {
     private var _clientSocket: Int32 = -1
     private var _clientGeneration: UInt64 = 0
 
+    func replaceClient(with socket: Int32) -> UInt64 {
+        clientLock.lock()
+        defer { clientLock.unlock() }
+        if _clientSocket >= 0 { shutdown(_clientSocket, SHUT_RDWR) }
+        _clientSocket = socket
+        _clientGeneration &+= 1
+        return _clientGeneration
+    }
+
+    @discardableResult
+    func withClientLease(socket: Int32, generation: UInt64, perform action: (Int32) -> Void) -> Bool {
+        clientLock.lock()
+        guard _clientSocket == socket, _clientGeneration == generation else {
+            clientLock.unlock()
+            return false
+        }
+        let lease = dup(socket)
+        clientLock.unlock()
+        guard lease >= 0 else { return false }
+        defer { close(lease) }
+        action(lease)
+        return true
+    }
+
     private func clientIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
         clientLock.lock()
         defer { clientLock.unlock() }
@@ -72,14 +96,14 @@ class IPCServer {
         return true
     }
 
-    private func finishClient(socket: Int32, generation: UInt64) {
+    func finishClient(socket: Int32, generation: UInt64) {
         clientLock.lock()
         let isCurrent = _clientGeneration == generation && _clientSocket == socket
         if isCurrent {
             _clientSocket = -1
         }
-        clientLock.unlock()
         close(socket)
+        clientLock.unlock()
     }
 
     /// Aligned landing area for incoming audio payloads (max 16384 bytes, enforced
@@ -201,20 +225,17 @@ class IPCServer {
         let server = serverSocket
         serverSocket = -1
         serverGeneration &+= 1
+        if server >= 0 { shutdown(server, SHUT_RDWR) }
         stateLock.unlock()
 
         clientLock.lock()
         let client = _clientSocket
         _clientSocket = -1
         _clientGeneration &+= 1
-        clientLock.unlock()
         if client >= 0 {
             shutdown(client, SHUT_RDWR)
         }
-
-        if server >= 0 {
-            shutdown(server, SHUT_RDWR)
-        }
+        clientLock.unlock()
 
         unlink(socketPath)
     }
@@ -234,7 +255,11 @@ class IPCServer {
     }
 
     private func acceptLoop(socket: Int32, generation: UInt64) {
-        defer { close(socket) }
+        defer {
+            stateLock.lock()
+            close(socket)
+            stateLock.unlock()
+        }
         while serverIsCurrent(socket, generation: generation) {
             var clientAddr = sockaddr_un()
             var clientAddrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
@@ -274,15 +299,7 @@ class IPCServer {
             setsockopt(newClient, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
             // Replace previous client if any
-            clientLock.lock()
-            let previous = _clientSocket
-            _clientSocket = newClient
-            _clientGeneration &+= 1
-            let generation = _clientGeneration
-            clientLock.unlock()
-            if previous >= 0 {
-                shutdown(previous, SHUT_RDWR)
-            }
+            let generation = replaceClient(with: newClient)
 
             print("[IPCServer] Client connected")
 
@@ -537,26 +554,26 @@ class IPCServer {
         }
     }
 
-    private func writeResponse(_ message: String, socket: Int32, generation: UInt64) {
-        guard clientIsCurrent(socket, generation: generation) else { return }
-
+    func writeResponse(_ message: String, socket: Int32, generation: UInt64) {
         guard let data = (message + "\n").data(using: .utf8) else { return }
         // Повний запис у циклі: великий LIST (~1 МБ) не влазить у буфер сокета за один write,
         // а частковий запис обрізав би JSON і клієнт ніколи б не розпарсив відповідь.
-        data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var sent = 0
-            let total = raw.count
-            while sent < total {
-                guard clientIsCurrent(socket, generation: generation) else { return }
-                let n = write(socket, base.advanced(by: sent), total - sent)
-                if n > 0 {
-                    sent += n
-                } else if n < 0, errno == EINTR {
-                    continue
-                } else {
-                    shutdown(socket, SHUT_RDWR)
-                    break
+        withClientLease(socket: socket, generation: generation) { lease in
+            data.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                var sent = 0
+                let total = raw.count
+                while sent < total {
+                    guard clientIsCurrent(socket, generation: generation) else { return }
+                    let n = write(lease, base.advanced(by: sent), total - sent)
+                    if n > 0 {
+                        sent += n
+                    } else if n < 0, errno == EINTR {
+                        continue
+                    } else {
+                        shutdown(lease, SHUT_RDWR)
+                        break
+                    }
                 }
             }
         }
