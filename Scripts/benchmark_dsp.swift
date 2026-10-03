@@ -8,6 +8,7 @@ struct DSPBenchmark {
     struct Measurement: Encodable {
         let workload: String
         let activeBands: Int
+        let roomBands: Int
         let bufferFrames: Int
         let trial: Int
         let threadCPUPercentOfOneCore: Double
@@ -22,7 +23,7 @@ struct DSPBenchmark {
     }
 
     struct Report: Encodable {
-        let schemaVersion = 1
+        let schemaVersion = 2
         let date: Date
         let operatingSystem: String
         let processorCount: Int
@@ -40,23 +41,28 @@ struct DSPBenchmark {
         case tenBands = "10-active-peaks"
         case thirtyOneBands = "31-active-peaks"
         case limiter = "31-active-peaks-limiter"
+        case mixedTenBands = "10-mixed-shelf-peak"
+        case mixedTenWithRoom = "10-mixed-shelf-peak-room"
+        case thirtyOneWithRoom = "31-active-peaks-room"
 
         var frequencies: [Float] {
             switch self {
             case .copyOnly,
                  .flat: []
-            case .tenBands: AutoEQConstants.tenBandFrequencies
+            case .tenBands, .mixedTenBands, .mixedTenWithRoom: AutoEQConstants.tenBandFrequencies
             case .limiter,
-                 .thirtyOneBands: AutoEQConstants.thirtyOneBandFrequencies
+                 .thirtyOneBands, .thirtyOneWithRoom: AutoEQConstants.thirtyOneBandFrequencies
             }
         }
 
         var bands: [ParametricBand] {
-            frequencies.enumerated().map { index, frequency in
+            let mixed = self == .mixedTenBands || self == .mixedTenWithRoom
+            return frequencies.enumerated().map { index, frequency in
                 ParametricBand(
                     frequency: frequency,
                     gain: index.isMultiple(of: 2) ? 3 : -3,
-                    q: self == .tenBands ? 1.4 : 2
+                    q: frequencies.count == 10 ? 1.4 : 2,
+                    filterType: mixed && index == 0 ? .lowShelf : (mixed && index == frequencies.count - 1 ? .highShelf : .peak)
                 )
             }
         }
@@ -117,7 +123,7 @@ struct DSPBenchmark {
             scope: "Offline synthetic stereo workload using production BiquadFilterVDSP. CPU is thread time / " +
                 "simulated audio duration, including input copies and timing overhead. Wall percentiles cover " +
                 "only processStereo plus clock overhead. No pacing, routing, meter, UI or ProjectM. " +
-                "Peak-only workloads do not reproduce the app's mixed shelf/peak 10-band policy. " +
+                "Mixed 10-band workloads include low/high shelves; room workloads include three notch filters. " +
                 "These are processing costs, not end-to-end audio latency or whole-app CPU.",
             measurements: measurements
         )
@@ -144,6 +150,17 @@ struct DSPBenchmark {
             outputBoost: workload == .limiter ? 12 : 0,
             sampleRate: Float(sampleRate)
         )
+        let room: BiquadFilterVDSP?
+        if workload == .mixedTenWithRoom || workload == .thirtyOneWithRoom {
+            let roomFilter = BiquadFilterVDSP(sampleRate: Float(sampleRate))
+            roomFilter.configure(
+                bands: [125, 250, 500].map { ParametricBand(frequency: Float($0), gain: -6, q: 8) },
+                preamp: 0, outputBoost: 0, sampleRate: Float(sampleRate)
+            )
+            room = roomFilter
+        } else {
+            room = nil
+        }
         let sourceCount = frameCount * 64
         let source = UnsafeMutablePointer<Float>.allocate(capacity: sourceCount)
         let left = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
@@ -166,6 +183,7 @@ struct DSPBenchmark {
             memcpy(right, source.advanced(by: offset), byteCount)
             if workload != .copyOnly {
                 filter.processStereo(left, right, frameCount: frameCount)
+                room?.processStereo(left, right, frameCount: frameCount)
             }
         }
 
@@ -178,7 +196,10 @@ struct DSPBenchmark {
             memcpy(left, source.advanced(by: offset), byteCount)
             memcpy(right, source.advanced(by: offset), byteCount)
             let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-            let limiterGain = workload == .copyOnly ? 1 : filter.processStereo(left, right, frameCount: frameCount)
+            var limiterGain = workload == .copyOnly ? 1 : filter.processStereo(left, right, frameCount: frameCount)
+            if let room {
+                limiterGain = min(limiterGain, room.processStereo(left, right, frameCount: frameCount))
+            }
             durations[index] = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start
             minimumLimiterGain = min(minimumLimiterGain, limiterGain)
             checksum += Double(left[0]) + Double(right[frameCount - 1])
@@ -200,6 +221,7 @@ struct DSPBenchmark {
         return Measurement(
             workload: workload.rawValue,
             activeBands: bands.count,
+            roomBands: room == nil ? 0 : 3,
             bufferFrames: frameCount,
             trial: trial,
             threadCPUPercentOfOneCore: Double(cpuNanoseconds) / 1_000_000_000 /
