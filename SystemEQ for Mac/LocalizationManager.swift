@@ -592,6 +592,10 @@ public enum LocalizedString: String, CaseIterable {
     // Accessibility
     case equalizerCurve
     case equalizerFlat
+    case nativeDriverDesc
+    case nativePermissionDesc
+    case nativePermissionInstructions
+    case nativeUnavailable
 }
 
 // MARK: - Localization Data Structure

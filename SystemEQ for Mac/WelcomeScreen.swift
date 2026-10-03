@@ -3,6 +3,20 @@ import AVFoundation
 import Combine
 import SwiftUI
 
+nonisolated enum WelcomeAudioBackend: Equatable {
+    case native
+    case blackHole
+    case nativeUnavailable
+
+    static func resolve(preference: AudioRoutingBackendPreference, nativeAvailable: Bool) -> Self {
+        switch preference {
+        case .automatic: nativeAvailable ? .native : .blackHole
+        case .native: nativeAvailable ? .native : .nativeUnavailable
+        case .blackHole: .blackHole
+        }
+    }
+}
+
 public struct WelcomeScreen: View {
     @Binding var isPresented: Bool
     @State private var currentTab = 0
@@ -12,6 +26,16 @@ public struct WelcomeScreen: View {
 
     public init(isPresented: Binding<Bool>) {
         self._isPresented = isPresented
+    }
+
+    private var setupBackend: WelcomeAudioBackend {
+        if audioRouter.backendPreference == .automatic, audioRouter.activeBackend == .blackHole { return .blackHole }
+        let nativeAvailable = if #available(macOS 14.4, *) {
+            true
+        } else {
+            false
+        }
+        return WelcomeAudioBackend.resolve(preference: audioRouter.backendPreference, nativeAvailable: nativeAvailable)
     }
 
     public var body: some View {
@@ -93,6 +117,8 @@ public struct WelcomeScreen: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             updateAudioPermission()
         }
+        .onChange(of: audioRouter.backendPreference) { _ in updateAudioPermission() }
+        .onChange(of: audioRouter.activeBackend) { _ in updateAudioPermission() }
     }
 
     // MARK: - Slides
@@ -186,16 +212,20 @@ public struct WelcomeScreen: View {
                 .foregroundColor(.orange)
                 .padding(.top, 40)
 
-            Text(localization.localized(.driverTitle))
+            Text(localization.localized(setupBackend == .blackHole ? .driverTitle : .audioBackendNative))
                 .font(.title)
                 .bold()
 
             VStack(spacing: 16) {
-                Text(localization.localized(.driverDesc))
+                Text(localization.localized(setupBackend == .blackHole ? .driverDesc : .nativeDriverDesc))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
 
-                if audioRouter.blackHoleDetected {
+                if setupBackend == .nativeUnavailable {
+                    Text(localization.localized(.nativeUnavailable))
+                        .multilineTextAlignment(.center)
+                        .padding()
+                } else if setupBackend == .blackHole, audioRouter.blackHoleDetected {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -205,7 +235,7 @@ public struct WelcomeScreen: View {
                     .padding()
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(8)
-                } else if #available(macOS 14.4, *) {
+                } else if setupBackend == .native {
                     VStack(spacing: 8) {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
@@ -213,7 +243,7 @@ public struct WelcomeScreen: View {
                             Text(localization.localized(.audioBackendNative))
                                 .fontWeight(.medium)
                         }
-                        Text(localization.localized(.audioBackendDesc))
+                        Text(localization.localized(.nativeDriverDesc))
                             .font(AppTypography.label)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -268,12 +298,15 @@ public struct WelcomeScreen: View {
                 .bold()
 
             VStack(spacing: 16) {
-                Text(localization.localized(.privacyDesc))
+                Text(localization.localized(setupBackend == .blackHole ? .privacyDesc : .nativePermissionDesc))
                     .multilineTextAlignment(.center)
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Label(localization.localized(.privacyPoint1), systemImage: "cable.connector")
+                    Label(
+                        localization.localized(setupBackend == .blackHole ? .privacyPoint1 : .nativeDriverDesc),
+                        systemImage: "cable.connector"
+                    )
                     Label(localization.localized(.privacyPoint2), systemImage: "music.note")
                     Label(localization.localized(.privacyPoint3), systemImage: "mic.slash.fill")
                         .foregroundColor(.blue)
@@ -283,7 +316,19 @@ public struct WelcomeScreen: View {
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(8)
 
-                if hasAudioPermission {
+                if setupBackend != .blackHole {
+                    Text(localization
+                        .localized(setupBackend == .native ? .nativePermissionInstructions : .nativeUnavailable))
+                        .font(AppTypography.labelSmall)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    if setupBackend == .native {
+                        Button(localization.localized(.openSystemSettings)) {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else if hasAudioPermission {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -315,10 +360,12 @@ public struct WelcomeScreen: View {
     }
 
     private func updateAudioPermission() {
-        hasAudioPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        hasAudioPermission = setupBackend == .blackHole && AVCaptureDevice
+            .authorizationStatus(for: .audio) == .authorized
     }
 
     private func requestAudioPermission() {
+        guard setupBackend == .blackHole else { return }
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .notDetermined:

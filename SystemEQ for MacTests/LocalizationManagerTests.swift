@@ -9,6 +9,15 @@
 import XCTest
 
 final class LocalizationManagerTests: XCTestCase {
+    func testOnboardingFollowsBackendPreferenceAndAvailability() {
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .automatic, nativeAvailable: true), .native)
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .automatic, nativeAvailable: false), .blackHole)
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .native, nativeAvailable: true), .native)
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .native, nativeAvailable: false), .nativeUnavailable)
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .blackHole, nativeAvailable: true), .blackHole)
+        XCTAssertEqual(WelcomeAudioBackend.resolve(preference: .blackHole, nativeAvailable: false), .blackHole)
+    }
+
     func testAllTranslationsAreComplete() {
         let missing = LocalizationManager.shared.validateTranslations()
         XCTAssertTrue(
