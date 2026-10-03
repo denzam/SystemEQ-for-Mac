@@ -9,6 +9,118 @@
 import XCTest
 
 final class BiquadFilterTests: XCTestCase {
+    func testRoomAndEQCascadeProducesExpectedAudioAcrossSampleRates() {
+        let engine = CoreAudioEngine.shared
+        defer {
+            engine.setEnabled(false)
+            engine.clearRoomNotchFilters()
+            engine.clearEQ()
+            engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 0, bufferFrames: 256)
+        }
+        for rate in [44100.0, 48000.0, 96000.0] {
+            for (band, frequency) in [(2, 125.0), (5, 1000.0), (8, 8000.0)] {
+                engine.prepareProcessTap(sampleRate: rate, outputDeviceID: 0, bufferFrames: 256)
+                var gains = [Float](repeating: 0, count: 10)
+                gains[band] = 3
+                engine.applyFixedBandEQ(gains, preamp: 0, outputBoost: 0)
+                engine.applyRoomNotchFilters([(frequency: Float(frequency), gain: -6, q: 8)])
+                engine.setEnabled(true)
+                let expectedEQGain = band == 8 ? 1.5 : 3.0
+                XCTAssertEqual(
+                    measuredGain(engine: engine, frequency: frequency, rate: rate),
+                    expectedEQGain - 6,
+                    accuracy: 0.12
+                )
+                engine.clearRoomNotchFilters()
+                XCTAssertEqual(
+                    measuredGain(engine: engine, frequency: frequency, rate: rate),
+                    expectedEQGain,
+                    accuracy: 0.12
+                )
+                engine.setEnabled(false)
+                XCTAssertEqual(measuredGain(engine: engine, frequency: frequency, rate: rate), 0, accuracy: 0.001)
+            }
+        }
+    }
+
+    private func measuredGain(engine: CoreAudioEngine, frequency: Double, rate: Double) -> Double {
+        var inputEnergy = 0.0
+        var outputEnergy = 0.0
+        for block in 0..<96 {
+            let source = (0..<256).map { index in
+                Float(sin(2 * Double.pi * frequency * Double(block * 256 + index) / rate) * 0.01)
+            }
+            var left = source
+            var right = source
+            left.withUnsafeMutableBufferPointer { l in
+                right.withUnsafeMutableBufferPointer { r in
+                    guard let left = l.baseAddress, let right = r.baseAddress else {
+                        XCTFail("Missing audio buffer")
+                        return
+                    }
+                    engine.processStereoInPlace(left: left, right: right, frameCount: 256)
+                }
+            }
+            XCTAssertTrue(left.allSatisfy(\.isFinite))
+            XCTAssertEqual(left, right)
+            if block >= 32 {
+                inputEnergy += source.reduce(0) { $0 + Double($1) * Double($1) }
+                outputEnergy += left.reduce(0) { $0 + Double($1) * Double($1) }
+            }
+        }
+        return 10 * log10(outputEnergy / inputEnergy)
+    }
+
+    func testResamplerLayoutsAgreeAcrossBoundaryAndWraparound() {
+        for available in [0, 1, 2, 17, 65, 128] {
+            for requested in [0, 1, 16, 64] {
+                let planar = SPSCRingBuffer()
+                let interleaved = SPSCRingBuffer()
+                planar.allocate(capacityFrames: 256)
+                interleaved.allocate(capacityFrames: 256)
+                let poison = [Float](repeating: .nan, count: planar.capacity)
+                for ring in [planar, interleaved] {
+                    _ = ring.write(inL: poison, inR: poison, frameCount: poison.count)
+                    var discardedL = [Float](repeating: 0, count: poison.count)
+                    var discardedR = discardedL
+                    ring.readNonInterleaved(outL: &discardedL, outR: &discardedR, framesRequested: poison.count)
+                }
+                let padding = [Float](repeating: .nan, count: planar.capacity - 6)
+                for ring in [planar, interleaved] {
+                    _ = ring.write(inL: padding, inR: padding, frameCount: padding.count)
+                    var discardedL = [Float](repeating: 0, count: padding.count)
+                    var discardedR = discardedL
+                    ring.readNonInterleaved(outL: &discardedL, outR: &discardedR, framesRequested: padding.count)
+                }
+                let input = (0..<available).map { Float($0) * 0.001 }
+                for ring in [planar, interleaved] {
+                    _ = ring.write(inL: input, inR: input, frameCount: available)
+                }
+                var left = [Float](repeating: -999, count: max(1, requested))
+                var right = left
+                var stereo = [Float](repeating: -999, count: max(1, requested * 2))
+                planar.readNonInterleavedResampled(
+                    outL: &left,
+                    outR: &right,
+                    framesRequested: requested,
+                    targetFillFrames: 0
+                )
+                interleaved.readInterleavedResampled(outPtr: &stereo, framesRequested: requested, targetFillFrames: 0)
+                for index in 0..<requested {
+                    XCTAssertEqual(left[index], stereo[index * 2], accuracy: 0.000001)
+                    XCTAssertEqual(right[index], stereo[index * 2 + 1], accuracy: 0.000001)
+                    XCTAssertTrue(left[index].isFinite)
+                }
+                if requested == 0 {
+                    XCTAssertEqual(left[0], -999)
+                    XCTAssertEqual(stereo[0], -999)
+                } else if available == 0 {
+                    XCTAssertEqual(Array(left.prefix(requested)), [Float](repeating: 0, count: requested))
+                }
+            }
+        }
+    }
+
     // MARK: - Peak Filter Coefficient Tests
 
     func testPeakFilterCoefficients_zeroGain_producesUnityFilter() {

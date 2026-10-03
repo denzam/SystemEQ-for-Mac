@@ -42,6 +42,55 @@ struct OutputVolumeState: Equatable {
     }
 }
 
+@MainActor
+final class RoutingWakeRecovery {
+    private var task: Task<Void, Never>?
+    private var generation: UInt64 = 0
+    private(set) var shouldResume = false
+
+    var isPending: Bool {
+        task != nil
+    }
+
+    func cancel() {
+        generation &+= 1
+        task?.cancel()
+        task = nil
+        shouldResume = false
+    }
+
+    func suspend(isActive: Bool) -> Bool {
+        guard isActive || isPending || shouldResume else { return false }
+        cancel()
+        shouldResume = true
+        return true
+    }
+
+    @discardableResult
+    func resume(
+        wait: @escaping @MainActor () async throws -> Void,
+        refresh: @escaping @MainActor () async -> Void,
+        restart: @escaping @MainActor () -> Void
+    ) -> Task<Void, Never>? {
+        guard shouldResume else { return nil }
+        cancel()
+        let expectedGeneration = generation
+        let pending = Task { @MainActor [weak self] in
+            defer {
+                if self?.generation == expectedGeneration { self?.task = nil }
+            }
+            do { try await wait() } catch { return }
+            guard let self, self.generation == expectedGeneration, !Task.isCancelled else { return }
+            await refresh()
+            guard self.generation == expectedGeneration, !Task.isCancelled else { return }
+            self.task = nil
+            restart()
+        }
+        task = pending
+        return pending
+    }
+}
+
 enum RoutingRequestReason: String {
     case request
     case backendPreferenceChanged
@@ -229,8 +278,7 @@ public final class AudioRouter: ObservableObject {
     private var preferredOutputUID: String?
 
     /// Set when sleep interrupted an active routing session, so wake restores it.
-    private var wasRoutingBeforeSleep = false
-    private var wakeRestartTask: Task<Void, Never>?
+    private let wakeRecovery = RoutingWakeRecovery()
 
     /// Whether we are the reason the system default output is BlackHole — true even
     /// while the engine is stopped (between sleep and the wake restart, or after a
@@ -539,9 +587,7 @@ public final class AudioRouter: ObservableObject {
 
         updateStatus()
         if isRoutingOwned {
-            wakeRestartTask?.cancel()
-            wakeRestartTask = nil
-            wasRoutingBeforeSleep = false
+            wakeRecovery.cancel()
             enableEQRouting(forceRestart: true, reason: .outputSelected)
         }
     }
@@ -974,14 +1020,12 @@ public final class AudioRouter: ObservableObject {
         )
 
         // Drop any pending wake restart — routing is off on purpose now.
-        wakeRestartTask?.cancel()
-        wakeRestartTask = nil
+        wakeRecovery.cancel()
         removeBlackHoleVolumeListeners()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
             nativeEngine.stop()
         }
         processTapEngineStorage = nil
-        wasRoutingBeforeSleep = false
         activeInputUID = nil
         activeOutputUID = nil
         activeBackend = .none
@@ -1623,9 +1667,7 @@ public final class AudioRouter: ObservableObject {
             return
         }
 
-        wakeRestartTask?.cancel()
-        wakeRestartTask = nil
-        wasRoutingBeforeSleep = false
+        wakeRecovery.cancel()
         originalSystemOutputDevice = device
         UserDefaults.standard.set(device.uid, forKey: originalOutputUIDKey)
         preferredOutputUID = device.uid
@@ -1749,14 +1791,9 @@ public final class AudioRouter: ObservableObject {
         // from (e.g. the lid closed again inside the 2.5s post-wake wait). Cancel
         // it and treat this as "was routing" too, or the intent to resume gets
         // silently dropped and wake never restores audio.
-        let hadPendingWakeRestart = wakeRestartTask != nil
-        guard CoreAudioEngine.shared.isRunning || hadPendingWakeRestart else { return }
+        guard wakeRecovery.suspend(isActive: CoreAudioEngine.shared.isRunning) else { return }
 
         DiagnosticEventStore.shared.record("routing.sleep")
-
-        wakeRestartTask?.cancel()
-        wakeRestartTask = nil
-        wasRoutingBeforeSleep = true
 
         removeBlackHoleVolumeListeners()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
@@ -1769,21 +1806,17 @@ public final class AudioRouter: ObservableObject {
 
     @objc
     private func handleDidWake(_ notification: Notification) {
-        guard wasRoutingBeforeSleep else { return }
+        guard wakeRecovery.shouldResume else { return }
         DiagnosticEventStore.shared.record("routing.wake.scheduled")
-        wasRoutingBeforeSleep = false
-
-        wakeRestartTask?.cancel()
-        wakeRestartTask = Task { @MainActor in
-            // USB and Bluetooth outputs reappear a couple of seconds after wake,
-            // often with a different AudioDeviceID, so refresh before rebuilding.
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard !Task.isCancelled else { return }
-            await self.refreshDevices()
-            guard !Task.isCancelled else { return }
+        wakeRecovery.resume(wait: {
+            try await Task.sleep(nanoseconds: 2_500_000_000)
+        }, refresh: { [weak self] in
+            await self?.refreshDevices()
+        }, restart: { [weak self] in
+            guard let self else { return }
             dlog("Wake — restoring EQ routing", level: .info, category: .routing)
             self.enableEQRouting(forceRestart: true, reason: .wake)
-        }
+        })
     }
 
     // MARK: - Manual Setup Alert

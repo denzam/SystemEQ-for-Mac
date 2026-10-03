@@ -183,6 +183,8 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate var allocatedFrameCapacity: UInt32 = 0 // frames; input/output ABL завжди алокуються з одним maxFrames
     fileprivate var outputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var outputABL: UnsafeMutableAudioBufferListPointer?
+    fileprivate var outputScratchLeft: UnsafeMutablePointer<Float>?
+    fileprivate var outputScratchRight: UnsafeMutablePointer<Float>?
 
     fileprivate var renderFramesAccum: UInt64 = 0
 
@@ -1094,6 +1096,8 @@ public final class CoreAudioEngine: ObservableObject {
         allocateRingBuffer(capacityFrames: Int(effectiveMaxFrames) * 16, channels: self.channelCount)
         guard inputBufferList != nil,
               outputBufferList != nil,
+              outputScratchLeft != nil,
+              outputScratchRight != nil,
               ringBuffer.isAllocated else {
             recordSetupFailure("bufferAllocation")
             dlog("❌ Failed to allocate audio buffers", level: .error, category: .engine)
@@ -1517,6 +1521,11 @@ public final class CoreAudioEngine: ObservableObject {
             outputBufferList = nil
         }
 
+        outputScratchLeft?.deallocate()
+        outputScratchRight?.deallocate()
+        outputScratchLeft = nil
+        outputScratchRight = nil
+
         // Deallocate ring buffer (safe to call multiple times)
         ringBuffer.deallocate()
 
@@ -1571,6 +1580,10 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private func allocateOutputBuffer(maxFrames: UInt32, channels: UInt32) {
+        outputScratchLeft?.deallocate()
+        outputScratchRight?.deallocate()
+        outputScratchLeft = .allocate(capacity: Int(maxFrames) * 2)
+        outputScratchRight = .allocate(capacity: Int(maxFrames))
         if let abl = outputABL, let ablPtr = outputBufferList {
             for i in 0..<abl.count where abl[i].mData != nil {
                 free(abl[i].mData)
@@ -1903,6 +1916,101 @@ private final class AudioCallbackWindow: @unchecked Sendable {
 
 // MARK: - Render Callback
 
+nonisolated enum CoreAudioOutput {
+    static func provideFallback(
+        buffers: UnsafeMutableAudioBufferListPointer, capacity: Int,
+        left: UnsafeMutablePointer<Float>?, right: UnsafeMutablePointer<Float>?
+    ) -> OSStatus {
+        guard capacity > 0, capacity <= Int(UInt32.max) / (2 * MemoryLayout<Float>.stride) else {
+            return kAudioUnitErr_TooManyFramesToProcess
+        }
+        for index in buffers.indices where buffers[index].mData == nil {
+            let channels = Int(buffers[index].mNumberChannels)
+            let pointer: UnsafeMutablePointer<Float>?
+            if buffers.count == 1, channels == 1 || channels == 2 {
+                pointer = left
+            } else if buffers.count == 2, channels == 1 {
+                pointer = index == 0 ? left : right
+            } else {
+                return kAudioUnitErr_FormatNotSupported
+            }
+            guard let pointer else { return kAudio_ParamError }
+            buffers[index].mData = UnsafeMutableRawPointer(pointer)
+            buffers[index].mDataByteSize = UInt32(capacity * channels * MemoryLayout<Float>.stride)
+        }
+        return noErr
+    }
+
+    static func render(
+        ring: SPSCRingBuffer,
+        buffers: UnsafeMutableAudioBufferListPointer,
+        frames: Int,
+        capacity: Int,
+        targetFill: Int,
+        scratchLeft: UnsafeMutablePointer<Float>?,
+        scratchRight: UnsafeMutablePointer<Float>?
+    ) -> OSStatus {
+        guard frames >= 0, frames <= capacity else { return kAudioUnitErr_TooManyFramesToProcess }
+        guard frames > 0 else { return noErr }
+        let stride = MemoryLayout<Float>.stride
+        if buffers.count == 1 {
+            let channels = Int(buffers[0].mNumberChannels)
+            guard channels == 1 || channels == 2 else { return kAudioUnitErr_FormatNotSupported }
+            guard frames <= Int(buffers[0].mDataByteSize) / stride / channels,
+                  let output = buffers[0].mData?.assumingMemoryBound(to: Float.self)
+            else { return kAudio_ParamError }
+            if channels == 2 {
+                ring.readInterleavedResampled(outPtr: output, framesRequested: frames, targetFillFrames: targetFill)
+            } else {
+                guard let scratchLeft, let scratchRight else { return kAudio_ParamError }
+                ring.readNonInterleavedResampled(
+                    outL: scratchLeft, outR: scratchRight, framesRequested: frames, targetFillFrames: targetFill
+                )
+                for index in 0..<frames {
+                    output[index] = scratchLeft[index] * 0.5 + scratchRight[index] * 0.5
+                }
+            }
+            buffers[0].mDataByteSize = UInt32(frames * channels * stride)
+        } else if buffers.count == 2 {
+            guard buffers[0].mNumberChannels == 1, buffers[1].mNumberChannels == 1 else {
+                return kAudioUnitErr_FormatNotSupported
+            }
+            guard frames <= Int(buffers[0].mDataByteSize) / stride,
+                  frames <= Int(buffers[1].mDataByteSize) / stride,
+                  let left = buffers[0].mData?.assumingMemoryBound(to: Float.self),
+                  let right = buffers[1].mData?.assumingMemoryBound(to: Float.self)
+            else { return kAudio_ParamError }
+            ring.readNonInterleavedResampled(
+                outL: left,
+                outR: right,
+                framesRequested: frames,
+                targetFillFrames: targetFill
+            )
+            buffers[0].mDataByteSize = UInt32(frames * stride)
+            buffers[1].mDataByteSize = UInt32(frames * stride)
+        } else {
+            return kAudioUnitErr_FormatNotSupported
+        }
+        return noErr
+    }
+
+    static func peak(buffers: UnsafeMutableAudioBufferListPointer, frames: Int) -> Float {
+        guard frames > 0 else { return 0 }
+        var peak: Float = 0
+        for buffer in buffers {
+            let channels = Int(buffer.mNumberChannels)
+            guard channels > 0, let pointer = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+            let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.stride
+            let count = min(frames, available / channels) * channels
+            guard count > 0 else { continue }
+            var bufferPeak: Float = 0
+            vDSP_maxmgv(pointer, 1, &bufferPeak, vDSP_Length(count))
+            peak = max(peak, bufferPeak)
+        }
+        return peak
+    }
+}
+
 private func renderCallbackFunction(
     inRefCon: UnsafeMutableRawPointer,
     ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
@@ -1928,14 +2036,11 @@ private func renderCallbackFunction(
     // Ensure ioData buffers have valid memory (fallback to preallocated buffers)
     if let ioData {
         let out = UnsafeMutableAudioBufferListPointer(ioData)
-        if let fallback = engine.outputABL {
-            let count = min(out.count, fallback.count)
-            for i in 0..<count where out[i].mData == nil {
-                out[i].mData = fallback[i].mData
-                out[i].mDataByteSize = min(out[i].mDataByteSize, fallback[i].mDataByteSize)
-                out[i].mNumberChannels = fallback[i].mNumberChannels
-            }
-        }
+        let status = CoreAudioOutput.provideFallback(
+            buffers: out, capacity: Int(engine.allocatedFrameCapacity),
+            left: engine.outputScratchLeft, right: engine.outputScratchRight
+        )
+        guard status == noErr else { return status }
     }
 
     // Diagnostics about output buffers and callback cadence
@@ -1949,48 +2054,25 @@ private func renderCallbackFunction(
     // RING READ: consume audio frames from ring buffer and feed to output
     guard let ioData else { return noErr }
     let outputBuffers = UnsafeMutableAudioBufferListPointer(ioData)
-    let outBufferCount = outputBuffers.count
     let framesRequested = Int(inNumberFrames)
-    let rb = engine.ringBuffer
     // 🔧 Fallback-буфери з outputABL мають ємність allocatedFrameCapacity — не писати більше
     guard inNumberFrames <= engine.allocatedFrameCapacity else {
         return kAudioUnitErr_TooManyFramesToProcess
     }
 
-    if outBufferCount == 1, outputBuffers[0].mNumberChannels >= 2 {
-        guard let outPtr = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        rb.readInterleavedResampled(
-            outPtr: outPtr,
-            framesRequested: framesRequested,
-            targetFillFrames: engine.ringTargetFillFrames
-        )
-        outputBuffers[0].mDataByteSize = UInt32(framesRequested * 2 * MemoryLayout<Float>.size)
-    } else if outBufferCount >= 2 {
-        guard let outL = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self),
-              let outR = outputBuffers[1].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-        rb.readNonInterleavedResampled(
-            outL: outL,
-            outR: outR,
-            framesRequested: framesRequested,
-            targetFillFrames: engine.ringTargetFillFrames
-        )
-        outputBuffers[0].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
-        outputBuffers[1].mDataByteSize = UInt32(framesRequested * MemoryLayout<Float>.size)
-    }
+    let status = CoreAudioOutput.render(
+        ring: engine.ringBuffer,
+        buffers: outputBuffers,
+        frames: framesRequested,
+        capacity: Int(engine.allocatedFrameCapacity),
+        targetFill: engine.ringTargetFillFrames,
+        scratchLeft: engine.outputScratchLeft,
+        scratchRight: engine.outputScratchRight
+    )
+    guard status == noErr else { return status }
     if seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0,
        seq_atomic_int64_load_acquire(engine.diagnosticTestToneOutputSeen) != 0 {
-        var peak: Float = 0
-        if outBufferCount == 1,
-           let pointer = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self) {
-            vDSP_maxmgv(pointer, 1, &peak, vDSP_Length(framesRequested * 2))
-        } else if outBufferCount >= 2,
-                  let left = outputBuffers[0].mData?.assumingMemoryBound(to: Float.self),
-                  let right = outputBuffers[1].mData?.assumingMemoryBound(to: Float.self) {
-            var rightPeak: Float = 0
-            vDSP_maxmgv(left, 1, &peak, vDSP_Length(framesRequested))
-            vDSP_maxmgv(right, 1, &rightPeak, vDSP_Length(framesRequested))
-            peak = max(peak, rightPeak)
-        }
+        let peak = CoreAudioOutput.peak(buffers: outputBuffers, frames: framesRequested)
         if peak > 0.0001 {
             seq_atomic_int64_store_release(engine.diagnosticTestToneDeviceBufferSeen, 1)
         }

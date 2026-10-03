@@ -103,8 +103,15 @@ final class ProjectMHelperClient: ObservableObject {
     private var socketPath: String?
     private var readSource: DispatchSourceRead?
 
-    private final class ResponseBuffer {
+    final class ResponseBuffer {
         var data = Data()
+
+        func nextLine() -> Data? {
+            guard let newline = data.firstIndex(of: 0x0A) else { return nil }
+            let line = Data(data[data.startIndex..<newline])
+            data.removeSubrange(data.startIndex...newline)
+            return line
+        }
     }
 
     private final class SocketPathBuffer {
@@ -128,7 +135,7 @@ final class ProjectMHelperClient: ObservableObject {
         return (_clientSocket, _socketGeneration)
     }
 
-    nonisolated private func socketLease() -> (socket: Int32, original: Int32, generation: UInt64)? {
+    nonisolated func socketLease() -> (socket: Int32, original: Int32, generation: UInt64)? {
         socketLock.lock()
         defer { socketLock.unlock() }
         guard _clientSocket >= 0 else { return nil }
@@ -137,7 +144,7 @@ final class ProjectMHelperClient: ObservableObject {
         return (leasedSocket, _clientSocket, _socketGeneration)
     }
 
-    nonisolated private func installSocket(_ value: Int32) -> UInt64 {
+    nonisolated func installSocket(_ value: Int32) -> UInt64 {
         socketLock.lock()
         _socketGeneration &+= 1
         _clientSocket = value
@@ -146,13 +153,13 @@ final class ProjectMHelperClient: ObservableObject {
         return generation
     }
 
-    nonisolated private func socketIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
+    nonisolated func socketIsCurrent(_ socket: Int32, generation: UInt64) -> Bool {
         socketLock.lock()
         defer { socketLock.unlock() }
         return _clientSocket == socket && _socketGeneration == generation
     }
 
-    nonisolated private func invalidateSocket() -> Int32 {
+    nonisolated func invalidateSocket() -> Int32 {
         socketLock.lock()
         let socket = _clientSocket
         _clientSocket = -1
@@ -161,7 +168,7 @@ final class ProjectMHelperClient: ObservableObject {
         return socket
     }
 
-    nonisolated private static func writeAll(
+    nonisolated static func writeAll(
         socket: Int32,
         baseAddress: UnsafeRawPointer,
         count: Int
@@ -215,7 +222,7 @@ final class ProjectMHelperClient: ObservableObject {
     private var _sendBuffer: UnsafeMutablePointer<UInt8>?
     private var _sendBufferCapacity: Int = 0
 
-    private init() {
+    init() {
         _audioRingBuffer = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
         _audioRingBuffer.initialize(repeating: 0, count: 8192)
     }
@@ -579,9 +586,7 @@ final class ProjectMHelperClient: ObservableObject {
         guard !accumulator.data.isEmpty else { return }
 
         // Обробляємо лише завершені рядки (до \n); хвіст лишаємо в буфері.
-        while let nl = accumulator.data.firstIndex(of: 0x0A) {
-            let lineData = accumulator.data[accumulator.data.startIndex..<nl]
-            accumulator.data = Data(accumulator.data[(nl + 1)...])
+        while let lineData = accumulator.nextLine() {
             if let line = String(data: lineData, encoding: .utf8) {
                 processLine(line, socket: socket, generation: generation)
             }

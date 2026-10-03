@@ -13,7 +13,7 @@
 import Accelerate
 import Foundation
 
-public final class SPSCRingBuffer {
+nonisolated public final class SPSCRingBuffer {
     // MARK: - Properties
 
     private(set) var left: UnsafeMutablePointer<Float>?
@@ -119,8 +119,6 @@ public final class SPSCRingBuffer {
         right?.initialize(repeating: 0, count: capacity)
 
         reset()
-
-        dlog("🧱 SPSCRingBuffer allocated: \(capacity) frames", category: .engine)
     }
 
     public func deallocate() {
@@ -435,7 +433,7 @@ public final class SPSCRingBuffer {
 }
 
 @inline(__always)
-private func interleaveStereo(
+nonisolated private func interleaveStereo(
     l: UnsafePointer<Float>,
     r: UnsafePointer<Float>,
     out: UnsafeMutablePointer<Float>,

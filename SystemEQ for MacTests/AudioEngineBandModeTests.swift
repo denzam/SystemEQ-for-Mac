@@ -8,8 +8,234 @@
 //
 
 import CoreAudio
+import Darwin
 @testable import SystemEQ_for_Mac
 import XCTest
+
+final class CoreAudioOutputTests: XCTestCase {
+    private func checkLayout(channels: [UInt32], frames: Int) {
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 256)
+        let left = [Float](repeating: 0.75, count: frames)
+        let right = [Float](repeating: -0.25, count: frames)
+        _ = ring.write(inL: left, inR: right, frameCount: frames)
+        let size = MemoryLayout<AudioBufferList>.size + (channels.count - 1) * MemoryLayout<AudioBuffer>.stride
+        guard let memory = malloc(size) else { XCTFail("Audio buffer allocation failed"); return }
+        let list = UnsafeMutableAudioBufferListPointer(memory.bindMemory(to: AudioBufferList.self, capacity: 1))
+        list.unsafeMutablePointer.pointee.mNumberBuffers = UInt32(channels.count)
+        let scratchLeft = UnsafeMutablePointer<Float>.allocate(capacity: max(1, frames))
+        let scratchRight = UnsafeMutablePointer<Float>.allocate(capacity: max(1, frames))
+        var allocations: [UnsafeMutablePointer<Float>] = []
+        for index in channels.indices {
+            let count = frames * Int(channels[index])
+            let pointer = UnsafeMutablePointer<Float>.allocate(capacity: count + 2)
+            pointer.initialize(repeating: -999, count: count + 2)
+            allocations.append(pointer)
+            list[index] = AudioBuffer(
+                mNumberChannels: channels[index], mDataByteSize: UInt32(count * MemoryLayout<Float>.stride),
+                mData: pointer.advanced(by: 1)
+            )
+        }
+        defer {
+            allocations.forEach { $0.deallocate() }
+            scratchLeft.deallocate()
+            scratchRight.deallocate()
+            free(list.unsafeMutablePointer)
+        }
+        XCTAssertEqual(CoreAudioOutput.render(
+            ring: ring, buffers: list, frames: frames, capacity: frames, targetFill: 0,
+            scratchLeft: scratchLeft, scratchRight: scratchRight
+        ), noErr)
+        for index in channels.indices {
+            let count = frames * Int(channels[index])
+            XCTAssertEqual(allocations[index][0], -999)
+            XCTAssertEqual(allocations[index][count + 1], -999)
+            XCTAssertEqual(list[index].mDataByteSize, UInt32(count * MemoryLayout<Float>.stride))
+            for sample in 0..<count {
+                let expected: Float = channels == [1] ? 0.25 :
+                    (channels == [2] ? (sample.isMultiple(of: 2) ? 0.75 : -0.25) : (index == 0 ? 0.75 : -0.25))
+                XCTAssertEqual(allocations[index][sample + 1], expected, accuracy: 0.0001)
+            }
+        }
+    }
+
+    func testMonoAndStereoLayoutsPreserveBounds() {
+        for frames in [0, 1, 7, 128] {
+            for channels: [UInt32] in [[1], [2], [1, 1]] {
+                checkLayout(channels: channels, frames: frames)
+            }
+        }
+    }
+
+    func testInvalidBufferDoesNotConsumeAudio() {
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 256)
+        _ = ring.write(inL: [0.75], inR: [-0.25], frameCount: 1)
+        var output: Float = -999
+        var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+            mNumberChannels: 1, mDataByteSize: 0, mData: nil
+        ))
+        withUnsafeMutablePointer(to: &output) { pointer in
+            list.mBuffers.mData = UnsafeMutableRawPointer(pointer)
+            withUnsafeMutablePointer(to: &list) { listPointer in
+                let buffers = UnsafeMutableAudioBufferListPointer(listPointer)
+                XCTAssertEqual(CoreAudioOutput.render(
+                    ring: ring, buffers: buffers, frames: 1, capacity: 1, targetFill: 0,
+                    scratchLeft: nil, scratchRight: nil
+                ), kAudio_ParamError)
+            }
+        }
+        XCTAssertEqual(output, -999)
+        var left: Float = 0
+        var right: Float = 0
+        ring.readNonInterleaved(outL: &left, outR: &right, framesRequested: 1)
+        XCTAssertEqual(left, 0.75)
+        XCTAssertEqual(right, -0.25)
+    }
+
+    func testMonoPeakDoesNotReadPastAdvertisedBytes() throws {
+        let page = Int(getpagesize())
+        let memory = try XCTUnwrap(mmap(nil, page * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0))
+        XCTAssertNotEqual(memory, MAP_FAILED)
+        guard memory != MAP_FAILED else { return }
+        defer { munmap(memory, page * 2) }
+        XCTAssertEqual(mprotect(memory.advanced(by: page), page, PROT_NONE), 0)
+        let pointer = memory.advanced(by: page - 4 * MemoryLayout<Float>.stride).assumingMemoryBound(to: Float.self)
+        pointer.initialize(repeating: -0.25, count: 4)
+        var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+            mNumberChannels: 1, mDataByteSize: 4 * UInt32(MemoryLayout<Float>.stride), mData: pointer
+        ))
+        withUnsafeMutablePointer(to: &list) {
+            XCTAssertEqual(CoreAudioOutput.peak(buffers: UnsafeMutableAudioBufferListPointer($0), frames: 8), 0.25)
+        }
+    }
+
+    func testNilDataFallbackPreservesMonoAndStereoLayoutsAcrossCallbackSizes() {
+        let capacity = 128
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: capacity * 2)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: capacity)
+        defer { left.deallocate(); right.deallocate() }
+        for channels: [UInt32] in [[1], [2], [1, 1]] {
+            let size = MemoryLayout<AudioBufferList>.size + (channels.count - 1) * MemoryLayout<AudioBuffer>.stride
+            guard let memory = malloc(size) else { XCTFail("Buffer allocation failed"); return }
+            defer { free(memory) }
+            let pointer = memory.bindMemory(to: AudioBufferList.self, capacity: 1)
+            pointer.pointee.mNumberBuffers = UInt32(channels.count)
+            let buffers = UnsafeMutableAudioBufferListPointer(pointer)
+            for frames in [1, 7, capacity] {
+                for index in channels.indices {
+                    buffers[index] = AudioBuffer(mNumberChannels: channels[index], mDataByteSize: 0, mData: nil)
+                }
+                XCTAssertEqual(
+                    CoreAudioOutput.provideFallback(buffers: buffers, capacity: capacity, left: left, right: right),
+                    noErr
+                )
+                XCTAssertEqual(buffers.map(\.mNumberChannels), channels)
+                let ring = SPSCRingBuffer()
+                ring.allocate(capacityFrames: 256)
+                _ = ring.write(
+                    inL: [Float](repeating: 0.75, count: frames),
+                    inR: [Float](repeating: -0.25, count: frames),
+                    frameCount: frames
+                )
+                XCTAssertEqual(CoreAudioOutput.render(
+                    ring: ring, buffers: buffers, frames: frames, capacity: capacity, targetFill: 0,
+                    scratchLeft: left, scratchRight: right
+                ), noErr)
+                XCTAssertEqual(left[0], channels == [1] ? 0.25 : 0.75)
+                if channels == [2] { XCTAssertEqual(left[1], -0.25) }
+                if channels == [1, 1] { XCTAssertEqual(right[0], -0.25) }
+                XCTAssertEqual(buffers[0].mDataByteSize, UInt32(frames * Int(channels[0]) * MemoryLayout<Float>.stride))
+            }
+        }
+    }
+}
+
+@MainActor
+final class RoutingWakeRecoveryTests: XCTestCase {
+    private final class Gate {
+        let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(name: String) {
+            entered = XCTestExpectation(description: name + " entered")
+        }
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                entered.fulfill()
+            }
+        }
+
+        func release() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    func testDisableDuringWakeDelayDoesNotRefreshOrRestart() async {
+        let recovery = RoutingWakeRecovery()
+        let gate = Gate(name: "delay")
+        var refreshes = 0
+        var restarts = 0
+        XCTAssertTrue(recovery.suspend(isActive: true))
+        let pending = recovery.resume(
+            wait: { await gate.wait() },
+            refresh: { refreshes += 1 },
+            restart: { restarts += 1 }
+        )
+        await fulfillment(of: [gate.entered], timeout: 2)
+        recovery.cancel()
+        gate.release()
+        await pending?.value
+        XCTAssertEqual(refreshes, 0)
+        XCTAssertEqual(restarts, 0)
+        XCTAssertFalse(recovery.isPending)
+        XCTAssertFalse(recovery.shouldResume)
+    }
+
+    func testSecondSleepPreservesIntentAndRejectsStaleWake() async {
+        let recovery = RoutingWakeRecovery()
+        let first = Gate(name: "first")
+        let second = Gate(name: "second")
+        let restarted = expectation(description: "new wake restarted")
+        var restarts = 0
+        XCTAssertTrue(recovery.suspend(isActive: true))
+        let firstTask = recovery.resume(wait: { await first.wait() }, refresh: {}, restart: { restarts += 1 })
+        await fulfillment(of: [first.entered], timeout: 2)
+        XCTAssertTrue(recovery.suspend(isActive: false))
+        let secondTask = recovery.resume(
+            wait: { await second.wait() },
+            refresh: {},
+            restart: { restarts += 1; restarted.fulfill() }
+        )
+        await fulfillment(of: [second.entered], timeout: 2)
+        first.release()
+        await firstTask?.value
+        XCTAssertTrue(recovery.isPending)
+        XCTAssertEqual(restarts, 0)
+        second.release()
+        await fulfillment(of: [restarted], timeout: 2)
+        await secondTask?.value
+        XCTAssertEqual(restarts, 1)
+        XCTAssertFalse(recovery.isPending)
+    }
+
+    func testDisableDuringDeviceRefreshDoesNotRestart() async {
+        let recovery = RoutingWakeRecovery()
+        let refresh = Gate(name: "refresh")
+        var restarts = 0
+        XCTAssertTrue(recovery.suspend(isActive: true))
+        let pending = recovery.resume(wait: {}, refresh: { await refresh.wait() }, restart: { restarts += 1 })
+        await fulfillment(of: [refresh.entered], timeout: 2)
+        recovery.cancel()
+        refresh.release()
+        await pending?.value
+        XCTAssertEqual(restarts, 0)
+        XCTAssertFalse(recovery.isPending)
+    }
+}
 
 final class AudioEngineBandModeTests: XCTestCase {
     override func tearDown() {
@@ -183,6 +409,43 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         wait(for: [renderFinished], timeout: 10)
         coreEngine.clearEQ()
+    }
+
+    func testConcurrentRoomFilterSwapAndRenderStress() {
+        let engine = CoreAudioEngine.shared
+        engine.setEnabled(true)
+        engine.applyFixedBandEQ([Float](repeating: 0, count: 10))
+        defer {
+            engine.clearRoomNotchFilters()
+            engine.clearEQ()
+        }
+        let rendered = expectation(description: "Room render finished")
+        DispatchQueue.global(qos: .userInitiated).async {
+            for _ in 0..<2000 {
+                var left = [Float](repeating: 0.01, count: 128)
+                var right = left
+                left.withUnsafeMutableBufferPointer { l in
+                    right.withUnsafeMutableBufferPointer { r in
+                        guard let left = l.baseAddress, let right = r.baseAddress else {
+                            XCTFail("Missing audio buffer")
+                            return
+                        }
+                        engine.processStereoInPlace(left: left, right: right, frameCount: 128)
+                    }
+                }
+                XCTAssertTrue(left.allSatisfy(\.isFinite))
+                XCTAssertTrue(right.allSatisfy(\.isFinite))
+            }
+            rendered.fulfill()
+        }
+        for iteration in 0..<250 {
+            if iteration.isMultiple(of: 3) {
+                engine.clearRoomNotchFilters()
+            } else {
+                engine.applyRoomNotchFilters([(frequency: 125, gain: -6, q: Float(iteration % 8 + 1))])
+            }
+        }
+        wait(for: [rendered], timeout: 10)
     }
 
     func testOutputBoostIsClampedAndPersisted() throws {
