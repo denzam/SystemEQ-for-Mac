@@ -238,14 +238,29 @@ final class RoutingWakeRecoveryTests: XCTestCase {
 }
 
 final class AudioEngineBandModeTests: XCTestCase {
+    private let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+    private var isolatedEngine: AudioEngine?
+    private var originalPlaybackSnapshot: Data?
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        originalPlaybackSnapshot = UserDefaults.standard.data(forKey: "lastPlayback.snapshot")
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        isolatedEngine = AudioEngine(defaults: defaults, enableRouting: { _ in true }, disableRouting: { _ in })
+    }
+
     override func tearDown() {
-        let engine = AudioEngine.shared
-        engine.bandMode = .tenBand
-        engine.syncBandsToMode()
-        engine.setPreampGain(0)
-        engine.setOutputBoostGain(0)
-        engine.resetAllBands()
+        if let engine = isolatedEngine {
+            engine.bandMode = .tenBand
+            engine.syncBandsToMode()
+            engine.setPreampGain(0)
+            engine.setOutputBoostGain(0)
+            engine.resetAllBands()
+        }
+        isolatedEngine = nil
+        UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
         CoreAudioEngine.shared.setEnabled(false)
+        XCTAssertEqual(UserDefaults.standard.data(forKey: "lastPlayback.snapshot"), originalPlaybackSnapshot)
         super.tearDown()
     }
 
@@ -258,8 +273,8 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(AutoEQView.BandMode.thirtyOne.audioEngineMode, .thirtyOneBand)
     }
 
-    func testApplyEQValues_rightAfterSwitchTo31Band_appliesAll31() {
-        let engine = AudioEngine.shared
+    func testApplyEQValues_rightAfterSwitchTo31Band_appliesAll31() throws {
+        let engine = try XCTUnwrap(isolatedEngine)
         engine.bandMode = .tenBand
         engine.syncBandsToMode()
 
@@ -273,8 +288,8 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(engine.bands.map(\.gain), values, "all 31 gains must be applied")
     }
 
-    func testApplyEQValues_rightAfterSwitchBackTo10Band_appliesAll10() {
-        let engine = AudioEngine.shared
+    func testApplyEQValues_rightAfterSwitchBackTo10Band_appliesAll10() throws {
+        let engine = try XCTUnwrap(isolatedEngine)
         engine.bandMode = .thirtyOneBand
         engine.syncBandsToMode()
 
@@ -287,8 +302,8 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(engine.bands.map(\.gain), values, "all 10 gains must be applied")
     }
 
-    func testApplyEQValues_countMismatch_stillRejected() {
-        let engine = AudioEngine.shared
+    func testApplyEQValues_countMismatch_stillRejected() throws {
+        let engine = try XCTUnwrap(isolatedEngine)
         engine.bandMode = .tenBand
         engine.syncBandsToMode()
         engine.resetAllBands()
@@ -327,8 +342,8 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(right[0], Float(0.25 * pow(10.0, 6.0 / 20.0)), accuracy: 0.0001)
     }
 
-    func testCoreAudioRenderBypassFollowsEnabledState() {
-        let audioEngine = AudioEngine.shared
+    func testCoreAudioRenderBypassFollowsEnabledState() throws {
+        let audioEngine = try XCTUnwrap(isolatedEngine)
         let coreEngine = CoreAudioEngine.shared
         audioEngine.bandMode = .tenBand
         audioEngine.syncBandsToMode()
