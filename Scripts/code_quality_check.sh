@@ -2,6 +2,7 @@
 
 # Full code quality check for SystemEQ for Mac
 # Run before releases or periodically
+set -uo pipefail
 
 echo "═══════════════════════════════════════════════════════════════"
 echo "  SystemEQ for Mac - Code Quality Check"
@@ -39,64 +40,41 @@ if command -v swiftformat &> /dev/null; then
         echo "   ⚠️  ${UNFORMATTED:-some} file(s) need formatting"
         echo "   Run: swiftformat 'SystemEQ for Mac' --config .swiftformat"
         ERRORS=$((ERRORS + 1))
+        printf '%s\n' "$FORMAT_OUT"
     fi
 else
     echo "   ⚠️  SwiftFormat not installed"
+    if [ "$MODE" = "--full" ]; then ERRORS=$((ERRORS + 1)); fi
 fi
 echo ""
 
 echo "🔎 [3/5] SwiftLint..."
 if command -v swiftlint &> /dev/null; then
-    LINT_OUT=$(swiftlint lint --config .swiftlint.yml --quiet 2>/dev/null)
+    LINT_OUT=$(swiftlint lint --config .swiftlint.yml --quiet 2>&1)
+    LINT_STATUS=$?
     LINT_ERRORS=$(printf '%s\n' "$LINT_OUT" | grep -c "error:")
     LINT_WARNINGS=$(printf '%s\n' "$LINT_OUT" | grep -c "warning:")
 
-    if [ "$LINT_ERRORS" -gt 0 ]; then
+    if [ "$LINT_STATUS" -ne 0 ] || [ "$LINT_ERRORS" -gt 0 ]; then
         echo "   ❌ $LINT_ERRORS error(s), $LINT_WARNINGS warning(s)"
         echo "   Run: swiftlint --fix"
         ERRORS=$((ERRORS + 1))
+        printf '%s\n' "$LINT_OUT"
     else
         echo "   ✅ No errors ($LINT_WARNINGS warnings)"
     fi
 else
     echo "   ⚠️  SwiftLint not installed"
+    if [ "$MODE" = "--full" ]; then ERRORS=$((ERRORS + 1)); fi
 fi
 echo ""
 
-echo "🐍 [4/5] Python checks..."
-PYTHON_FILES=()
-while IFS= read -r -d '' file; do
-    PYTHON_FILES+=("$file")
-done < <(git ls-files -z -co --exclude-standard -- '*.py')
-
-if [ "${#PYTHON_FILES[@]}" -eq 0 ]; then
-    echo "   ✅ No Python files found"
-elif python3 - "${PYTHON_FILES[@]}" <<'PYTHON'
-from pathlib import Path
-import sys
-
-failed = False
-for path in sys.argv[1:]:
-    try:
-        compile(Path(path).read_bytes(), path, "exec", dont_inherit=True)
-    except (OSError, SyntaxError, ValueError) as error:
-        print(f"{path}: {error}", file=sys.stderr)
-        failed = True
-sys.exit(1 if failed else 0)
-PYTHON
-then
-    echo "   ✅ Python syntax is valid"
+echo "🐍 [4/5] Tooling checks..."
+if python3 Scripts/verify_tooling.py; then
+    echo "   ✅ Tooling checks passed"
 else
-    echo "   ❌ Python syntax check failed"
+    echo "   ❌ Tooling checks failed"
     ERRORS=$((ERRORS + 1))
-fi
-if [ -f ".agents/skills/task-router/scripts/test_route.py" ]; then
-    if python3 ".agents/skills/task-router/scripts/test_route.py"; then
-        echo "   ✅ Task-router tests passed"
-    else
-        echo "   ❌ Task-router tests failed"
-        ERRORS=$((ERRORS + 1))
-    fi
 fi
 echo ""
 
@@ -107,16 +85,19 @@ else
     echo "🔨 [5/5] Build check..."
     XCODE_ACTION="build"
 fi
+XCODE_LOG=$(mktemp "${TMPDIR:-/tmp}/systemeq-quality.XXXXXX") || exit 1
+trap 'rm -f "$XCODE_LOG"' EXIT
 if xcodebuild -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" \
     -configuration Debug "$XCODE_ACTION" -destination "platform=macOS" \
     -derivedDataPath "${TMPDIR:-/tmp}/systemeq-derived-data" \
-    CODE_SIGNING_ALLOWED=NO -quiet 2>/dev/null; then
+    CODE_SIGNING_ALLOWED=NO -quiet >"$XCODE_LOG" 2>&1; then
     if [ "$MODE" = "--full" ]; then
         echo "   ✅ Tests passed"
     else
         echo "   ✅ Build successful"
     fi
 else
+    tail -60 "$XCODE_LOG"
     if [ "$MODE" = "--full" ]; then
         echo "   ❌ Tests failed"
     else

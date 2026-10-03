@@ -12,6 +12,9 @@ on:
       - '.swiftlint.yml'
       - '.github/workflows/**'
       - 'Scripts/**'
+      - '.agents/skills/**'
+      - '.githooks/**'
+      - 'SystemEQ for Mac/Assets.xcassets/**'
   pull_request:
     branches: [main]
     paths:
@@ -23,8 +26,25 @@ on:
       - '.swiftlint.yml'
       - '.github/workflows/**'
       - 'Scripts/**'
+      - '.agents/skills/**'
+      - '.githooks/**'
+      - 'SystemEQ for Mac/Assets.xcassets/**'
 
 jobs:
+  tooling:
+    name: Tooling Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Verify scripts and regression tests
+        run: python3 Scripts/verify_tooling.py
+      - name: Verify reproducible language icons
+        run: |
+          python3 -m venv "$RUNNER_TEMP/systemeq-icons"
+          "$RUNNER_TEMP/systemeq-icons/bin/python" -m pip install -r Scripts/requirements-icons.txt
+          "$RUNNER_TEMP/systemeq-icons/bin/python" Scripts/generate_language_icons.py --check
+
   swiftlint:
     name: SwiftLint
     runs-on: macos-latest
@@ -61,7 +81,7 @@ jobs:
   test:
     name: Test Check
     runs-on: macos-latest
-    needs: [swiftlint, swiftformat]
+    needs: [tooling, swiftlint, swiftformat]
     
     steps:
       - name: Checkout

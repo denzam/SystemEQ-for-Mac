@@ -52,6 +52,7 @@ jobs:
             -project "SystemEQ for Mac.xcodeproj" \
             -scheme "SystemEQ for Mac" \
             -configuration Release \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             -archivePath build/SystemEQ.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             -quiet
@@ -116,6 +117,13 @@ jobs:
           ZIP_SIZE=$(ls -lh "build/SystemEQ-v${{ steps.version.outputs.version }}.zip" | awk '{print $5}')
           echo "dmg_size=$DMG_SIZE" >> $GITHUB_OUTPUT
           echo "zip_size=$ZIP_SIZE" >> $GITHUB_OUTPUT
+
+      - name: Verify finished distribution packages
+        run: |
+          bash Scripts/verify_release_artifacts.sh \
+            "build/SystemEQ-v${{ steps.version.outputs.version }}.zip" \
+            "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
+            "${{ steps.version.outputs.version }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
