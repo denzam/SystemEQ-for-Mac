@@ -640,6 +640,7 @@ public final class CoreAudioEngine: ObservableObject {
         let finalInRate = getDeviceSampleRate(inputDevice) ?? preferred
         let finalOutRate = getDeviceSampleRate(outputDevice) ?? preferred
         self.currentSampleRate = finalOutRate
+        rebuildActiveEQFilter(sampleRate: finalOutRate)
         rebuildRoomFilter(sampleRate: finalOutRate)
         DiagnosticEventStore.shared.record(
             "engine.setup.format",
@@ -1169,9 +1170,9 @@ public final class CoreAudioEngine: ObservableObject {
         let outputBoost = Self.sanitizedOutputBoost(outputBoost)
         self.preampGain = preamp
         self.outputBoostGain = outputBoost
+        self.eqGains = gains
 
         let bands = FixedBandEQDefinition.bands(mode: .thirtyOneBand, gains: gains)
-        let count = bands.count
 
         // ⚡ Use vDSP optimized filter (5-10x faster, ~5-10% CPU even with 31 bands)
         let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
@@ -1182,6 +1183,17 @@ public final class CoreAudioEngine: ObservableObject {
             sampleRate: Float(currentSampleRate)
         )
         self.vdspFilter = filter
+    }
+
+    /// Rebuild active vDSP filter with new sample rate (called on sample rate change)
+    func rebuildActiveEQFilter(sampleRate: Double) {
+        currentSampleRate = sampleRate
+        guard vdspFilter != nil else { return }
+        if eqGains.count == 31 {
+            applyGraphicEQ31(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        } else {
+            applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        }
     }
 
     /// Clear EQ
@@ -1761,6 +1773,7 @@ public final class CoreAudioEngine: ObservableObject {
         seq_atomic_int64_store_release(diagnosticNativeOutputCallbacks, 0)
         callbackWindow?.reset()
         currentSampleRate = sampleRate
+        rebuildActiveEQFilter(sampleRate: sampleRate)
         rebuildRoomFilter(sampleRate: sampleRate)
         channelCount = 2
         inputDeviceID = 0

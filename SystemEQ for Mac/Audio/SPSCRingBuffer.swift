@@ -323,9 +323,14 @@ nonisolated public final class SPSCRingBuffer {
             let sourceOffset = Int(position)
             let fraction = Float(position - Double(sourceOffset))
             let index = (rIdxBase + sourceOffset) & mask
-            let nextIndex = (index &+ 1) & mask
-            outL[frame] = l[index] + (l[nextIndex] - l[index]) * fraction
-            outR[frame] = r[index] + (r[nextIndex] - r[index]) * fraction
+            if fraction <= 1e-7 {
+                outL[frame] = l[index]
+                outR[frame] = r[index]
+            } else {
+                let nextIndex = (index &+ 1) & mask
+                outL[frame] = l[index] + (l[nextIndex] - l[index]) * fraction
+                outR[frame] = r[index] + (r[nextIndex] - r[index]) * fraction
+            }
             position += ratio
         }
 
@@ -366,10 +371,15 @@ nonisolated public final class SPSCRingBuffer {
             let sourceOffset = Int(position)
             let fraction = Float(position - Double(sourceOffset))
             let index = (rIdxBase + sourceOffset) & mask
-            let nextIndex = (index &+ 1) & mask
             let outIndex = frame &* 2
-            outPtr[outIndex] = l[index] + (l[nextIndex] - l[index]) * fraction
-            outPtr[outIndex &+ 1] = r[index] + (r[nextIndex] - r[index]) * fraction
+            if fraction <= 1e-7 {
+                outPtr[outIndex] = l[index]
+                outPtr[outIndex &+ 1] = r[index]
+            } else {
+                let nextIndex = (index &+ 1) & mask
+                outPtr[outIndex] = l[index] + (l[nextIndex] - l[index]) * fraction
+                outPtr[outIndex &+ 1] = r[index] + (r[nextIndex] - r[index]) * fraction
+            }
             position += ratio
         }
 

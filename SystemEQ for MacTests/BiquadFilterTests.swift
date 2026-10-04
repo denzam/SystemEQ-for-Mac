@@ -599,4 +599,69 @@ final class BiquadFilterTests: XCTestCase {
         // Clean up
         engine.clearRoomNotchFilters()
     }
+
+    func testSPSCRingBuffer_resampler_nanProtection_whenFractionIsZero() {
+        let rb = SPSCRingBuffer()
+        rb.allocate(capacityFrames: 256)
+
+        // Write frame 0 with valid audio, and frame 1 with NaN / Inf
+        let inL: [Float] = [0.75, Float.nan, 0.0]
+        let inR: [Float] = [0.75, Float.infinity, 0.0]
+        _ = rb.write(inL: inL, inR: inR, frameCount: 3)
+
+        // Test planar resampler at fraction == 0
+        var outL = [Float](repeating: -999.0, count: 1)
+        var outR = [Float](repeating: -999.0, count: 1)
+        rb.readNonInterleavedResampled(outL: &outL, outR: &outR, framesRequested: 1, targetFillFrames: 0)
+
+        XCTAssertEqual(outL[0], 0.75, accuracy: 0.001, "Valid sample must not be poisoned by NaN in next index")
+        XCTAssertEqual(outR[0], 0.75, accuracy: 0.001, "Valid sample must not be poisoned by Inf in next index")
+        XCTAssertFalse(outL[0].isNaN, "outL must not be NaN")
+        XCTAssertFalse(outR[0].isNaN, "outR must not be NaN")
+
+        // Test interleaved resampler
+        let rbInterleaved = SPSCRingBuffer()
+        rbInterleaved.allocate(capacityFrames: 256)
+        _ = rbInterleaved.write(inL: inL, inR: inR, frameCount: 3)
+
+        var outInterleaved = [Float](repeating: -999.0, count: 2)
+        rbInterleaved.readInterleavedResampled(outPtr: &outInterleaved, framesRequested: 1, targetFillFrames: 0)
+
+        XCTAssertEqual(outInterleaved[0], 0.75, accuracy: 0.001)
+        XCTAssertEqual(outInterleaved[1], 0.75, accuracy: 0.001)
+        XCTAssertFalse(outInterleaved[0].isNaN)
+        XCTAssertFalse(outInterleaved[1].isNaN)
+    }
+
+    func testCoreAudioEngine_activeEQFilter_rebuildsOnSampleRateChange() {
+        let engine = CoreAudioEngine.shared
+        let testGains: [Float] = [1, 2, 3, 4, 5, -1, -2, -3, -4, -5]
+        engine.applyFixedBandEQ(testGains, preamp: 1.0, outputBoost: 0.5)
+
+        XCTAssertNotNil(engine.vdspFilter)
+
+        // Rebuild for 96kHz
+        engine.rebuildActiveEQFilter(sampleRate: 96000)
+
+        guard let filter96 = engine.vdspFilter else {
+            XCTFail("vdspFilter must be rebuilt")
+            return
+        }
+        XCTAssertEqual(filter96.sampleRate, 96000, accuracy: 1.0)
+
+        // Test 31-band rebuild
+        let gains31 = [Float](repeating: 2.0, count: 31)
+        engine.applyGraphicEQ31(gains31, preamp: -2.0, outputBoost: 1.0)
+
+        engine.rebuildActiveEQFilter(sampleRate: 192_000)
+        guard let filter192 = engine.vdspFilter else {
+            XCTFail("vdspFilter 31-band must be rebuilt")
+            return
+        }
+        XCTAssertEqual(filter192.sampleRate, 192_000, accuracy: 1.0)
+
+        // Clean up
+        engine.clearEQ()
+        engine.rebuildActiveEQFilter(sampleRate: 48000)
+    }
 }

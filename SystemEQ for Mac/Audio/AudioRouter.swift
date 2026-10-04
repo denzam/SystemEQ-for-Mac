@@ -850,6 +850,7 @@ public final class AudioRouter: ObservableObject {
             inputDevice: blackHoleDevice.id,
             outputDevice: physicalOutput.id
         )
+        AudioEngine.shared.reapplyCurrentFilters()
 
         guard engine.start() else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStart"])
@@ -1008,6 +1009,7 @@ public final class AudioRouter: ObservableObject {
                 inputDevice: blackHoleInput.id,
                 outputDevice: physicalOutput.id
             )
+            AudioEngine.shared.reapplyCurrentFilters()
             guard CoreAudioEngine.shared.start() else {
                 errorLog("Cannot start test routing", category: .routing)
                 restoreOriginalSystemOutputDevice()
