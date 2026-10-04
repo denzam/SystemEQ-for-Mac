@@ -108,7 +108,7 @@ def load_project_config():
         ).strip()
         if git_root:
             search_dirs.append(Path(git_root))
-    except Exception:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
     for d in search_dirs:
@@ -117,8 +117,10 @@ def load_project_config():
             try:
                 with open(cfg, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except json.JSONDecodeError as err:
+                sys.stderr.write(f"⚠️  task-router: failed to parse {cfg}: {err}\n")
+            except OSError as err:
+                sys.stderr.write(f"⚠️  task-router: failed to read {cfg}: {err}\n")
     return {}
 
 
@@ -143,7 +145,7 @@ def get_git_status_files():
                     path = path.split(" -> ")[1]
                 files.append(path.strip('"'))
         return files
-    except Exception:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return []
 
 
