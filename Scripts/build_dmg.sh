@@ -76,7 +76,7 @@ INFO
 if command -v create-dmg &> /dev/null; then
     echo "   Using create-dmg for professional layout..."
     
-    create-dmg \
+    if ! create-dmg \
         --volname "$APP_NAME" \
         --volicon "$EXPORT_PATH/$APP_NAME.app/Contents/Resources/AppIcon.icns" \
         --window-pos 200 120 \
@@ -88,15 +88,14 @@ if command -v create-dmg &> /dev/null; then
         --app-drop-link 450 200 \
         --no-internet-enable \
         "$DMG_PATH" \
-        "$DMG_TEMP" \
-        2>/dev/null || {
+        "$DMG_TEMP"; then
         # Fallback to hdiutil if create-dmg fails
-        echo "   Fallback to hdiutil..."
+        echo "   ⚠️ create-dmg failed; falling back to hdiutil..." >&2
         hdiutil create -volname "$APP_NAME" \
             -srcfolder "$DMG_TEMP" \
             -ov -format UDZO \
             "$DMG_PATH"
-    }
+    fi
 else
     echo "   Using hdiutil (install create-dmg for prettier DMG: brew install create-dmg)"
     

@@ -8,6 +8,20 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONSTANTS_FILE="$REPO_ROOT/SystemEQ for Mac/Config/AppConstants.swift"
 HOMEBREW_API="https://formulae.brew.sh/api/cask/blackhole-2ch.json"
 
+MODE="${1:-}"
+case "$MODE" in
+    "" | --update) ;;
+    -h | --help)
+        echo "Usage: $0 [--update]"
+        exit 0
+        ;;
+    *)
+        echo "❌ Unknown argument: $MODE" >&2
+        echo "Usage: $0 [--update]" >&2
+        exit 2
+        ;;
+esac
+
 if [[ ! -f "$CONSTANTS_FILE" ]]; then
     echo "❌ AppConstants.swift not found at: $CONSTANTS_FILE"
     exit 1
@@ -15,7 +29,7 @@ fi
 
 echo "🔍 Checking latest BlackHole version via Homebrew API..."
 
-LATEST=$(curl -fsSL "$HOMEBREW_API" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+LATEST=$(curl -fsSL --max-time 15 "$HOMEBREW_API" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
 
 if [[ -z "$LATEST" ]]; then
     echo "❌ Could not fetch latest version."
@@ -33,7 +47,7 @@ if [[ "$CURRENT" == "$LATEST" ]]; then
 fi
 
 PKG_URL="https://existential.audio/downloads/BlackHole2ch-${LATEST}.pkg"
-HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" -I "$PKG_URL")
+HTTP_CODE=$(curl -o /dev/null -s --max-time 15 -w "%{http_code}" -I "$PKG_URL")
 
 if [[ "$HTTP_CODE" != "200" ]]; then
     echo "⚠️  New version $LATEST found, but direct .pkg URL returned HTTP $HTTP_CODE:"

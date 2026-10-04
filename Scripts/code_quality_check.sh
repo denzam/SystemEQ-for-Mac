@@ -19,8 +19,10 @@ fi
 
 ERRORS=0
 
+SKIPPED=0
+
 echo "🧹 [1/5] Git whitespace..."
-if git diff --check && git diff --cached --check; then
+if git --no-pager diff --check && git --no-pager diff --cached --check; then
     echo "   ✅ No whitespace errors"
 else
     echo "   ❌ Whitespace errors found"
@@ -44,6 +46,7 @@ if command -v swiftformat &> /dev/null; then
     fi
 else
     echo "   ⚠️  SwiftFormat not installed"
+    SKIPPED=$((SKIPPED + 1))
     if [ "$MODE" = "--full" ]; then ERRORS=$((ERRORS + 1)); fi
 fi
 echo ""
@@ -65,6 +68,7 @@ if command -v swiftlint &> /dev/null; then
     fi
 else
     echo "   ⚠️  SwiftLint not installed"
+    SKIPPED=$((SKIPPED + 1))
     if [ "$MODE" = "--full" ]; then ERRORS=$((ERRORS + 1)); fi
 fi
 echo ""
@@ -109,11 +113,17 @@ echo ""
 
 # Summary
 echo "═══════════════════════════════════════════════════════════════"
-if [ $ERRORS -eq 0 ]; then
+if [ "$ERRORS" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
     echo "  ✅ All checks passed! Code is ready."
+    echo "═══════════════════════════════════════════════════════════════"
+    exit 0
+elif [ "$ERRORS" -eq 0 ]; then
+    echo "  ⚠️  $SKIPPED check(s) skipped due to missing tools. Code is NOT fully verified." >&2
+    echo "     Install missing tools (brew install swiftformat swiftlint) to verify." >&2
+    echo "═══════════════════════════════════════════════════════════════" >&2
+    exit 1
 else
-    echo "  ❌ $ERRORS check(s) failed. Please fix before release."
+    echo "  ❌ $ERRORS check(s) failed ($SKIPPED skipped). Please fix before release." >&2
+    echo "═══════════════════════════════════════════════════════════════" >&2
+    exit "$ERRORS"
 fi
-echo "═══════════════════════════════════════════════════════════════"
-
-exit $ERRORS

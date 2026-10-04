@@ -1,15 +1,22 @@
 #!/bin/bash
+set -u
 
 # Setup periodic reminders for SystemEQ maintenance tasks
-# Uses macOS Calendar to create recurring events
+# Uses macOS Calendar/Reminders to create recurring events
 
 echo "📅 Setting up maintenance reminders..."
 echo ""
 
-# Create reminders using osascript (AppleScript)
+if ! command -v osascript &>/dev/null; then
+    echo "❌ osascript not available in this environment." >&2
+    exit 1
+fi
+
+CREATED=0
+ERRORS=0
 
 # 1. Weekly reminder - Find unused code
-if osascript <<EOF
+if osascript <<EOF 2>/dev/null
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🧹 SystemEQ: Перевірити невикористаний код", body:"Запустити: ./Scripts/find_unused_code.sh
@@ -20,12 +27,14 @@ end tell
 EOF
 then
     echo "✅ Створено нагадування: Перевірка невикористаного коду (щотижня)"
+    CREATED=$((CREATED + 1))
 else
-    echo "⚠️  Не вдалося створити нагадування. Спробуйте вручну."
+    echo "❌ Не вдалося створити нагадування: Перевірка невикористаного коду" >&2
+    ERRORS=$((ERRORS + 1))
 fi
 
 # 2. Monthly reminder - Full code audit
-if osascript <<EOF
+if osascript <<EOF 2>/dev/null
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🔍 SystemEQ: Повний аудит коду", body:"Запустити: ./Scripts/code_quality_check.sh
@@ -39,12 +48,14 @@ end tell
 EOF
 then
     echo "✅ Створено нагадування: Повний аудит коду (щомісяця)"
+    CREATED=$((CREATED + 1))
 else
-    echo "⚠️  Не вдалося створити нагадування."
+    echo "❌ Не вдалося створити нагадування: Повний аудит коду" >&2
+    ERRORS=$((ERRORS + 1))
 fi
 
 # 3. Monthly reminder - Update dependencies
-if osascript <<EOF
+if osascript <<EOF 2>/dev/null
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"📦 SystemEQ: Оновити залежності", body:"Перевірити оновлення:
@@ -56,19 +67,28 @@ end tell
 EOF
 then
     echo "✅ Створено нагадування: Оновлення залежностей (щомісяця)"
+    CREATED=$((CREATED + 1))
 else
-    echo "⚠️  Не вдалося створити нагадування."
+    echo "❌ Не вдалося створити нагадування: Оновлення залежностей" >&2
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "  📱 Нагадування створені в додатку Reminders!"
-echo "═══════════════════════════════════════════════════════════════"
-echo ""
-echo "  Розклад:"
-echo "  • Щотижня: Перевірка невикористаного коду"
-echo "  • Щомісяця: Повний аудит коду"
-echo "  • Щомісяця: Оновлення залежностей"
-echo ""
-echo "  💡 Відкрийте Reminders щоб налаштувати повторення"
-echo ""
+if [ "$ERRORS" -eq 0 ] && [ "$CREATED" -eq 3 ]; then
+    echo "  📱 Нагадування успішно створені в додатку Reminders! ($CREATED/3)"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  Розклад:"
+    echo "  • Щотижня: Перевірка невикористаного коду"
+    echo "  • Щомісяця: Повний аудит коду"
+    echo "  • Щомісяця: Оновлення залежностей"
+    echo ""
+    echo "  💡 Відкрийте Reminders щоб налаштувати повторення"
+    exit 0
+else
+    echo "  ❌ Помилка: створено $CREATED/3 нагадувань ($ERRORS помилок)." >&2
+    echo "     Перевірте дозволи доступу до Reminders (Automation permissions)." >&2
+    echo "═══════════════════════════════════════════════════════════════" >&2
+    exit 1
+fi

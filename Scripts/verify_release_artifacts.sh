@@ -56,9 +56,13 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/systemeq-packages.XXXXXX")
 MOUNTED=0
 cleanup() {
     if [[ "$MOUNTED" == 1 ]]; then
-        hdiutil detach "$WORK_DIR/mount" >/dev/null || return 1
+        if ! hdiutil detach "$WORK_DIR/mount" -force >/dev/null 2>&1; then
+            echo "Warning: failed to cleanly detach $WORK_DIR/mount" >&2
+        fi
     fi
-    rm -rf "$WORK_DIR"
+    if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
+        rm -rf "$WORK_DIR"
+    fi
 }
 trap cleanup EXIT
 ditto -x -k "$1" "$WORK_DIR/zip"

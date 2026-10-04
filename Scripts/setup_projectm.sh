@@ -27,10 +27,18 @@ INCLUDE_SEARCH_PATHS=(
 
 MODE="${1:-}"
 case "$MODE" in
+    -h | --help)
+        echo "Usage: $0 [options]"
+        echo "Options:"
+        echo "  (no args)           Перевірка наявності libprojectM"
+        echo "  --build             Зібрати з source (native arch, v$PROJECTM_VERSION)"
+        echo "  --build-universal   Зібрати universal binary (arm64 + x86_64)"
+        exit 0
+        ;;
     "" | --build | --build-universal) ;;
     *)
         echo "❌ Невідомий аргумент: $MODE"
-        echo "   Доступно: без аргументів | --build | --build-universal"
+        echo "   Доступно: -h | --help | без аргументів | --build | --build-universal"
         exit 64
         ;;
 esac
@@ -83,9 +91,6 @@ find_newest_lib() {
                 FOUND_LIB="$candidate"
             fi
         done
-        if [[ -n "$FOUND_LIB" ]]; then
-            return 0
-        fi
     done
     return 0
 }
@@ -173,7 +178,16 @@ if [[ $WANT_BUILD -eq 1 ]]; then
     cmake "${CMAKE_ARGS[@]}"
     cmake --build "$BUILD_OUT" -j "$(sysctl -n hw.ncpu)"
     echo "🔐 Потрібен sudo для install у /usr/local..."
-    sudo cmake --install "$BUILD_OUT"
+    if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
+        echo "❌ sudo вимагає введення пароля, але поточний термінал неінтерактивний." >&2
+        echo "   Запустіть команду в інтерактивному терміналі або налаштуйте sudo без пароля." >&2
+        exit 1
+    fi
+    if sudo -n true 2>/dev/null; then
+        sudo -n cmake --install "$BUILD_OUT"
+    else
+        sudo cmake --install "$BUILD_OUT"
+    fi
 
     echo "✅ projectM v$PROJECTM_VERSION встановлено."
 
@@ -203,33 +217,42 @@ count_presets() {
 PRESET_COUNT="$(count_presets)"
 
 if [[ "$PRESET_COUNT" -eq 0 ]]; then
-    echo ""
-    echo "⚠️  MilkDrop пресети не знайдено. Завантажую..."
-    mkdir -p "$PRESETS_DIR"
+    if [[ $WANT_BUILD -eq 0 ]]; then
+        echo ""
+        echo "ℹ️  MilkDrop пресети не знайдено у $PRESETS_DIR."
+        echo "   Щоб завантажити повний набір пресетів, запустіть:"
+        echo "     $0 --build"
+    else
+        echo ""
+        echo "⚠️  MilkDrop пресети не знайдено. Завантажую..."
+        mkdir -p "$PRESETS_DIR"
 
-    if [[ -z "$TMP_ROOT" ]]; then
-        TMP_ROOT="$(mktemp -d)"
+        if [[ -z "$TMP_ROOT" ]]; then
+            TMP_ROOT="$(mktemp -d)"
+        fi
+        DL_DIR="$TMP_ROOT/presets"
+        mkdir -p "$DL_DIR"
+
+        curl -fsSL \
+            "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/refs/heads/master.zip" \
+            -o "$DL_DIR/presets.zip"
+        unzip -q "$DL_DIR/presets.zip" -d "$DL_DIR"
+
+        # В архіві рівно одна коренева тека; на її точну назву не покладаємось.
+        EXTRACTED=("$DL_DIR"/*/)
+        if [[ ${#EXTRACTED[@]} -ne 1 ]]; then
+            echo "❌ Неочікувана структура архіву пресетів (${#EXTRACTED[@]} кореневих тек)."
+            exit 1
+        fi
+
+        cp -R "${EXTRACTED[0]}." "$PRESETS_DIR/"
+        PRESET_COUNT="$(count_presets)"
     fi
-    DL_DIR="$TMP_ROOT/presets"
-    mkdir -p "$DL_DIR"
-
-    curl -fsSL \
-        "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/refs/heads/master.zip" \
-        -o "$DL_DIR/presets.zip"
-    unzip -q "$DL_DIR/presets.zip" -d "$DL_DIR"
-
-    # В архіві рівно одна коренева тека; на її точну назву не покладаємось.
-    EXTRACTED=("$DL_DIR"/*/)
-    if [[ ${#EXTRACTED[@]} -ne 1 ]]; then
-        echo "❌ Неочікувана структура архіву пресетів (${#EXTRACTED[@]} кореневих тек)."
-        exit 1
-    fi
-
-    cp -R "${EXTRACTED[0]}." "$PRESETS_DIR/"
-    PRESET_COUNT="$(count_presets)"
 fi
 
-echo "✅ $PRESET_COUNT MilkDrop пресетів готові"
+if [[ "$PRESET_COUNT" -gt 0 ]]; then
+    echo "✅ $PRESET_COUNT MilkDrop пресетів готові"
+fi
 echo ""
 echo "🎉 projectM готовий до використання."
 

@@ -13,11 +13,11 @@ echo "🚀 Building Release version of SystemEQ for Mac..."
 echo "📁 Project: $PROJECT_DIR"
 echo ""
 
-# Clean previous build
-if [ -d "$BUILD_DIR" ]; then
-    echo "🧹 Cleaning previous build..."
-    rm -rf "$BUILD_DIR"
-fi
+TEMP_DERIVED=$(mktemp -d "${TMPDIR:-/tmp}/systemeq-release.XXXXXX")
+cleanup() {
+    rm -rf "$TEMP_DERIVED"
+}
+trap cleanup EXIT
 
 # Build Release configuration
 echo "🔨 Building Release configuration..."
@@ -25,22 +25,26 @@ xcodebuild \
     -project "$PROJECT_DIR/SystemEQ for Mac.xcodeproj" \
     -scheme "$SCHEME" \
     -configuration Release \
-    -derivedDataPath "$DERIVED_DATA" \
+    -derivedDataPath "$TEMP_DERIVED" \
     -destination "platform=macOS" \
+    -quiet \
     build
 
 # Find the built app
-APP_PATH=$(find "$DERIVED_DATA" -name "SystemEQ for Mac.app" -type d | head -n 1)
+APP_PATH=$(find "$TEMP_DERIVED" -name "SystemEQ for Mac.app" -type d | head -n 1)
 
 if [ -z "$APP_PATH" ]; then
     echo "❌ Failed to find built app"
     exit 1
 fi
 
-# Copy to build directory
-echo "📦 Copying app to build directory..."
+# Stage atomically to build directory
+echo "📦 Staging app to build directory..."
 mkdir -p "$BUILD_DIR"
-cp -R "$APP_PATH" "$BUILD_DIR/"
+rm -rf "$BUILD_DIR/SystemEQ for Mac.app.tmp"
+cp -R "$APP_PATH" "$BUILD_DIR/SystemEQ for Mac.app.tmp"
+rm -rf "$BUILD_DIR/SystemEQ for Mac.app"
+mv "$BUILD_DIR/SystemEQ for Mac.app.tmp" "$BUILD_DIR/SystemEQ for Mac.app"
 
 echo ""
 echo "✅ Release build complete!"

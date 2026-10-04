@@ -47,7 +47,9 @@ else
     echo "BUILD FAILED (exit code $EXIT_CODE)"
     echo ""
     echo "Повні помилки:"
-    grep -E "error:" "$LOG" | grep -v "appintentsmetadataprocessor" || true
+    if ! grep -E "error:" "$LOG" | grep -v "appintentsmetadataprocessor"; then
+        echo "   (Деталей error: не виявлено; дивіться повний лог: $LOG)"
+    fi
 fi
 
 exit "$EXIT_CODE"
