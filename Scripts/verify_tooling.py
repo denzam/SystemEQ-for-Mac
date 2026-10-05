@@ -24,6 +24,7 @@ def main():
         cwd=root, env=env, check=True,
     )
     subprocess.run([sys.executable, "Scripts/test_code_quality.py"], cwd=root, env=env, check=True)
+    subprocess.run([sys.executable, "Scripts/test_audit_antipatterns.py"], cwd=root, env=env, check=True)
     if sys.platform == "darwin":
         subprocess.run([sys.executable, "Scripts/test_runtime_tools.py"], cwd=root, env=env, check=True)
 
