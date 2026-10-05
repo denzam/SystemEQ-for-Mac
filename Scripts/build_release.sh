@@ -2,12 +2,15 @@
 # Build Release version of SystemEQ for Mac for performance testing
 # This creates an optimized build WITHOUT Xcode debugger overhead
 
-set -e
+set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEME="SystemEQ for Mac"
 BUILD_DIR="$PROJECT_DIR/build"
-DERIVED_DATA="$BUILD_DIR/DerivedData"
+TARGET_APP="$BUILD_DIR/$SCHEME.app"
+STAGING_DIR=""
+LOCK_OWNED=0
+PUBLISHED=0
 
 echo "🚀 Building Release version of SystemEQ for Mac..."
 echo "📁 Project: $PROJECT_DIR"
@@ -15,9 +18,32 @@ echo ""
 
 TEMP_DERIVED=$(mktemp -d "${TMPDIR:-/tmp}/systemeq-release.XXXXXX")
 cleanup() {
-    rm -rf "$TEMP_DERIVED"
+    local status=$? failed=0 keep_staging=0
+    trap - EXIT
+    if [[ -n "$STAGING_DIR" && -e "$STAGING_DIR/previous.app" && "$PUBLISHED" == 0 ]]; then
+        if [[ -e "$TARGET_APP" || -L "$TARGET_APP" ]]; then
+            keep_staging=1
+        elif ! mv "$STAGING_DIR/previous.app" "$TARGET_APP"; then
+            keep_staging=1
+            failed=1
+        fi
+        if [[ "$keep_staging" == 1 ]]; then
+            echo "Previous build preserved at: $STAGING_DIR/previous.app" >&2
+        fi
+    fi
+    if [[ -n "$STAGING_DIR" && "$keep_staging" == 0 ]]; then
+        if ! rm -rf "$STAGING_DIR"; then failed=1; fi
+    fi
+    if ! rm -rf "$TEMP_DERIVED"; then failed=1; fi
+    if [[ "$LOCK_OWNED" == 1 ]]; then
+        if ! rmdir "$BUILD_DIR/.systemeq-release.lock"; then failed=1; fi
+    fi
+    if [[ "$status" == 0 && "$failed" == 1 ]]; then status=1; fi
+    exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Build Release configuration
 echo "🔨 Building Release configuration..."
@@ -31,20 +57,31 @@ xcodebuild \
     build
 
 # Find the built app
-APP_PATH=$(find "$TEMP_DERIVED" -name "SystemEQ for Mac.app" -type d | head -n 1)
+APP_PATH="$TEMP_DERIVED/Build/Products/Release/$SCHEME.app"
 
-if [ -z "$APP_PATH" ]; then
+if [[ ! -d "$APP_PATH" ]]; then
     echo "❌ Failed to find built app"
     exit 1
 fi
 
-# Stage atomically to build directory
 echo "📦 Staging app to build directory..."
 mkdir -p "$BUILD_DIR"
-rm -rf "$BUILD_DIR/SystemEQ for Mac.app.tmp"
-cp -R "$APP_PATH" "$BUILD_DIR/SystemEQ for Mac.app.tmp"
-rm -rf "$BUILD_DIR/SystemEQ for Mac.app"
-mv "$BUILD_DIR/SystemEQ for Mac.app.tmp" "$BUILD_DIR/SystemEQ for Mac.app"
+if ! mkdir "$BUILD_DIR/.systemeq-release.lock"; then
+    echo "Release publication is locked; previous build was not changed." >&2
+    exit 1
+fi
+LOCK_OWNED=1
+if [[ -L "$TARGET_APP" ]]; then
+    echo "Refusing to replace a symlinked app: $TARGET_APP" >&2
+    exit 1
+fi
+STAGING_DIR=$(mktemp -d "$BUILD_DIR/.systemeq-release.XXXXXX")
+cp -R "$APP_PATH" "$STAGING_DIR/$SCHEME.app"
+if [[ -e "$TARGET_APP" ]]; then
+    mv "$TARGET_APP" "$STAGING_DIR/previous.app"
+fi
+mv "$STAGING_DIR/$SCHEME.app" "$TARGET_APP"
+PUBLISHED=1
 
 echo ""
 echo "✅ Release build complete!"

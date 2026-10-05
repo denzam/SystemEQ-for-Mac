@@ -55,20 +55,29 @@ test -f "$2"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/systemeq-packages.XXXXXX")
 MOUNTED=0
 cleanup() {
+    local status=$?
+    trap - EXIT
     if [[ "$MOUNTED" == 1 ]]; then
-        if ! hdiutil detach "$WORK_DIR/mount" -force >/dev/null 2>&1; then
-            echo "Warning: failed to cleanly detach $WORK_DIR/mount" >&2
+        if ! hdiutil detach "$WORK_DIR/mount" -force; then
+            echo "Failed to detach; preserving work directory: $WORK_DIR" >&2
+            if [[ "$status" == 0 ]]; then status=1; fi
+            exit "$status"
         fi
     fi
     if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
-        rm -rf "$WORK_DIR"
+        if ! rm -rf "$WORK_DIR"; then
+            if [[ "$status" == 0 ]]; then status=1; fi
+        fi
     fi
+    if [[ "$status" == 0 ]]; then echo "ZIP and DMG bundle checks passed."; fi
+    exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 ditto -x -k "$1" "$WORK_DIR/zip"
 verify_bundle "$WORK_DIR/zip/SystemEQ for Mac.app" "$3"
 mkdir "$WORK_DIR/mount"
-hdiutil attach "$2" -readonly -nobrowse -mountpoint "$WORK_DIR/mount" >/dev/null
 MOUNTED=1
+hdiutil attach "$2" -readonly -nobrowse -mountpoint "$WORK_DIR/mount" >/dev/null
 verify_bundle "$WORK_DIR/mount/SystemEQ for Mac.app" "$3"
-echo "ZIP and DMG bundle checks passed."
