@@ -10,7 +10,7 @@ import XCTest
 
 final class BiquadFilterTests: XCTestCase {
     func testRoomAndEQCascadeProducesExpectedAudioAcrossSampleRates() {
-        let engine = CoreAudioEngine.shared
+        let engine = CoreAudioEngine()
         defer {
             engine.setEnabled(false)
             engine.clearRoomNotchFilters()
@@ -497,14 +497,14 @@ final class BiquadFilterTests: XCTestCase {
         let bands = [
             ParametricBand(frequency: 100, gain: 0.0, q: 0.707, filterType: .highPass),
             ParametricBand(frequency: 10000, gain: 0.0, q: 0.707, filterType: .lowPass),
-            ParametricBand(frequency: 1000, gain: 0.0, q: 1.0, filterType: .peak),
+            ParametricBand(frequency: 1000, gain: 0.0, q: 1.0, filterType: .peak)
         ]
         filter.configure(bands: bands, preamp: 0.0, outputBoost: 0.0, sampleRate: 48000)
         XCTAssertEqual(filter.activeFilterCount, 2, "HighPass and LowPass should be active even with 0 gain")
     }
 
     func testCoreAudioEngine_roomNotchFilters_preservesActiveEQ() {
-        let engine = CoreAudioEngine.shared
+        let engine = CoreAudioEngine()
         // Set a 10-band EQ
         engine.applyFixedBandEQ([3.0, 3.0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0.0, outputBoost: 0.0)
         let originalVDSP = engine.vdspFilter
@@ -580,7 +580,7 @@ final class BiquadFilterTests: XCTestCase {
     }
 
     func testCoreAudioEngine_roomNotchFilters_rebuildsOnSampleRateChange() {
-        let engine = CoreAudioEngine.shared
+        let engine = CoreAudioEngine()
         engine.applyRoomNotchFilters([(frequency: 250, gain: -6.0, q: 8.0)])
         guard let initialRoomFilter = engine.roomFilter else {
             XCTFail("roomFilter should be initialized")
@@ -634,7 +634,7 @@ final class BiquadFilterTests: XCTestCase {
     }
 
     func testCoreAudioEngine_activeEQFilter_rebuildsOnSampleRateChange() {
-        let engine = CoreAudioEngine.shared
+        let engine = CoreAudioEngine()
         let testGains: [Float] = [1, 2, 3, 4, 5, -1, -2, -3, -4, -5]
         engine.applyFixedBandEQ(testGains, preamp: 1.0, outputBoost: 0.5)
 

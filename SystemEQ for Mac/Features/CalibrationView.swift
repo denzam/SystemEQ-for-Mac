@@ -116,6 +116,17 @@ struct CalibrationView: View {
         .sheet(isPresented: $showNewProfileSheet) {
             newProfileSheet
         }
+        .sheet(item: $currentProfile) { profile in
+            CalibrationProfileEditor(profile: profile, save: { updated in
+                guard await calibration.saveEditedProfile(updated) else { return false }
+                currentProfile = nil
+                return true
+            }, cancel: { currentProfile = nil })
+        }
+        .onChange(of: calibration.profiles) { profiles in
+            if let id = profileA?.id { profileA = profiles.first { $0.id == id } }
+            if let id = profileB?.id { profileB = profiles.first { $0.id == id } }
+        }
         .alert(localization.localized(.warning31Bands), isPresented: $show31BandWarning1) {
             Button(localization.localized(.warning31BandsButton1), role: .cancel) {
                 selectedBandCount = .bands10
@@ -163,6 +174,11 @@ struct CalibrationView: View {
         VStack(spacing: 24) {
             // Info card
             infoCard
+
+            if isReferenceStep, !calibration.profiles.isEmpty {
+                Button(localization.localized(.profiles)) { selectedTab = .profiles }
+                    .buttonStyle(.borderedProminent)
+            }
 
             // Calibration mode selector
             if isReferenceStep {
@@ -601,8 +617,7 @@ struct CalibrationView: View {
     }
 
     private var frequencyCalibrationView: some View {
-        let frequencies = selectedBandCount == .bands10 ?
-            calibration.get10BandFrequencies() : calibration.standardFrequencies
+        let frequencies = calibrationStepIndices.map { calibration.standardFrequencies[$0] }
         let currentFrequency = frequencies[currentTestBandIndex]
 
         return VStack(spacing: 20) {
@@ -884,7 +899,7 @@ struct CalibrationView: View {
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(
-                            "\(currentTestBandIndex + 1) \(localization.localized(.progressOf)) \(selectedBandCount == .bands10 ? 10 : 31)"
+                            "\(currentTestBandIndex + 1) \(localization.localized(.progressOf)) \(calibrationStepIndices.count)"
                         )
                         .font(AppTypography.body)
                         .fontWeight(.semibold)
@@ -892,7 +907,7 @@ struct CalibrationView: View {
 
                     ProgressView(
                         value: Double(currentTestBandIndex + 1),
-                        total: Double(selectedBandCount == .bands10 ? 10 : 31)
+                        total: Double(calibrationStepIndices.count)
                     )
                     .accentColor(.blue)
                 }
@@ -920,7 +935,7 @@ struct CalibrationView: View {
                     }
                     .buttonStyle(BorderedButtonStyle())
 
-                    if currentTestBandIndex < (selectedBandCount == .bands10 ? 9 : 30) {
+                    if currentTestBandIndex < calibrationStepIndices.count - 1 {
                         Button(action: {
                             calibration.stopTestTone()
                             calibration.stopComparisonMode()
@@ -1126,6 +1141,9 @@ struct CalibrationView: View {
                 }
                 .buttonStyle(ProfileButtonStyle(isActive: calibration.activeProfile?.id == profile.id))
 
+                Button(localization.localized(.editProfile)) { currentProfile = profile }
+                    .buttonStyle(BorderedButtonStyle())
+
                 Button(action: {
                     profileToDelete = profile
                     showDeleteAlert = true
@@ -1303,39 +1321,39 @@ struct CalibrationView: View {
 
     private var newProfileSheet: some View {
         VStack(spacing: 20) {
-            Text("Save Calibration Profile")
+            Text(localization.localized(.saveCalibrationProfile))
                 .font(.title2)
                 .fontWeight(.semibold)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Profile Name")
+                Text(localization.localized(.profileName))
                     .font(AppTypography.body)
                     .foregroundColor(.secondary)
-                TextField("e.g., My Headphones", text: $profileName)
+                TextField(localization.localized(.exampleProfileName), text: $profileName)
                     .textFieldStyle(.roundedBorder)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Notes (Optional)")
+                Text(localization.localized(.profileNotes))
                     .font(AppTypography.body)
                     .foregroundColor(.secondary)
-                TextField("e.g., Calibrated for evening listening", text: $profileNotes)
+                TextField(localization.localized(.profileNotes), text: $profileNotes)
                     .textFieldStyle(.roundedBorder)
             }
 
             HStack(spacing: 12) {
-                Button("Cancel") {
+                Button(localization.localized(.cancel)) {
                     showNewProfileSheet = false
                     profileName = ""
                     profileNotes = ""
                 }
                 .buttonStyle(BorderedButtonStyle())
 
-                Button("Save") {
+                Button(localization.localized(.save)) {
                     saveProfile()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(profileName.isEmpty)
+                .disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
@@ -1350,22 +1368,19 @@ struct CalibrationView: View {
         testBands = Array(repeating: 0.0, count: 31)
     }
 
+    private var calibrationStepIndices: [Int] {
+        calibration.calibrationBandIndices(mode: selectedBandCount == .bands10 ? .tenBand : .thirtyOneBand)
+    }
+
     private func getGlobalBandIndex(_ localIndex: Int) -> Int {
-        if selectedBandCount == .bands10 {
-            let indices = calibration.get10BandIndices()
-            return indices[localIndex]
-        } else {
-            return localIndex
-        }
+        calibrationStepIndices[localIndex]
     }
 
     private func saveProfile() {
-        let profile = CalibrationProfile(
-            name: profileName,
-            type: .equalLoudness,
-            bands: testBands,
-            notes: profileNotes
-        )
+        guard let profile = calibration.equalLoudnessProfile(name: profileName, bands: testBands, notes: profileNotes)
+        else {
+            return
+        }
         calibration.profiles.append(profile)
         calibration.updateProfile(profile)
 

@@ -340,6 +340,10 @@ public enum LocalizedString: String, CaseIterable {
     case gain
     case saveProfile
     case profileName
+    case editProfile
+    case profileNotes
+    case profileSaveFailed
+    case showVisualizerWindow
     case saveCalibrationProfile
     case compareOriginalVsFiltered
     case detectedResonances

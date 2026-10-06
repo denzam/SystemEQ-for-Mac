@@ -23,6 +23,11 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
     /// Metadata
     public var notes: String
 
+    var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            bands.count == 31 && bands.allSatisfy(\.isFinite)
+    }
+
     public init(
         id: UUID = UUID(),
         name: String,
@@ -36,6 +41,40 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         self.type = type
         self.bands = bands
         self.notes = notes
+    }
+}
+
+struct CalibrationProfileDraft {
+    private let original: CalibrationProfile
+    private let originalBandInputs: [String]
+    private let decimalSeparator: String
+    var name: String
+    var notes: String
+    var bandInputs: [String]
+
+    init(_ profile: CalibrationProfile, locale: Locale = .current) {
+        original = profile
+        name = profile.name
+        notes = profile.notes
+        decimalSeparator = locale.decimalSeparator ?? "."
+        originalBandInputs = profile.bands.map { $0.formatted(.number.locale(locale)) }
+        bandInputs = originalBandInputs
+    }
+
+    var updatedProfile: CalibrationProfile? {
+        guard original.bands.count == 31, original.bands.allSatisfy(\.isFinite), bandInputs.count == 31 else {
+            return nil
+        }
+        var profile = original
+        profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.notes = notes
+        for index in bandInputs.indices where bandInputs[index] != originalBandInputs[index] {
+            let input = bandInputs[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: decimalSeparator, with: ".")
+            guard let gain = Float(input), gain.isFinite else { return nil }
+            profile.bands[index] = gain
+        }
+        return profile.isValid ? profile : nil
     }
 }
 
@@ -101,6 +140,8 @@ public final class CalibrationEngine: ObservableObject {
     private var playerNode: AVAudioPlayerNode?
     private var testToneBuffer: AVAudioPCMBuffer?
     private var isAudioEngineSetup: Bool = false
+    private let eqEngine: AudioEngine
+    private let storedProfilesURL: URL?
 
     private let profilesQueue = DispatchQueue(label: "com.systemeq.calibration-profiles", qos: .utility)
     private let profilePersistenceState = ProfilePersistenceState()
@@ -133,8 +174,19 @@ public final class CalibrationEngine: ObservableObject {
 
     // MARK: - Initialization
 
-    private init() {
-        loadProfiles()
+    init(
+        eqEngine: AudioEngine = .shared,
+        profilesURL: URL? = nil,
+        audioEngine: AVAudioEngine? = nil,
+        playerNode: AVAudioPlayerNode? = nil,
+        loadStoredProfiles: Bool = true
+    ) {
+        self.eqEngine = eqEngine
+        storedProfilesURL = profilesURL
+        self.audioEngine = audioEngine
+        self.playerNode = playerNode
+        isAudioEngineSetup = audioEngine != nil && playerNode != nil
+        if loadStoredProfiles { loadProfiles() } else { didFinishLoadingProfiles = true }
         // ⚡ OPTIMIZATION: Lazy initialization - setup audio engine only when needed
         // setupAudioEngine() - moved to ensureAudioEngineSetup()
     }
@@ -243,6 +295,8 @@ public final class CalibrationEngine: ObservableObject {
         testToneBuffer = buffer
 
         player.stop()
+        player.volume = 1
+        isPlayingLoop = false
         player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: { [weak self] in
             DispatchQueue.main.async {
                 self?.isTestTonePlaying = false
@@ -285,7 +339,7 @@ public final class CalibrationEngine: ObservableObject {
         let angularFrequency = 2.0 * .pi * frequency / sampleRate
 
         for frame in 0..<Int(frameCount) {
-            let sample = Float(sin(angularFrequency * Double(frame))) * amplitude
+            let sample = Float(sin(angularFrequency * Double(frame)))
 
             // Stereo
             buffer.floatChannelData?[0][frame] = sample
@@ -298,6 +352,7 @@ public final class CalibrationEngine: ObservableObject {
         testToneBuffer = buffer
 
         player.stop()
+        player.volume = Self.normalizedAmplitude(amplitude)
 
         // Schedule buffer with looping
         player.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
@@ -311,70 +366,16 @@ public final class CalibrationEngine: ObservableObject {
 
     /// Update amplitude of currently playing loop
     public func updateLoopAmplitude(_ newAmplitude: Float) {
-        ensureAudioEngineSetup()
         guard isPlayingLoop, let player = playerNode else { return }
-
-        // Regenerate buffer with new amplitude
-        let sampleRate: Double = 48000
-        let duration: TimeInterval = 2.0
-        let frameCount = AVAudioFrameCount(sampleRate * duration)
-
-        guard let format = AVAudioFormat(
-            standardFormatWithSampleRate: sampleRate,
-            channels: 2
-        ) else { return }
-
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: frameCount
-        ) else { return }
-
-        buffer.frameLength = frameCount
-
-        // Generate sine wave with new amplitude
-        let angularFrequency = 2.0 * .pi * currentTestFrequency / sampleRate
-
-        for frame in 0..<Int(frameCount) {
-            let sample = Float(sin(angularFrequency * Double(frame))) * newAmplitude
-
-            // Stereo
-            buffer.floatChannelData?[0][frame] = sample
-            buffer.floatChannelData?[1][frame] = sample
-        }
-
-        // Apply fade in/out to avoid clicks
-        applyFadeInOut(buffer: buffer, fadeDuration: 0.05)
-
-        testToneBuffer = buffer
-
-        // Schedule new buffer (will take effect after current buffer finishes)
-        player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+        player.volume = Self.normalizedAmplitude(newAmplitude)
     }
 
-    /// Update amplitude for filtered pink noise loop
     public func updatePinkNoiseLoopAmplitude(_ newAmplitude: Float) {
-        ensureAudioEngineSetup()
-        guard isPlayingLoop, let player = playerNode else { return }
+        updateLoopAmplitude(newAmplitude)
+    }
 
-        let duration: TimeInterval = 2.0
-
-        // Generate pink noise buffer
-        guard let pinkBuffer = generatePinkNoiseBuffer(duration: duration) else { return }
-
-        // Apply band-pass filter around target frequency
-        guard let filtered = applyBandPassFilterToBuffer(
-            buffer: pinkBuffer,
-            centerFrequency: currentTestFrequency,
-            bandwidth: 1.0 / 3.0
-        ) else { return }
-
-        // Scale amplitude
-        scaleBufferAmplitude(filtered, amplitude: newAmplitude)
-
-        testToneBuffer = filtered
-
-        // Schedule new buffer
-        player.scheduleBuffer(filtered, at: nil, options: [], completionHandler: nil)
+    private static func normalizedAmplitude(_ amplitude: Float) -> Float {
+        amplitude.isFinite ? min(max(amplitude, 0), 1) : 0
     }
 
     /// Play filtered pink noise at specific frequency band
@@ -405,6 +406,8 @@ public final class CalibrationEngine: ObservableObject {
         testToneBuffer = filtered
 
         player.stop()
+        player.volume = 1
+        isPlayingLoop = false
         player.scheduleBuffer(filtered, at: nil, options: [], completionHandler: { [weak self] in
             DispatchQueue.main.async {
                 self?.isTestTonePlaying = false
@@ -594,11 +597,44 @@ public final class CalibrationEngine: ObservableObject {
     }
 
     /// Update profile
-    public func updateProfile(_ profile: CalibrationProfile) {
-        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-            profiles[index] = profile
-            profilesDidChange(.upsert(profile))
-            dlog("✅ Updated calibration profile: \(profile.name)", category: .calibration)
+    @discardableResult
+    public func updateProfile(_ profile: CalibrationProfile) -> Bool {
+        guard profile.isValid, let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return false }
+        if activeProfile?.id == profile.id {
+            guard eqEngine.setCalibrationAdjustments(profile.bands) else { return false }
+            activeProfile = profile
+        }
+        profiles[index] = profile
+        profilesDidChange(.upsert(profile))
+        dlog("✅ Updated calibration profile: \(profile.name)", category: .calibration)
+        return true
+    }
+
+    @MainActor
+    func saveEditedProfile(_ profile: CalibrationProfile) async -> Bool {
+        guard let original = profiles.first(where: { $0.id == profile.id }),
+              original.bands.count == 31, original.bands.allSatisfy(\.isFinite),
+              updateProfile(profile) else { return false }
+        let state = profilePersistenceState
+        return await withCheckedContinuation { continuation in
+            profilesQueue.async { [weak self] in
+                let saved = !state.needsWrite
+                DispatchQueue.main.async {
+                    guard let self else { continuation.resume(returning: false); return }
+                    if !saved, let index = self.profiles.firstIndex(where: { $0 == profile }) {
+                        if self.activeProfile?.id == profile.id {
+                            if self.eqEngine.setCalibrationAdjustments(original.bands) {
+                                self.activeProfile = original
+                            } else {
+                                dlog("Failed to restore calibration correction", category: .calibration)
+                            }
+                        }
+                        self.profiles[index] = original
+                        self.profilesDidChange(.upsert(original))
+                    }
+                    continuation.resume(returning: saved)
+                }
+            }
         }
     }
 
@@ -606,7 +642,7 @@ public final class CalibrationEngine: ObservableObject {
     public func deleteProfile(_ profile: CalibrationProfile) {
         profiles.removeAll { $0.id == profile.id }
         if activeProfile?.id == profile.id {
-            activeProfile = nil
+            deactivateProfile()
         }
         profilesDidChange(.delete(profile.id))
         dlog("🗑️ Deleted calibration profile: \(profile.name)", category: .calibration)
@@ -614,23 +650,13 @@ public final class CalibrationEngine: ObservableObject {
 
     /// Activate profile
     public func activateProfile(_ profile: CalibrationProfile) {
-        activeProfile = profile
-        applyCalibrationToEQ(profile)
-
-        // Auto-enable EQ routing when activating a calibration profile
-        // Check both routing state and actual CoreAudioEngine status
-        if !AudioRouter.shared.isRoutingActive || !CoreAudioEngine.shared.isRunning {
-            AudioRouter.shared.enableEQRouting()
+        guard eqEngine.setCalibrationAdjustments(profile.bands) else {
+            dlog("Invalid calibration profile bands", category: .calibration)
+            return
         }
-
-        // ✅ AUTO-ENABLE: Automatically enable EQ processing when activating calibration
-        // This ensures calibration filters are actually applied to audio
-        if !CoreAudioEngine.shared.isEnabled {
-            dlog("🔧 Auto-enabling EQ processing for calibration profile", category: .calibration)
-            CoreAudioEngine.shared.setEnabled(true)
-
-            // Sync UI state via notification
-            DispatchQueue.main.async {
+        activeProfile = profile
+        if !eqEngine.coreAudioEngine.isRunning || !eqEngine.coreAudioEngine.isEnabled {
+            if eqEngine.setEnabled(true) {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("EQStateChanged"),
                     object: nil,
@@ -638,70 +664,19 @@ public final class CalibrationEngine: ObservableObject {
                 )
             }
         }
-
         dlog("✅ Activated calibration profile: \(profile.name)", category: .calibration)
     }
 
-    /// Deactivate profile
     public func deactivateProfile() {
         activeProfile = nil
-        clearCalibrationFromEQ()
+        eqEngine.setCalibrationAdjustments(nil)
         dlog("🔄 Deactivated calibration profile", category: .calibration)
-    }
-
-    // MARK: - Apply Calibration to EQ
-
-    /// Apply calibration adjustments to CoreAudioEngine
-    private func applyCalibrationToEQ(_ profile: CalibrationProfile) {
-        // Get current EQ mode from AudioEngine
-        let currentMode = AudioEngine.shared.bandMode
-        let indices10 = get10BandIndices()
-
-        // Apply calibration adjustments based on current EQ mode
-        switch currentMode {
-        case .tenBand:
-            // Apply only 10 bands (subset of 31)
-            for (bandIndex, calibIndex) in indices10.enumerated() where calibIndex < profile.bands.count {
-                let adjustment = profile.bands[calibIndex]
-                CoreAudioEngine.shared.setEQBand(index: bandIndex, gain: adjustment)
-            }
-            dlog("🎚️ Applied calibration to EQ: 10 bands", category: .calibration)
-
-        case .thirtyOneBand:
-            // Apply all 31 bands
-            for (index, adjustment) in profile.bands.enumerated() where index < 31 {
-                CoreAudioEngine.shared.setEQBand(index: index, gain: adjustment)
-            }
-            dlog("🎚️ Applied calibration to EQ: 31 bands", category: .calibration)
-        }
-    }
-
-    /// Clear calibration from EQ
-    private func clearCalibrationFromEQ() {
-        // Get current EQ mode from AudioEngine
-        let currentMode = AudioEngine.shared.bandMode
-
-        // Reset all EQ bands to 0 dB based on current mode
-        switch currentMode {
-        case .tenBand:
-            // Reset 10 bands
-            for bandIndex in 0..<10 {
-                CoreAudioEngine.shared.setEQBand(index: bandIndex, gain: 0.0)
-            }
-            dlog("🔄 Calibration cleared from EQ: 10 bands reset to 0 dB", category: .calibration)
-
-        case .thirtyOneBand:
-            // Reset all 31 bands
-            for bandIndex in 0..<31 {
-                CoreAudioEngine.shared.setEQBand(index: bandIndex, gain: 0.0)
-            }
-            dlog("🔄 Calibration cleared from EQ: 31 bands reset to 0 dB", category: .calibration)
-        }
     }
 
     // MARK: - Persistence
 
     private var profilesURL: URL {
+        if let storedProfilesURL { return storedProfilesURL }
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documentsPath.appendingPathComponent("CalibrationProfiles.json")
     }
@@ -739,7 +714,7 @@ public final class CalibrationEngine: ObservableObject {
                 state.needsWrite = false
                 dlog("💾 Saved \(profiles.count) calibration profiles", category: .calibration)
             } catch {
-                dlog("❌ Failed to save profiles: \(error)", category: .calibration)
+                dlog("❌ Failed to save profiles: \(error)", level: .error, category: .calibration)
             }
         }
     }
@@ -809,7 +784,7 @@ public final class CalibrationEngine: ObservableObject {
                 state.needsWrite = false
                 dlog("💾 Flushed \(profiles.count) calibration profiles", category: .calibration)
             } catch {
-                dlog("❌ Failed to flush profiles: \(error)", category: .calibration)
+                dlog("❌ Failed to flush profiles: \(error)", level: .error, category: .calibration)
             }
         }
     }
@@ -870,10 +845,10 @@ public final class CalibrationEngine: ObservableObject {
             bandwidth: 1.0 / 3.0
         ) else { return }
 
-        // Scale amplitude
-        scaleBufferAmplitude(filtered, amplitude: amplitude)
-
+        currentTestFrequency = frequency
+        testToneBuffer = filtered
         player.stop()
+        player.volume = Self.normalizedAmplitude(amplitude)
 
         // Schedule buffer with looping
         player.scheduleBuffer(filtered, at: nil, options: .loops, completionHandler: nil)
@@ -910,7 +885,7 @@ public final class CalibrationEngine: ObservableObject {
         let angularFrequency = 2.0 * .pi * referenceFrequency / sampleRate
 
         for frame in 0..<Int(frameCount) {
-            let sample = Float(sin(angularFrequency * Double(frame))) * amplitude
+            let sample = Float(sin(angularFrequency * Double(frame)))
 
             // Stereo
             buffer.floatChannelData?[0][frame] = sample
@@ -921,12 +896,15 @@ public final class CalibrationEngine: ObservableObject {
         applyFadeInOut(buffer: buffer, fadeDuration: 0.05)
 
         player.stop()
+        player.volume = Self.normalizedAmplitude(amplitude)
 
         // Schedule buffer with looping
         player.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
 
         player.play()
         isTestTonePlaying = true
+        isPlayingLoop = true
+        currentTestFrequency = referenceFrequency
     }
 
     /// Play test tone at specific level
@@ -1051,6 +1029,20 @@ public final class CalibrationEngine: ObservableObject {
         return freq10.compactMap { standardFrequencies.firstIndex(of: $0) }
     }
 
+    func calibrationBandIndices(mode: EQBandMode) -> [Int] {
+        let indices = mode == .tenBand ? get10BandIndices() : Array(standardFrequencies.indices)
+        return indices.filter { standardFrequencies[$0] != 1000 }
+    }
+
+    func equalLoudnessProfile(name: String, bands: [Float], notes: String) -> CalibrationProfile? {
+        var profile = CalibrationProfile(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), type: .equalLoudness, bands: bands, notes: notes
+        )
+        guard profile.isValid, let referenceIndex = standardFrequencies.firstIndex(of: 1000) else { return nil }
+        profile.bands[referenceIndex] = 0
+        return profile
+    }
+
     // MARK: - Frequency Helpers
 
     /// Get frequency label for display
@@ -1076,8 +1068,8 @@ public final class CalibrationEngine: ObservableObject {
 
         if mode == .clean {
             // Save current EQ state and disable EQ
-            savedEQEnabled = CoreAudioEngine.shared.isEnabled
-            CoreAudioEngine.shared.isEnabled = false
+            savedEQEnabled = eqEngine.coreAudioEngine.isEnabled
+            eqEngine.coreAudioEngine.setEnabled(false)
 
             dlog("🎚️ Calibration started in CLEAN mode (EQ disabled)", category: .calibration)
         } else {
@@ -1092,7 +1084,7 @@ public final class CalibrationEngine: ObservableObject {
 
         if mode == .clean {
             // Restore EQ state
-            CoreAudioEngine.shared.isEnabled = savedEQEnabled
+            eqEngine.coreAudioEngine.setEnabled(savedEQEnabled)
 
             dlog(
                 "🎚️ Calibration ended - EQ state restored (\(savedEQEnabled ? "enabled" : "disabled"))",

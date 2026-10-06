@@ -171,6 +171,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     // EQ parameters (10-band)
     fileprivate var eqGains: [Float] = Array(repeating: 0.0, count: 10)
+    private var activeEQMode: EQBandMode = .tenBand
     private let eqFrequencies: [Float] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
     fileprivate var preampGain: Float = 0.0
@@ -357,7 +358,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Initialization
 
-    private init() {
+    init() {
         callbackWindow = AudioCallbackWindow(
             input: diagnosticInputCallbacks,
             output: diagnosticOutputCallbacks,
@@ -1143,6 +1144,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Apply fixed-band EQ (10 bands)
     public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
+        activeEQMode = .tenBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
         let outputBoost = Self.sanitizedOutputBoost(outputBoost)
@@ -1165,6 +1167,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Apply 31-band graphic EQ using parametric peaks
     public func applyGraphicEQ31(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
+        activeEQMode = .thirtyOneBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
         let outputBoost = Self.sanitizedOutputBoost(outputBoost)
@@ -1189,7 +1192,7 @@ public final class CoreAudioEngine: ObservableObject {
     func rebuildActiveEQFilter(sampleRate: Double) {
         currentSampleRate = sampleRate
         guard vdspFilter != nil else { return }
-        if eqGains.count == 31 {
+        if activeEQMode == .thirtyOneBand {
             applyGraphicEQ31(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
         } else {
             applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
@@ -1198,6 +1201,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Clear EQ
     public func clearEQ() {
+        activeEQMode = .tenBand
         self.vdspFilter = nil
         self.preampGain = 0.0
         self.eqGains = Array(repeating: 0.0, count: 10)
@@ -1636,11 +1640,11 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Set single EQ band (rebuilds filter chain)
     public func setEQBand(index: Int, gain: Float) {
-        guard index < eqGains.count else { return }
+        guard index >= 0, index < eqGains.count, gain.isFinite else { return }
         eqGains[index] = max(-20.0, min(20.0, gain))
 
         // Rebuild filter chain with new gains
-        applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        applyCurrentEQGains()
     }
 
     /// Get current band gain
@@ -1714,12 +1718,22 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Set all bands at once
     public func setAllBands(_ gains: [Float]) {
+        guard gains.allSatisfy(\.isFinite) else { return }
         for (index, gain) in gains.prefix(eqGains.count).enumerated() {
             eqGains[index] = max(-20.0, min(20.0, gain))
         }
 
         // Rebuild filter chain
-        applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        applyCurrentEQGains()
+    }
+
+    private func applyCurrentEQGains() {
+        switch activeEQMode {
+        case .tenBand:
+            applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        case .thirtyOneBand:
+            applyGraphicEQ31(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+        }
     }
 
     // MARK: - Room Correction

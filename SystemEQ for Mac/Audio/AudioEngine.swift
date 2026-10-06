@@ -174,6 +174,8 @@ public final class AudioEngine: ObservableObject {
     private var persistenceDebounceWorkItem: DispatchWorkItem?
     private let persistenceDebounceInterval: DispatchTimeInterval = .milliseconds(250)
     private let defaults: UserDefaults
+    let coreAudioEngine: CoreAudioEngine
+    private var calibrationAdjustments: [Float]?
     private let enableRouting: (Bool) -> Bool
     private let disableRouting: (Bool) -> Void
     private static let outputBoostGainKey = "outputBoostGain"
@@ -186,6 +188,7 @@ public final class AudioEngine: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
+        coreAudioEngine: CoreAudioEngine = .shared,
         enableRouting: @escaping (Bool) -> Bool = { persistEnabledStateOnFailure in
             AudioRouter.shared.enableEQRouting(
                 persistEnabledStateOnFailure: persistEnabledStateOnFailure
@@ -196,6 +199,7 @@ public final class AudioEngine: ObservableObject {
         }
     ) {
         self.defaults = defaults
+        self.coreAudioEngine = coreAudioEngine
         self.enableRouting = enableRouting
         self.disableRouting = disableRouting
         outputBoostGain = Self.sanitizedOutputBoost(defaults.float(forKey: Self.outputBoostGainKey))
@@ -206,14 +210,14 @@ public final class AudioEngine: ObservableObject {
 
     private func setupBindings() {
         // Bind CoreAudioEngine states to this facade
-        CoreAudioEngine.shared.$isRunning
+        coreAudioEngine.$isRunning
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
                 DispatchQueue.main.async { self?.isRunning = value }
             }
             .store(in: &cancellables)
 
-        CoreAudioEngine.shared.$isEnabled
+        coreAudioEngine.$isEnabled
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
                 DispatchQueue.main.async { self?.isEnabled = value }
@@ -269,21 +273,7 @@ public final class AudioEngine: ObservableObject {
         syncDebounceWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            let gains = self.bands.map(\.gain)
-            switch self.bandMode {
-            case .tenBand:
-                CoreAudioEngine.shared.applyFixedBandEQ(
-                    gains,
-                    preamp: self.preampGain,
-                    outputBoost: self.outputBoostGain
-                )
-            case .thirtyOneBand:
-                CoreAudioEngine.shared.applyGraphicEQ31(
-                    gains,
-                    preamp: self.preampGain,
-                    outputBoost: self.outputBoostGain
-                )
-            }
+            self.syncToCoreAudioEngineImmediate()
         }
         syncDebounceWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + syncDebounceInterval, execute: work)
@@ -294,13 +284,32 @@ public final class AudioEngine: ObservableObject {
     private func syncToCoreAudioEngineImmediate() {
         syncDebounceWorkItem?.cancel()
         syncDebounceWorkItem = nil
-        let gains = bands.map(\.gain)
+        syncBandsToMode()
+        let frequencies = EQBandMode.thirtyOneBand.frequencies
+        let gains = bands.map { band -> Float in
+            let correction = calibrationAdjustments.flatMap { adjustments in
+                frequencies.firstIndex(of: band.frequency).map { adjustments[$0] }
+            } ?? 0
+            let gain = band.gain + correction
+            return gain.isFinite ? min(max(gain, -20), 20) : 0
+        }
         switch bandMode {
         case .tenBand:
-            CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: preampGain, outputBoost: outputBoostGain)
+            coreAudioEngine.applyFixedBandEQ(gains, preamp: preampGain, outputBoost: outputBoostGain)
         case .thirtyOneBand:
-            CoreAudioEngine.shared.applyGraphicEQ31(gains, preamp: preampGain, outputBoost: outputBoostGain)
+            coreAudioEngine.applyGraphicEQ31(gains, preamp: preampGain, outputBoost: outputBoostGain)
         }
+    }
+
+    @discardableResult
+    func setCalibrationAdjustments(_ adjustments: [Float]?) -> Bool {
+        if let adjustments {
+            guard adjustments.count == EQBandMode.thirtyOneBand.bandCount,
+                  adjustments.allSatisfy(\.isFinite) else { return false }
+        }
+        calibrationAdjustments = adjustments
+        syncToCoreAudioEngineImmediate()
+        return true
     }
 
     func reapplyCurrentFilters() {
@@ -314,7 +323,7 @@ public final class AudioEngine: ObservableObject {
     /// намір користувача, інакше наступні запуски перестають відновлювати EQ.
     @discardableResult
     func setEnabled(_ enabled: Bool, persistState: Bool = true) -> Bool {
-        CoreAudioEngine.shared.setEnabled(enabled)
+        coreAudioEngine.setEnabled(enabled)
 
         // Enable/disable routing based on EQ state
         if enabled {
@@ -323,7 +332,7 @@ public final class AudioEngine: ObservableObject {
             syncToCoreAudioEngineImmediate()
             // Then enable routing
             guard enableRouting(false) else {
-                CoreAudioEngine.shared.setEnabled(false)
+                coreAudioEngine.setEnabled(false)
                 if persistState {
                     defaults.set(false, forKey: "eqWasEnabled")
                 }

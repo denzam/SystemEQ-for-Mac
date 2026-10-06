@@ -7,6 +7,7 @@
 //  same-turn applyEQValues used to see the stale array and bail out.
 //
 
+import AVFoundation
 import CoreAudio
 import Darwin
 @testable import SystemEQ_for_Mac
@@ -312,6 +313,7 @@ final class RoutingWakeRecoveryTests: XCTestCase {
 }
 
 final class AudioEngineBandModeTests: XCTestCase {
+    private let coreAudioEngine = CoreAudioEngine()
     private let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
     private var isolatedEngine: AudioEngine?
     private var originalPlaybackSnapshot: Data?
@@ -320,7 +322,12 @@ final class AudioEngineBandModeTests: XCTestCase {
         try super.setUpWithError()
         originalPlaybackSnapshot = UserDefaults.standard.data(forKey: "lastPlayback.snapshot")
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        isolatedEngine = AudioEngine(defaults: defaults, enableRouting: { _ in true }, disableRouting: { _ in })
+        isolatedEngine = AudioEngine(
+            defaults: defaults,
+            coreAudioEngine: self.coreAudioEngine,
+            enableRouting: { _ in true },
+            disableRouting: { _ in }
+        )
     }
 
     override func tearDown() {
@@ -333,7 +340,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         }
         isolatedEngine = nil
         UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
-        CoreAudioEngine.shared.setEnabled(false)
+        self.coreAudioEngine.setEnabled(false)
         XCTAssertEqual(UserDefaults.standard.data(forKey: "lastPlayback.snapshot"), originalPlaybackSnapshot)
         super.tearDown()
     }
@@ -392,7 +399,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -400,7 +407,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         engine.setPreampGain(0)
         engine.setPreampGain(6)
 
-        let filter = try XCTUnwrap(CoreAudioEngine.shared.vdspFilter)
+        let filter = try XCTUnwrap(self.coreAudioEngine.vdspFilter)
         var left = [Float](repeating: 0.25, count: 64)
         var right = [Float](repeating: 0.25, count: 64)
         let frameCount = left.count
@@ -418,7 +425,7 @@ final class AudioEngineBandModeTests: XCTestCase {
 
     func testCoreAudioRenderBypassFollowsEnabledState() throws {
         let audioEngine = try XCTUnwrap(isolatedEngine)
-        let coreEngine = CoreAudioEngine.shared
+        let coreEngine = self.coreAudioEngine
         audioEngine.bandMode = .tenBand
         audioEngine.syncBandsToMode()
         audioEngine.resetAllBands()
@@ -467,7 +474,7 @@ final class AudioEngineBandModeTests: XCTestCase {
     }
 
     func testConcurrentFilterSwapAndRenderStress() {
-        let coreEngine = CoreAudioEngine.shared
+        let coreEngine = self.coreAudioEngine
         coreEngine.setEnabled(true)
         coreEngine.applyFixedBandEQ(Array(repeating: 0, count: 10))
         let renderFinished = expectation(description: "Concurrent render finished")
@@ -501,7 +508,7 @@ final class AudioEngineBandModeTests: XCTestCase {
     }
 
     func testConcurrentRoomFilterSwapAndRenderStress() {
-        let engine = CoreAudioEngine.shared
+        let engine = self.coreAudioEngine
         engine.setEnabled(true)
         engine.applyFixedBandEQ([Float](repeating: 0, count: 10))
         defer {
@@ -542,7 +549,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -584,7 +591,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -607,7 +614,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         let presetGains = (0..<10).map { Float($0) - 5 }
         PresetPersistence.save(mode: .tenBand, gains: presetGains, preamp: -4.5, bassBoost: 6)
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -638,7 +645,7 @@ final class AudioEngineBandModeTests: XCTestCase {
             defaults.removePersistentDomain(forName: suiteName)
         }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -657,10 +664,10 @@ final class AudioEngineBandModeTests: XCTestCase {
     func testApplyFixedBandEQ_oversizedGains_doesNotCrash() {
         let gains = [Float](repeating: 1.0, count: 31)
 
-        CoreAudioEngine.shared.applyFixedBandEQ(gains, preamp: 0)
+        self.coreAudioEngine.applyFixedBandEQ(gains, preamp: 0)
 
         // Повернути конфіг у чистий 10-band стан
-        CoreAudioEngine.shared.applyFixedBandEQ([Float](repeating: 0, count: 10), preamp: 0)
+        self.coreAudioEngine.applyFixedBandEQ([Float](repeating: 0, count: 10), preamp: 0)
     }
 
     // MARK: - Startup state persistence
@@ -672,7 +679,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         defaults.set(true, forKey: "eqWasEnabled")
         var routerPersistence: Bool?
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: {
                 routerPersistence = $0
                 return false
@@ -685,7 +692,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertFalse(succeeded)
         XCTAssertEqual(routerPersistence, false)
         XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
-        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
     }
 
     func testSetEnabled_routingFailureFromUserAction_disablesFutureRestore() throws {
@@ -694,7 +701,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(true, forKey: "eqWasEnabled")
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in false },
             disableRouting: { _ in }
         )
@@ -703,7 +710,7 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         XCTAssertFalse(succeeded)
         XCTAssertFalse(defaults.bool(forKey: "eqWasEnabled"))
-        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
     }
 
     func testSetEnabled_routingSuccessFromUserAction_persistsEnabledState() throws {
@@ -713,7 +720,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         defaults.set(false, forKey: "eqWasEnabled")
         var routerPersistence: Bool?
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: {
                 routerPersistence = $0
                 return true
@@ -726,7 +733,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertTrue(succeeded)
         XCTAssertEqual(routerPersistence, false)
         XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
-        XCTAssertTrue(CoreAudioEngine.shared.isEnabled)
+        XCTAssertTrue(self.coreAudioEngine.isEnabled)
     }
 
     func testRoutingControlsDelegateToAudioEngine() throws {
@@ -736,7 +743,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         var enableRequests: [Bool] = []
         var disableRequests: [Bool] = []
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: {
                 enableRequests.append($0)
                 return true
@@ -749,7 +756,7 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         XCTAssertEqual(enableRequests, [false])
         XCTAssertEqual(disableRequests, [false])
-        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
     }
 
     func testSetEnabled_reappliesFiltersAfterRoutingStarts() throws {
@@ -757,9 +764,9 @@ final class AudioEngineBandModeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in
-                CoreAudioEngine.shared.clearEQ()
+                self.coreAudioEngine.clearEQ()
                 return true
             },
             disableRouting: { _ in }
@@ -768,7 +775,7 @@ final class AudioEngineBandModeTests: XCTestCase {
 
         XCTAssertTrue(engine.setEnabled(true))
 
-        let filter = try XCTUnwrap(CoreAudioEngine.shared.vdspFilter)
+        let filter = try XCTUnwrap(self.coreAudioEngine.vdspFilter)
         var left = [Float](repeating: 0.25, count: 64)
         var right = [Float](repeating: 0.25, count: 64)
         let frameCount = left.count
@@ -789,7 +796,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { _ in }
         )
@@ -815,7 +822,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         defaults.set(true, forKey: "eqWasEnabled")
         var routerPersistence: Bool?
         let engine = AudioEngine(
-            defaults: defaults,
+            defaults: defaults, coreAudioEngine: self.coreAudioEngine,
             enableRouting: { _ in true },
             disableRouting: { routerPersistence = $0 }
         )
@@ -825,7 +832,7 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertTrue(succeeded)
         XCTAssertEqual(routerPersistence, false)
         XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
-        XCTAssertFalse(CoreAudioEngine.shared.isEnabled)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
     }
 
     func testOutputVolumeTransferCopiesAvailableState() {
@@ -954,7 +961,7 @@ final class AudioEngineBandModeTests: XCTestCase {
     }
 
     func testProcessTapTestToneRestartResetsPhaseAndStopBypassesGeneration() {
-        let engine = CoreAudioEngine.shared
+        let engine = self.coreAudioEngine
         engine.stop()
         engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 1, bufferFrames: 64)
         engine.markProcessTapStarted()
@@ -1290,7 +1297,7 @@ final class AudioEngineBandModeTests: XCTestCase {
     }
 
     func testNativeDiagnosticReportDoesNotClaimBlackHoleHealth() {
-        let report = CoreAudioEngine.shared.diagnosticSummary(backend: .native)
+        let report = self.coreAudioEngine.diagnosticSummary(backend: .native)
         XCTAssertTrue(report.contains("not applicable"))
         XCTAssertFalse(report.contains("Underruns in interval"))
     }
@@ -1355,5 +1362,414 @@ final class AudioEngineBandModeTests: XCTestCase {
             mBitsPerChannel: 32,
             mReserved: 0
         )
+    }
+}
+
+@MainActor
+final class CalibrationProfileTests: XCTestCase {
+    func testEditorReportsDiskFailureRollsBackAndCanRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let profileURL = directory.appendingPathComponent("profiles.json")
+        let suite = "CalibrationSaveTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defer {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                do { try FileManager.default.removeItem(at: directory) } catch {
+                    XCTFail("Fixture cleanup failed: \(error)")
+                }
+            }
+        }
+        let core = CoreAudioEngine()
+        let engine = AudioEngine(
+            defaults: defaults,
+            coreAudioEngine: core,
+            enableRouting: { _ in true },
+            disableRouting: { _ in }
+        )
+        engine.applyEQValues([Float](repeating: 2, count: 10))
+        let calibration = CalibrationEngine(eqEngine: engine, profilesURL: profileURL, loadStoredProfiles: false)
+        defer { calibration.flushProfileWrites() }
+        let original = calibration.createProfile(name: "Original", type: .equalLoudness)
+        calibration.activateProfile(original)
+        core.setEnabled(false)
+        var changed = original
+        changed.name = "Changed"
+        changed.bands[17] = 4
+        let failed = await calibration.saveEditedProfile(changed)
+        XCTAssertFalse(failed)
+        XCTAssertEqual(calibration.profiles.first, original)
+        XCTAssertEqual(calibration.activeProfile, original)
+        XCTAssertEqual(core.getBandGain(index: 5), 2)
+        XCTAssertFalse(core.isEnabled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profileURL.path))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let saved = await calibration.saveEditedProfile(changed)
+        XCTAssertTrue(saved)
+        let data = try Data(contentsOf: profileURL)
+        let decoded = try JSONDecoder().decode([CalibrationProfile].self, from: data)
+        XCTAssertEqual(decoded, [changed])
+        XCTAssertEqual(calibration.activeProfile, changed)
+        XCTAssertEqual(core.getBandGain(index: 5), 6)
+        XCTAssertFalse(core.isEnabled)
+        var draft = CalibrationProfileDraft(changed)
+        draft.name = "Cancelled"
+        draft.bandInputs[17] = "8"
+        calibration.flushProfileWrites()
+        XCTAssertEqual(try Data(contentsOf: profileURL), data)
+        var invalid = changed
+        invalid.bands = []
+        let rejected = await calibration.saveEditedProfile(invalid)
+        XCTAssertFalse(rejected)
+        XCTAssertEqual(try Data(contentsOf: profileURL), data)
+        calibration.deleteProfile(changed)
+        calibration.flushProfileWrites()
+        let deletedData = try Data(contentsOf: profileURL)
+        let stale = await calibration.saveEditedProfile(changed)
+        XCTAssertFalse(stale)
+        XCTAssertEqual(try Data(contentsOf: profileURL), deletedData)
+        XCTAssertTrue(calibration.profiles.isEmpty)
+    }
+
+    func testCalibrationStepsSkipReferenceAndPreserve31StoredBands() throws {
+        try withProfile { _, calibration, _, _ in
+            let ten = calibration.calibrationBandIndices(mode: .tenBand)
+            let thirtyOne = calibration.calibrationBandIndices(mode: .thirtyOneBand)
+            XCTAssertEqual(ten.count, 9)
+            XCTAssertEqual(Array(ten[4...5]), [14, 20])
+            XCTAssertEqual(thirtyOne.count, 30)
+            XCTAssertEqual(Array(thirtyOne[16...17]), [16, 18])
+            XCTAssertEqual(thirtyOne.last, 30)
+            XCTAssertFalse(ten.contains(17))
+            XCTAssertFalse(thirtyOne.contains(17))
+            let profile = try XCTUnwrap(calibration.equalLoudnessProfile(
+                name: " Test ", bands: [Float](repeating: 3, count: 31), notes: "notes"
+            ))
+            XCTAssertEqual(profile.bands.count, 31)
+            XCTAssertEqual(profile.bands[17], 0)
+            XCTAssertEqual(profile.bands[18], 3)
+            XCTAssertEqual(profile.name, "Test")
+            XCTAssertNil(calibration.equalLoudnessProfile(name: " ", bands: [], notes: ""))
+        }
+    }
+
+    func testProfileDraftCancelValidationAndMetadataPreservation() throws {
+        var original = CalibrationProfile(
+            name: "Original",
+            type: .custom,
+            bands: [Float](repeating: 25.123456, count: 31)
+        )
+        original.createdAt = Date(timeIntervalSince1970: 12345)
+        var draft = CalibrationProfileDraft(original, locale: Locale(identifier: "it_IT"))
+        draft.name = " Changed "
+        draft.notes = "new notes"
+        draft.bandInputs[2] = "-2,5"
+        let updated = try XCTUnwrap(draft.updatedProfile)
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(updated.createdAt, original.createdAt)
+        XCTAssertEqual(updated.type, original.type)
+        XCTAssertEqual(updated.name, "Changed")
+        XCTAssertEqual(updated.bands[2], -2.5)
+        XCTAssertEqual(updated.bands[0], original.bands[0])
+        XCTAssertEqual(original.name, "Original")
+        XCTAssertEqual(original.bands[2], 25.123456)
+        for input in ["", "nan", "inf", "3bad", "1,2,3", "1e100"] {
+            draft.bandInputs[2] = input
+            XCTAssertNil(draft.updatedProfile)
+        }
+        draft = CalibrationProfileDraft(original)
+        draft.name = " \n "
+        XCTAssertNil(draft.updatedProfile)
+        for bands in [
+            [],
+            [Float](repeating: 0, count: 30),
+            [Float](repeating: 0, count: 32),
+            [Float](repeating: .nan, count: 31)
+        ] {
+            original.bands = bands
+            XCTAssertNil(CalibrationProfileDraft(original).updatedProfile)
+        }
+    }
+
+    func testActiveProfileEditsRefreshCorrectionWithoutEnablingRouting() throws {
+        try withProfile { _, calibration, core, _ in
+            var profile = calibration.createProfile(name: "Original", type: .equalLoudness)
+            calibration.activateProfile(profile)
+            core.setEnabled(false)
+            profile.name = "Changed"
+            profile.bands[17] = 4
+            XCTAssertTrue(calibration.updateProfile(profile))
+            XCTAssertFalse(core.isEnabled)
+            XCTAssertEqual(calibration.activeProfile, profile)
+            XCTAssertEqual(core.getBandGain(index: 5), 6)
+            var invalid = profile
+            invalid.bands = []
+            XCTAssertFalse(calibration.updateProfile(invalid))
+            XCTAssertEqual(calibration.activeProfile, profile)
+            XCTAssertEqual(core.getBandGain(index: 5), 6)
+            calibration.deleteProfile(profile)
+            XCTAssertFalse(calibration.updateProfile(profile))
+            XCTAssertTrue(calibration.profiles.isEmpty)
+            XCTAssertNil(calibration.activeProfile)
+        }
+    }
+
+    func testInactiveProfileEditsDoNotApplyAndDraftDoesNotMutatePersistence() throws {
+        try withProfile { _, calibration, core, defaults in
+            var profile = calibration.createProfile(name: "Original", type: .custom)
+            calibration.flushProfileWrites()
+            let snapshot = defaults.data(forKey: "lastPlayback.snapshot")
+            var draft = CalibrationProfileDraft(profile)
+            draft.name = "Uncommitted"
+            draft.bandInputs[0] = "8"
+            XCTAssertEqual(calibration.profiles.first?.name, "Original")
+            XCTAssertEqual(core.getBandGain(index: 0), 2)
+            core.setEnabled(false)
+            profile.notes = "saved notes"
+            profile.bands[0] = 6
+            XCTAssertTrue(calibration.updateProfile(profile))
+            XCTAssertNil(calibration.activeProfile)
+            XCTAssertFalse(core.isEnabled)
+            XCTAssertEqual(core.getBandGain(index: 0), 2)
+            XCTAssertEqual(defaults.data(forKey: "lastPlayback.snapshot"), snapshot)
+            calibration.flushProfileWrites()
+        }
+    }
+
+    private func measuredGain(_ core: CoreAudioEngine, frequency: Double) throws -> Double {
+        let filter = try XCTUnwrap(core.vdspFilter)
+        let rate = Double(filter.sampleRate)
+        var inputEnergy = 0.0
+        var outputEnergy = 0.0
+        for block in 0..<32 {
+            let source = (0..<512).map { index in
+                Float(0.001 * sin(2 * .pi * frequency * Double(block * 512 + index) / rate))
+            }
+            var left = source
+            var right = source
+            _ = try left.withUnsafeMutableBufferPointer { l in
+                try right.withUnsafeMutableBufferPointer { r in
+                    try filter.processStereo(XCTUnwrap(l.baseAddress), XCTUnwrap(r.baseAddress), frameCount: 512)
+                }
+            }
+            if block > 7 {
+                inputEnergy += source.reduce(0) { $0 + Double($1 * $1) }
+                outputEnergy += left.reduce(0) { $0 + Double($1 * $1) }
+            }
+        }
+        return 10 * log10(outputEnergy / inputEnergy)
+    }
+
+    private func renderedEnergy(_ audio: AVAudioEngine) throws -> Double {
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: audio.manualRenderingFormat, frameCapacity: 1024))
+        var remaining = 96000
+        var energy = 0.0
+        while remaining > 0 {
+            let count = AVAudioFrameCount(min(remaining, 1024))
+            XCTAssertEqual(try audio.renderOffline(count, to: buffer), .success)
+            let samples = try XCTUnwrap(buffer.floatChannelData)[0]
+            for index in 0..<Int(buffer.frameLength) {
+                energy += Double(samples[index] * samples[index])
+            }
+            remaining -= Int(count)
+        }
+        return energy
+    }
+
+    private func withProfile(
+        mode: EQBandMode = .tenBand,
+        _ test: (AudioEngine, CalibrationEngine, CoreAudioEngine, UserDefaults) throws -> Void
+    ) throws {
+        let suite = "CalibrationProfileTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            do { try FileManager.default.removeItem(at: directory) } catch {
+                XCTFail("Temporary profile cleanup failed: \(error)")
+            }
+        }
+        let core = CoreAudioEngine()
+        let engine = AudioEngine(
+            defaults: defaults,
+            coreAudioEngine: core,
+            enableRouting: { _ in core.clearEQ(); return true },
+            disableRouting: { _ in }
+        )
+        engine.bandMode = mode
+        engine.applyEQValues([Float](repeating: 2, count: mode.bandCount))
+        let calibration = CalibrationEngine(
+            eqEngine: engine,
+            profilesURL: directory.appendingPathComponent("profiles.json"),
+            loadStoredProfiles: false
+        )
+        defer { calibration.flushProfileWrites() }
+        try test(engine, calibration, core, defaults)
+    }
+
+    func testProfileSurvivesToggleAndRoutingReapplyWithoutChangingBaseSnapshot() throws {
+        try withProfile { engine, calibration, core, defaults in
+            let profile = CalibrationProfile(
+                name: "Test",
+                type: .equalLoudness,
+                bands: [Float](repeating: 3, count: 31)
+            )
+            calibration.activateProfile(profile)
+            XCTAssertEqual(core.getBandGain(index: 5), 5)
+            XCTAssertTrue(engine.setEnabled(false))
+            XCTAssertTrue(engine.setEnabled(true))
+            XCTAssertEqual(core.getBandGain(index: 5), 5)
+            core.clearEQ()
+            engine.reapplyCurrentFilters()
+            XCTAssertEqual(core.getBandGain(index: 5), 5)
+            XCTAssertEqual(calibration.activeProfile?.id, profile.id)
+            XCTAssertEqual(engine.bands.map(\.gain), [Float](repeating: 2, count: 10))
+            XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.gains, [Float](repeating: 2, count: 10))
+        }
+    }
+
+    func testSwitchingProfilesAndDeactivationDoNotAccumulateCorrection() throws {
+        try withProfile { engine, calibration, core, _ in
+            let a = CalibrationProfile(name: "A", type: .equalLoudness, bands: [Float](repeating: 3, count: 31))
+            let b = CalibrationProfile(name: "B", type: .equalLoudness, bands: [Float](repeating: -1, count: 31))
+            for profile in [a, b, a] {
+                calibration.activateProfile(profile)
+                XCTAssertEqual(core.getBandGain(index: 0), 2 + profile.bands[2])
+            }
+            engine.applyEQValues([Float](repeating: 4, count: 10))
+            XCTAssertEqual(core.getBandGain(index: 0), 7)
+            calibration.deactivateProfile()
+            XCTAssertEqual(core.getBandGain(index: 0), 4)
+            calibration.activateProfile(a)
+            calibration.deleteProfile(a)
+            XCTAssertNil(calibration.activeProfile)
+            XCTAssertEqual(core.getBandGain(index: 0), 4)
+        }
+    }
+
+    func testProfileChangesActualDSPResponseAfterToggleAndSampleRateChange() throws {
+        try withProfile { engine, calibration, core, _ in
+            var base = [Float](repeating: 0, count: 10)
+            base[5] = 3
+            engine.applyEQValues(base)
+            var correction = [Float](repeating: 0, count: 31)
+            correction[17] = 6
+            calibration.activateProfile(CalibrationProfile(name: "DSP", type: .equalLoudness, bands: correction))
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 9, accuracy: 0.05)
+            XCTAssertTrue(engine.setEnabled(false))
+            XCTAssertTrue(engine.setEnabled(true))
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 9, accuracy: 0.05)
+            core.rebuildActiveEQFilter(sampleRate: 96000)
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 9, accuracy: 0.05)
+            calibration.deactivateProfile()
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 3, accuracy: 0.05)
+        }
+    }
+
+    func testProfilePreserves31BandModeAcrossRateAndModeChanges() throws {
+        try withProfile(mode: .thirtyOneBand) { engine, calibration, core, _ in
+            var gains = [Float](repeating: 1, count: 31)
+            gains[30] = 6
+            calibration.activateProfile(CalibrationProfile(name: "31", type: .equalLoudness, bands: gains))
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 31)
+            XCTAssertEqual(core.getBandGain(index: 30), 8)
+            core.rebuildActiveEQFilter(sampleRate: 96000)
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 31)
+            XCTAssertEqual(core.vdspFilter?.sampleRate, 96000)
+            engine.bandMode = .tenBand
+            engine.reapplyCurrentFilters()
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 10)
+            engine.bandMode = .thirtyOneBand
+            engine.reapplyCurrentFilters()
+            XCTAssertEqual(core.getBandGain(index: 30), 8)
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 31)
+        }
+    }
+
+    func testMalformedProfilesLeaveActiveCorrectionUnchanged() throws {
+        try withProfile { _, calibration, core, _ in
+            let valid = CalibrationProfile(name: "Valid", type: .equalLoudness, bands: [Float](repeating: 3, count: 31))
+            calibration.activateProfile(valid)
+            for bands in [
+                [],
+                [Float](repeating: 1, count: 30),
+                [Float](repeating: .nan, count: 31),
+                [Float](repeating: .infinity, count: 31)
+            ] {
+                calibration.activateProfile(CalibrationProfile(name: "Invalid", type: .equalLoudness, bands: bands))
+                XCTAssertEqual(calibration.activeProfile?.id, valid.id)
+                XCTAssertEqual(core.getBandGain(index: 5), 5)
+            }
+        }
+    }
+
+    func testBandEditsKeepExplicit31BandModeAndRejectInvalidValues() {
+        let core = CoreAudioEngine()
+        core.applyGraphicEQ31([Float](repeating: 1, count: 31))
+        core.setEQBand(index: 30, gain: 6)
+        XCTAssertEqual(core.vdspFilter?.activeFilterCount, 31)
+        core.setEQBand(index: -1, gain: 3)
+        core.setEQBand(index: 31, gain: 3)
+        core.setEQBand(index: 30, gain: .nan)
+        XCTAssertEqual(core.getBandGain(index: 30), 6)
+        core.setAllBands([Float](repeating: 2, count: 31))
+        core.rebuildActiveEQFilter(sampleRate: 192_000)
+        XCTAssertEqual(core.vdspFilter?.activeFilterCount, 31)
+        XCTAssertEqual(core.getBandGain(index: 30), 2)
+        core.applyFixedBandEQ([Float](repeating: 1, count: 31))
+        core.rebuildActiveEQFilter(sampleRate: 48000)
+        XCTAssertEqual(core.vdspFilter?.activeFilterCount, 10)
+    }
+
+    func testLoopVolumeChangesImmediatelyAndStoppedUpdatesDoNotStartAudio() {
+        let player = AVAudioPlayerNode()
+        let calibration = CalibrationEngine(playerNode: player, loadStoredProfiles: false)
+        player.volume = 0.2
+        calibration.updateLoopAmplitude(0.8)
+        XCTAssertEqual(player.volume, 0.2)
+        XCTAssertFalse(player.isPlaying)
+        calibration.isPlayingLoop = true
+        calibration.updateLoopAmplitude(0.05)
+        XCTAssertEqual(player.volume, 0.05)
+        calibration.updatePinkNoiseLoopAmplitude(0.4)
+        XCTAssertEqual(player.volume, 0.4)
+        for invalid in [Float.nan, .infinity, -1] {
+            calibration.updateLoopAmplitude(invalid)
+            XCTAssertEqual(player.volume, 0)
+        }
+        calibration.updateLoopAmplitude(2)
+        XCTAssertEqual(player.volume, 1)
+    }
+
+    func testReferenceLoopsExposeLiveVolumeAndOneShotResetsGain() throws {
+        for noise in [false, true] {
+            let audio = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
+            audio.attach(player)
+            audio.connect(player, to: audio.mainMixerNode, format: format)
+            try audio.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
+            try audio.start()
+            defer { player.stop(); audio.stop() }
+            let calibration = CalibrationEngine(audioEngine: audio, playerNode: player, loadStoredProfiles: false)
+            calibration.useFilteredNoise = noise
+            calibration.referenceFrequency = 1250
+            calibration.referenceLevel = -20
+            calibration.playReferenceTone()
+            XCTAssertTrue(calibration.isPlayingLoop)
+            XCTAssertEqual(calibration.currentTestFrequency, 1250)
+            XCTAssertEqual(player.volume, 0.03, accuracy: 0.00001)
+            let initialEnergy = try renderedEnergy(audio)
+            XCTAssertGreaterThan(initialEnergy, 0)
+            calibration.updateLoopAmplitude(0.15)
+            XCTAssertEqual(player.volume, 0.15)
+            XCTAssertTrue(player.isPlaying)
+            let louderEnergy = try renderedEnergy(audio)
+            XCTAssertEqual(sqrt(louderEnergy / initialEnergy), 5, accuracy: 0.3)
+            calibration.playCalibrationSignal(frequency: 500, amplitude: 0.2)
+            XCTAssertEqual(player.volume, 1)
+            XCTAssertFalse(calibration.isPlayingLoop)
+        }
     }
 }
