@@ -108,7 +108,7 @@ class RuntimeToolsTests(unittest.TestCase):
     def test_ipc_descriptor_reuse_partial_write_and_shutdown(self):
         result = subprocess.run([str(self.ipc)], capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("IPC server: 3 tests passed", result.stdout)
+        self.assertIn("IPC server: 4 tests passed", result.stdout)
 
 
 if __name__ == "__main__":

@@ -127,6 +127,11 @@ struct VisualizerView: View {
                         Text(localization.localized(.dragProjectMWindowHint))
                             .font(AppTypography.labelSmall)
                             .foregroundColor(.secondary.opacity(0.7))
+
+                        Button(localization.localized(.showVisualizerWindow)) {
+                            helperClient.showWindow()
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                 } else {
                     // Helper not running - show start button

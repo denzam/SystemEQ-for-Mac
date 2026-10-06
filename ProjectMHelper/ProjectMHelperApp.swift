@@ -79,6 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window?.isOpaque = true
         window?.hasShadow = true
         window?.level = .normal
+        window?.isReleasedWhenClosed = false
         window?.titlebarAppearsTransparent = true
         window?.titleVisibility = .hidden
         window?.isMovableByWindowBackground = true
@@ -101,7 +102,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Start IPC server
         if let controller = visualizerController {
-            ipcServer = IPCServer(controller: controller)
+            ipcServer = IPCServer(controller: controller, showWindow: { [weak self] in
+                self?.showVisualizerWindow()
+            })
         }
         ipcServer?.start()
 
@@ -111,6 +114,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         print("[ProjectMHelper] Started with frame: \(windowFrame)")
+    }
+
+    private func showVisualizerWindow() {
+        guard let window else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) {
+            window.center()
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

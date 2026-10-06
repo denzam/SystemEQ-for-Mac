@@ -4,6 +4,51 @@ import XCTest
 
 @MainActor
 final class ProjectMHelperClientTests: XCTestCase {
+    func testWindowRequestWaitsForCurrentAcknowledgmentAndReplaysAfterConnection() async throws {
+        let queue = DispatchQueue(label: "ProjectMHelperClientTests.window-show")
+        let client = ProjectMHelperClient(ipcQueue: queue)
+        client.showWindow()
+        await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
+        XCTAssertEqual(client.pendingWindowShow, 1)
+        var sockets: [Int32] = [-1, -1]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets), 0)
+        var noSigPipe: Int32 = 1
+        for socket in sockets {
+            XCTAssertEqual(
+                setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size)),
+                0
+            )
+        }
+        let generation = client.installSocket(sockets[0])
+        defer { client.disconnectSocket(); close(sockets[1]) }
+        client.replayWindowShowIfNeeded()
+        await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
+        var buffer = [UInt8](repeating: 0, count: 128)
+        let first = recv(sockets[1], &buffer, buffer.count, MSG_DONTWAIT)
+        XCTAssertEqual(first, 7)
+        XCTAssertEqual(Data(buffer.prefix(max(first, 0))), Data("SHOW:1\n".utf8))
+        client.showWindow()
+        await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
+        let second = recv(sockets[1], &buffer, buffer.count, MSG_DONTWAIT)
+        XCTAssertEqual(second, 7)
+        XCTAssertEqual(Data(buffer.prefix(max(second, 0))), Data("SHOW:2\n".utf8))
+        client.startReadingResponses(socket: sockets[0], generation: generation)
+        let old = Data("SHOWN:1\n".utf8)
+        XCTAssertEqual(old.withUnsafeBytes { write(sockets[1], $0.baseAddress, $0.count) }, old.count)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(client.pendingWindowShow, 2)
+        let current = Data("SHOWN:2\n".utf8)
+        XCTAssertEqual(current.withUnsafeBytes { write(sockets[1], $0.baseAddress, $0.count) }, current.count)
+        let deadline = Date().addingTimeInterval(1)
+        while client.pendingWindowShow != nil, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNil(client.pendingWindowShow)
+        client.showWindow()
+        client.stop()
+        XCTAssertNil(client.pendingWindowShow)
+    }
+
     private final class ClientHolder: @unchecked Sendable {
         nonisolated(unsafe) var client: ProjectMHelperClient?
 

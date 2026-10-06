@@ -26,6 +26,7 @@ final class WindowCoordinator {
     @discardableResult
     func focus(id: String) -> Bool {
         if let w = windows[id] {
+            if w.isMiniaturized { w.deminiaturize(nil) }
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return true

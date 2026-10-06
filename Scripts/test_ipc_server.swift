@@ -146,12 +146,65 @@ struct IPCServerTests {
         try require(done.wait(timeout: .now() + 2) == .success, "stop did not unblock writer")
     }
 
+    static func testShowWindowRequests() throws {
+        let original = try pair()
+        let replacement = try pair()
+        var shows = 0
+        var onMainThread = true
+        let server = IPCServer(controller: VisualizerController(), showWindow: {
+            shows += 1
+            onMainThread = onMainThread && Thread.isMainThread
+        })
+        let oldGeneration = server.replaceClient(with: original[0])
+        var generation = oldGeneration
+        defer {
+            server.finishClient(socket: original[0], generation: oldGeneration)
+            server.finishClient(socket: replacement[0], generation: generation)
+            close(original[1])
+            close(replacement[1])
+        }
+        for command in ["SHOW", "SHOW:", "SHOW:invalid", "SHOW:-1", "SHOW:18446744073709551616"] {
+            server.processMessage(command, socket: original[0], generation: oldGeneration)
+        }
+        let drained = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { drained.signal() }
+        let parserDeadline = Date().addingTimeInterval(2)
+        var parserDrained = false
+        while Date() < parserDeadline {
+            if drained.wait(timeout: .now()) == .success { parserDrained = true; break }
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        try require(parserDrained && shows == 0, "Current client accepted malformed SHOW")
+        server.processMessage("SHOW:1", socket: original[0], generation: oldGeneration)
+        generation = server.replaceClient(with: replacement[0])
+        server.processMessage("SHOW:2", socket: replacement[0], generation: generation)
+        server.processMessage("SHOW:3", socket: replacement[0], generation: generation)
+        let deadline = Date().addingTimeInterval(2)
+        while shows < 2, Date() < deadline {
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        try require(shows == 2 && onMainThread, "SHOW accepted invalid/stale requests or used wrong thread")
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 128)
+        while response.count < 16, Date() < deadline {
+            let count = recv(replacement[1], &buffer, buffer.count, MSG_DONTWAIT)
+            if count > 0 { response.append(contentsOf: buffer.prefix(count)) }
+            else { usleep(1000) }
+        }
+        try require(response == Data("SHOWN:2\nSHOWN:3\n".utf8), "SHOW acknowledgments missing or wrong")
+        server.processMessage("SHOW:4", socket: replacement[0], generation: generation)
+        server.stop()
+        _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        try require(shows == 2, "Stopped helper accepted a queued SHOW")
+    }
+
     static func main() {
         do {
             try testDescriptorReuse()
             try testLargePartialResponse()
             try testStopUnblocksWriter()
-            try FileHandle.standardOutput.write(contentsOf: Data("IPC server: 3 tests passed\n".utf8))
+            try testShowWindowRequests()
+            try FileHandle.standardOutput.write(contentsOf: Data("IPC server: 4 tests passed\n".utf8))
         } catch {
             try? FileHandle.standardError.write(contentsOf: Data("\(error.localizedDescription)\n".utf8))
             exit(EXIT_FAILURE)

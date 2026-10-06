@@ -24,6 +24,7 @@ enum IPCCommand: String {
     case setWeight = "WEIGHT" // WEIGHT:Light|Medium|Heavy|All
     case getCategories = "CATEGORIES"
     case quit = "QUIT"
+    case showWindow = "SHOW"
 }
 
 // MARK: - IPC Server
@@ -36,6 +37,7 @@ class IPCServer {
     private var serverGeneration: UInt64 = 0
     private let stateLock = NSLock()
     private let controller: VisualizerController
+    private let showWindow: () -> Void
 
     // Client socket is touched from listenQueue (accept/replace), readQueue
     // (readLoop, command handlers) and stop() — guard it with a lock.
@@ -113,8 +115,9 @@ class IPCServer {
     private let listenQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.listen", qos: .userInitiated)
     private let readQueue = DispatchQueue(label: "com.systemeq.projectm.ipc.read", qos: .userInitiated)
 
-    init(controller: VisualizerController) {
+    init(controller: VisualizerController, showWindow: @escaping () -> Void = {}) {
         self.controller = controller
+        self.showWindow = showWindow
         self.socketPath = IPCServer.makeSocketPath()
     }
 
@@ -398,13 +401,22 @@ class IPCServer {
         return true
     }
 
-    private func processMessage(_ message: String, socket: Int32, generation: UInt64) {
+    func processMessage(_ message: String, socket: Int32, generation: UInt64) {
         let parts = message.split(separator: ":", maxSplits: 1)
         guard let commandStr = parts.first else { return }
 
         let argument = parts.count > 1 ? String(parts[1]) : nil
 
         switch commandStr {
+        case "SHOW":
+            guard let argument, let request = UInt64(argument) else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.withCurrentClient(socket, generation: generation) {
+                    self?.showWindow()
+                    self?.sendResponse("SHOWN:\(request)", socket: socket, generation: generation)
+                }
+            }
+
         case "NEXT":
             DispatchQueue.main.async { [weak self] in
                 self?.withCurrentClient(socket, generation: generation) {

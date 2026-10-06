@@ -32,6 +32,8 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Published Properties
 
     @Published private(set) var isRunning = false
+    private(set) var pendingWindowShow: UInt64?
+    private var windowShowGeneration: UInt64 = 0
     @Published private(set) var currentPresetName: String = "None"
     @Published private(set) var presetCount: Int = 0
     @Published private(set) var availableCategories: [String] = ["All"]
@@ -297,7 +299,10 @@ final class ProjectMHelperClient: ObservableObject {
     // MARK: - Lifecycle
 
     func start(frame: NSRect) {
-        guard !isRunning else { return }
+        if isRunning {
+            showWindow()
+            return
+        }
         DiagnosticEventStore.shared.record("visualizer.start.request", details: [
             "category": selectedCategory == "All" ? "all" : "filtered",
             "locked": isPresetLocked ? "true" : "false",
@@ -394,6 +399,7 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     func stop() {
+        pendingWindowShow = nil
         let wasRunning = isRunning
         helperGeneration &+= 1
 
@@ -581,6 +587,7 @@ final class ProjectMHelperClient: ObservableObject {
                 for command in startupCommands {
                     self.sendCommand(command)
                 }
+                self.replayWindowShowIfNeeded()
                 dlog("✅ Connected to ProjectMHelper IPC", category: .audio)
                 DiagnosticEventStore.shared.record("visualizer.ipc.connected", details: [
                     "replayedCommands": "\(startupCommands.count)"
@@ -652,7 +659,13 @@ final class ProjectMHelperClient: ObservableObject {
     }
 
     private func processLine(_ line: String, socket: Int32, generation: UInt64) {
-        if line.hasPrefix("STATUS:") {
+        if line.hasPrefix("SHOWN:"), let request = UInt64(line.dropFirst(6)) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.socketIsCurrent(socket, generation: generation),
+                      self.pendingWindowShow == request else { return }
+                self.pendingWindowShow = nil
+            }
+        } else if line.hasPrefix("STATUS:") {
             let jsonStr = String(line.dropFirst(7))
             guard let data = jsonStr.data(using: .utf8),
                   let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -762,6 +775,16 @@ final class ProjectMHelperClient: ObservableObject {
 
     func resize(width: Int, height: Int) {
         sendCommand("RESIZE:\(width):\(height)")
+    }
+
+    func showWindow() {
+        windowShowGeneration &+= 1
+        pendingWindowShow = windowShowGeneration
+        replayWindowShowIfNeeded()
+    }
+
+    func replayWindowShowIfNeeded() {
+        if let request = pendingWindowShow { sendCommand("SHOW:\(request)") }
     }
 
     // MARK: - Audio
