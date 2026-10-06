@@ -6,30 +6,72 @@
 # Usage: ./Scripts/build_dmg.sh [version]
 # Example: ./Scripts/build_dmg.sh 1.0.0
 
-set -e
+set -euo pipefail
+
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+    echo "Usage: $0 [version]"
+    exit 0
+fi
+if [[ $# -gt 1 || ! "${1:-1.0.0}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]]; then
+    echo "Invalid version or arguments. Usage: $0 [version]" >&2
+    exit 2
+fi
 
 # Configuration
 APP_NAME="SystemEQ for Mac"
 SCHEME="SystemEQ for Mac"
 PROJECT="SystemEQ for Mac.xcodeproj"
 VERSION="${1:-1.0.0}"
+cd "$(dirname "$0")/.."
 BUILD_DIR="build"
-ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
-EXPORT_PATH="$BUILD_DIR/export"
+if [[ -L "$BUILD_DIR" ]]; then
+    echo "Refusing a symlinked build directory." >&2
+    exit 1
+fi
+mkdir -p "$BUILD_DIR"
+LOCK_OWNED=0
+STAGING_DIR=""
+PUBLISHED=0
 DMG_NAME="SystemEQ-v${VERSION}"
 DMG_PATH="$BUILD_DIR/${DMG_NAME}.dmg"
-DMG_TEMP="$BUILD_DIR/dmg_temp"
-
-cd "$(dirname "$0")/.."
+cleanup() {
+    local status=$?
+    trap - EXIT
+    if [[ -n "$STAGING_DIR" && -e "$STAGING_DIR/previous.dmg" && "$PUBLISHED" == 0 ]]; then
+        if [[ ! -e "$DMG_PATH" && ! -L "$DMG_PATH" ]]; then
+            if ! mv "$STAGING_DIR/previous.dmg" "$DMG_PATH"; then status=1; fi
+        fi
+    fi
+    if [[ "$LOCK_OWNED" == 1 ]]; then
+        if ! rmdir "$BUILD_DIR/.systemeq-dmg.lock"; then status=1; fi
+    fi
+    if [[ -n "$STAGING_DIR" ]]; then
+        echo "Build artifacts preserved at: $STAGING_DIR" >&2
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if ! mkdir "$BUILD_DIR/.systemeq-dmg.lock"; then
+    echo "DMG build is locked; previous artifacts were not changed." >&2
+    exit 1
+fi
+LOCK_OWNED=1
+if [[ -L "$DMG_PATH" ]]; then
+    echo "Refusing to replace a symlinked DMG." >&2
+    exit 1
+fi
+STAGING_DIR=$(mktemp -d "$BUILD_DIR/.systemeq-dmg.XXXXXX")
+ARCHIVE_PATH="$STAGING_DIR/$APP_NAME.xcarchive"
+EXPORT_PATH="$STAGING_DIR/export"
+STAGED_DMG_PATH="$STAGING_DIR/${DMG_NAME}.dmg"
+DMG_TEMP="$STAGING_DIR/dmg_temp"
 
 echo "═══════════════════════════════════════════════════════════════"
 echo "  Building SystemEQ for Mac v${VERSION}"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
-
-# Clean previous build
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
 
 # Step 1: Archive
 echo "📦 [1/4] Archiving..."
@@ -52,13 +94,13 @@ cp -R "$ARCHIVE_PATH/Products/Applications/$APP_NAME.app" "$EXPORT_PATH/"
 
 echo "   🔏 Ad-hoc signing (no Apple Developer account required)..."
 codesign --deep --force --sign - "$EXPORT_PATH/$APP_NAME.app"
+codesign --verify --deep --strict "$EXPORT_PATH/$APP_NAME.app"
 echo "   ✅ Export + sign complete"
 
 # Step 3: Create DMG
 echo "💿 [3/4] Creating DMG..."
 
 # Create temporary DMG directory
-rm -rf "$DMG_TEMP"
 mkdir -p "$DMG_TEMP"
 
 # Copy app
@@ -87,14 +129,14 @@ if command -v create-dmg &> /dev/null; then
         --hide-extension "$APP_NAME.app" \
         --app-drop-link 450 200 \
         --no-internet-enable \
-        "$DMG_PATH" \
+        "$STAGED_DMG_PATH" \
         "$DMG_TEMP"; then
         # Fallback to hdiutil if create-dmg fails
         echo "   ⚠️ create-dmg failed; falling back to hdiutil..." >&2
         hdiutil create -volname "$APP_NAME" \
             -srcfolder "$DMG_TEMP" \
             -ov -format UDZO \
-            "$DMG_PATH"
+            "$STAGED_DMG_PATH"
     fi
 else
     echo "   Using hdiutil (install create-dmg for prettier DMG: brew install create-dmg)"
@@ -102,16 +144,18 @@ else
     hdiutil create -volname "$APP_NAME" \
         -srcfolder "$DMG_TEMP" \
         -ov -format UDZO \
-        "$DMG_PATH"
+        "$STAGED_DMG_PATH"
 fi
 
 echo "   ✅ DMG created"
 
-# Step 4: Cleanup
-echo "🧹 [4/4] Cleanup..."
-rm -rf "$DMG_TEMP"
-rm -rf "$ARCHIVE_PATH"
-rm -f "$BUILD_DIR/ExportOptions.plist"
+hdiutil verify "$STAGED_DMG_PATH"
+test -s "$STAGED_DMG_PATH"
+if [[ -e "$DMG_PATH" ]]; then
+    mv "$DMG_PATH" "$STAGING_DIR/previous.dmg"
+fi
+mv "$STAGED_DMG_PATH" "$DMG_PATH"
+PUBLISHED=1
 
 # Get file size
 DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)

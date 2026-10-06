@@ -25,6 +25,11 @@ INCLUDE_SEARCH_PATHS=(
     "/opt/homebrew/include/projectM-4"
 )
 
+if [[ $# -gt 1 ]]; then
+    echo "Too many arguments. Use --help for usage." >&2
+    exit 2
+fi
+
 MODE="${1:-}"
 case "$MODE" in
     -h | --help)
@@ -178,12 +183,7 @@ if [[ $WANT_BUILD -eq 1 ]]; then
     cmake "${CMAKE_ARGS[@]}"
     cmake --build "$BUILD_OUT" -j "$(sysctl -n hw.ncpu)"
     echo "🔐 Потрібен sudo для install у /usr/local..."
-    if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
-        echo "❌ sudo вимагає введення пароля, але поточний термінал неінтерактивний." >&2
-        echo "   Запустіть команду в інтерактивному терміналі або налаштуйте sudo без пароля." >&2
-        exit 1
-    fi
-    if sudo -n true 2>/dev/null; then
+    if [[ ! -t 0 ]] || sudo -n true 2>/dev/null; then
         sudo -n cmake --install "$BUILD_OUT"
     else
         sudo cmake --install "$BUILD_OUT"

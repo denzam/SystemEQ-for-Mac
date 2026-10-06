@@ -4,6 +4,15 @@
 
 set -euo pipefail
 
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+    echo "Usage: $0"
+    exit 0
+fi
+if [[ $# -ne 0 ]]; then
+    echo "Unsupported arguments. Usage: $0" >&2
+    exit 2
+fi
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEME="SystemEQ for Mac"
 BUILD_DIR="$PROJECT_DIR/build"

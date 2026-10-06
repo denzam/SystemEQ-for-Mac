@@ -1,6 +1,15 @@
 #!/bin/bash
 set -u
 
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+    echo "Usage: $0"
+    exit 0
+fi
+if [[ $# -ne 0 ]]; then
+    echo "Unsupported arguments. Usage: $0" >&2
+    exit 2
+fi
+
 # Setup periodic reminders for SystemEQ maintenance tasks
 # Uses macOS Calendar/Reminders to create recurring events
 
@@ -16,7 +25,7 @@ CREATED=0
 ERRORS=0
 
 # 1. Weekly reminder - Find unused code
-if osascript <<EOF 2>/dev/null
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🧹 SystemEQ: Перевірити невикористаний код", body:"Запустити: ./Scripts/find_unused_code.sh
@@ -34,7 +43,7 @@ else
 fi
 
 # 2. Monthly reminder - Full code audit
-if osascript <<EOF 2>/dev/null
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"🔍 SystemEQ: Повний аудит коду", body:"Запустити: ./Scripts/code_quality_check.sh
@@ -55,7 +64,7 @@ else
 fi
 
 # 3. Monthly reminder - Update dependencies
-if osascript <<EOF 2>/dev/null
+if osascript <<EOF
 tell application "Reminders"
     tell first list
         make new reminder with properties {name:"📦 SystemEQ: Оновити залежності", body:"Перевірити оновлення:

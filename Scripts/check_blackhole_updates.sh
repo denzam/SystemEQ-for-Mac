@@ -8,6 +8,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONSTANTS_FILE="$REPO_ROOT/SystemEQ for Mac/Config/AppConstants.swift"
 HOMEBREW_API="https://formulae.brew.sh/api/cask/blackhole-2ch.json"
 
+if [[ $# -gt 1 ]]; then
+    echo "Too many arguments. Use --help for usage." >&2
+    exit 2
+fi
+
 MODE="${1:-}"
 case "$MODE" in
     "" | --update) ;;
