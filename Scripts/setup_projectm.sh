@@ -63,6 +63,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+copy_missing_presets() {
+    local copy_source_root="${1%/}" copy_destination_root="$2" copy_list="$3"
+    local source_file relative_file destination_file
+    find "$copy_source_root" -type f -print0 > "$copy_list"
+    while IFS= read -r -d '' source_file; do
+        relative_file="${source_file#"$copy_source_root/"}"
+        destination_file="$copy_destination_root/$relative_file"
+        if [[ -e "$destination_file" || -L "$destination_file" ]]; then
+            continue
+        fi
+        mkdir -p "$(dirname "$destination_file")"
+        cp "$source_file" "$destination_file"
+    done < "$copy_list"
+}
+
 # `[[ "4.1.10" < "4.1.5" ]]` порівнює РЯДКИ і вважає 4.1.10 старішою, тому
 # порівняння версій іде через sort -V.
 version_lt() {
@@ -227,15 +242,25 @@ if [[ "$PRESET_COUNT" -eq 0 ]]; then
         echo "⚠️  MilkDrop пресети не знайдено. Завантажую..."
         mkdir -p "$PRESETS_DIR"
 
+        if [[ -L "$PRESETS_DIR" ]]; then
+            echo "Preset destination must not be a symlink." >&2
+            exit 1
+        fi
+        PRESET_LINK="$(find "$PRESETS_DIR" -type l -print -quit)"
+        if [[ -n "$PRESET_LINK" ]]; then
+            echo "Preset destination contains symlinks; existing files are preserved." >&2
+            exit 1
+        fi
+
         if [[ -z "$TMP_ROOT" ]]; then
             TMP_ROOT="$(mktemp -d)"
         fi
         DL_DIR="$TMP_ROOT/presets"
         mkdir -p "$DL_DIR"
 
-        curl -fsSL \
-            "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/refs/heads/master.zip" \
-            -o "$DL_DIR/presets.zip"
+        PRESETS_URL="$(python3 "$PROJECT_DIR/Scripts/verify_projectm_presets.py" --url)"
+        curl -fsSL "$PRESETS_URL" -o "$DL_DIR/presets.zip"
+        python3 "$PROJECT_DIR/Scripts/verify_projectm_presets.py" "$DL_DIR/presets.zip"
         unzip -q "$DL_DIR/presets.zip" -d "$DL_DIR"
 
         # В архіві рівно одна коренева тека; на її точну назву не покладаємось.
@@ -245,7 +270,7 @@ if [[ "$PRESET_COUNT" -eq 0 ]]; then
             exit 1
         fi
 
-        cp -R "${EXTRACTED[0]}." "$PRESETS_DIR/"
+        copy_missing_presets "${EXTRACTED[0]}" "$PRESETS_DIR" "$DL_DIR/preset-files"
         PRESET_COUNT="$(count_presets)"
     fi
 fi

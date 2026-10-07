@@ -9,6 +9,7 @@
 import AppKit
 import CoreVideo
 import Foundation
+import os
 import QuartzCore
 
 @main
@@ -418,7 +419,7 @@ class VisualizerController: NSObject {
 
     // Broken preset blacklist — filled by preset_switch_failed callback, persisted across sessions
     private var brokenPresets: Set<String> = []
-    private let blacklistURL: URL = {
+    private let brokenPresetsURL: URL = {
         let dir = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/SystemEQ")
         return dir.appendingPathComponent("broken_presets.json")
@@ -546,10 +547,6 @@ class VisualizerController: NSObject {
 
     // MARK: - Preset Bootstrap (first-run download)
 
-    private static let presetsArchiveURL = URL(
-        string: "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/refs/heads/master.zip"
-    )!
-
     private func ensurePresetsAvailable(at basePath: String, completion: @escaping () -> Void) {
         let fileManager = FileManager.default
         try? fileManager.createDirectory(atPath: basePath, withIntermediateDirectories: true)
@@ -559,12 +556,29 @@ class VisualizerController: NSObject {
             return
         }
 
+        let archive: ProjectMPresetArchive
+        do {
+            archive = try ProjectMPresetArchive(infoDictionary: Bundle.main.infoDictionary)
+        } catch {
+            dlog(error.localizedDescription, category: "presets")
+            completion()
+            return
+        }
+
         print("[ProjectMHelper] No presets found at \(basePath) — downloading…")
 
-        URLSession.shared.downloadTask(with: VisualizerController.presetsArchiveURL) { [weak self] tmpURL, _, error in
+        URLSession.shared.downloadTask(with: archive.url) { [weak self] tmpURL, response, error in
             guard let self else { return }
             guard let tmpURL, error == nil else {
                 print("[ProjectMHelper] Preset download failed: \(error?.localizedDescription ?? "unknown")")
+                DispatchQueue.main.async { completion() }
+                return
+            }
+
+            do {
+                try archive.validate(file: tmpURL, statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+            } catch {
+                self.dlog(error.localizedDescription, category: "presets")
                 DispatchQueue.main.async { completion() }
                 return
             }
@@ -584,6 +598,11 @@ class VisualizerController: NSObject {
 
             DispatchQueue.main.async { completion() }
         }.resume()
+    }
+
+    private func dlog(_ message: String, category: String) {
+        Logger(subsystem: "com.denzam.SystemEQ.ProjectMHelper", category: category)
+            .error("\(message, privacy: .public)")
     }
 
     private func hasMilkPresets(at basePath: String) -> Bool {
@@ -617,7 +636,6 @@ class VisualizerController: NSObject {
             return
         }
 
-        // Archive root is `presets-cream-of-the-crop-master/` — move its contents into basePath.
         // Skip macOS-generated metadata folders (`__MACOSX`) and dotfiles so we don't pick them as the root.
         let fm = FileManager.default
         guard let roots = try? fm.contentsOfDirectory(
@@ -635,9 +653,13 @@ class VisualizerController: NSObject {
         guard let entries = try? fm.contentsOfDirectory(at: archiveRoot, includingPropertiesForKeys: nil)
         else { return }
         let baseURL = URL(fileURLWithPath: basePath)
+        guard entries.allSatisfy({ !fm.fileExists(atPath: baseURL.appendingPathComponent($0.lastPathComponent).path) })
+        else {
+            dlog("Preset installation would replace existing files; preserving them", category: "presets")
+            return
+        }
         for entry in entries {
             let dest = baseURL.appendingPathComponent(entry.lastPathComponent)
-            try? fm.removeItem(at: dest)
             do {
                 try fm.moveItem(at: entry, to: dest)
             } catch {
@@ -718,7 +740,7 @@ class VisualizerController: NSObject {
     // MARK: - Broken preset blacklist
 
     private func loadBrokenPresets() {
-        guard let data = try? Data(contentsOf: blacklistURL),
+        guard let data = try? Data(contentsOf: brokenPresetsURL),
               let list = try? JSONDecoder().decode([String].self, from: data) else { return }
         brokenPresets = Set(list)
         print("[ProjectMHelper] Loaded \(brokenPresets.count) blacklisted presets")
@@ -727,9 +749,9 @@ class VisualizerController: NSObject {
     private func saveBrokenPresets() {
         guard let data = try? JSONEncoder().encode(Array(brokenPresets)) else { return }
         try? FileManager.default.createDirectory(
-            at: blacklistURL.deletingLastPathComponent(), withIntermediateDirectories: true
+            at: brokenPresetsURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        try? data.write(to: blacklistURL)
+        try? data.write(to: brokenPresetsURL)
     }
 
     func markPresetBroken(_ path: String, reason: String) {
@@ -837,7 +859,6 @@ class VisualizerController: NSObject {
             // CVDisplayLink is deprecated in macOS 15 but needed for macOS 13 fallback
             // (NSView.displayLink requires macOS 14+). Deprecation warnings intentionally suppressed.
             var link: CVDisplayLink?
-            // swiftlint:disable deprecated_api
             _ = CVDisplayLinkCreateWithActiveCGDisplays(&link)
             guard let link else { return }
             let selfPtr = Unmanaged.passUnretained(self).toOpaque()
@@ -848,7 +869,6 @@ class VisualizerController: NSObject {
                 return kCVReturnSuccess
             }, selfPtr)
             _ = CVDisplayLinkStart(link)
-            // swiftlint:enable deprecated_api
             cvDisplayLink = link
         }
     }

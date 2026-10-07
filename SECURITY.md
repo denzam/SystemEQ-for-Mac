@@ -61,8 +61,6 @@ audio utility, the mitigations cost more complexity than the risk warrants:
   vendoring binaries.
 - Remote AutoEQ index refresh and the ProjectM preset archive download lack hard
   byte and entry budgets; both use fixed HTTPS endpoints.
-- The ProjectM preset archive is fetched from a mutable branch rather than a
-  pinned commit with a verified checksum.
 - `Scripts/setup_projectm.sh` (developer-only, requires explicit execution and a
   sudo confirmation) builds from a mutable upstream tag. The predictable `/tmp`
   paths reported in the same finding were fixed after the audit: the script now
@@ -70,3 +68,7 @@ audio utility, the mitigations cost more complexity than the risk warrants:
 
 These are re-evaluated at each audit. If you believe one is more exploitable in
 practice than assessed here, please report it.
+
+ProjectM preset downloads use a pinned commit and verify SHA256 before
+extraction in both the helper and the developer setup script. Updating the
+pin requires changing the helper Info.plist commit and checksum together.

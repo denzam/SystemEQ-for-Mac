@@ -30,5 +30,9 @@
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>ProjectMPresetCommit</key>
+    <string>0180df21f5e0bd39b9060cc5de420ed2f1f9e509</string>
+    <key>ProjectMPresetSHA256</key>
+    <string>5600f974497d8f73295393fbdf866895ceb89efe82892f5e2d019358b2659202</string>
 </dict>
 </plist>

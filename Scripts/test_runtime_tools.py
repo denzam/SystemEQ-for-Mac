@@ -30,6 +30,7 @@ class RuntimeToolsTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         cls.cpu = Path(cls.temp.name) / "measure-process-cpu"
         cls.ipc = Path(cls.temp.name) / "ipc-server-tests"
+        cls.presets = Path(cls.temp.name) / "preset-archive-tests"
         sanitizer = os.environ.get("SYSTEMEQ_TEST_SANITIZER", "")
         if sanitizer not in ("", "address", "thread"):
             raise ValueError("Unsupported SYSTEMEQ_TEST_SANITIZER")
@@ -37,6 +38,7 @@ class RuntimeToolsTests(unittest.TestCase):
         for sources, output in (
             (["Scripts/measure_process_cpu.swift"], cls.cpu),
             (["ProjectMHelper/IPCServer.swift", "Scripts/test_ipc_server.swift"], cls.ipc),
+            (["ProjectMHelper/ProjectMPresetArchive.swift", "Scripts/test_preset_archive.swift"], cls.presets),
         ):
             subprocess.run(
                 ["xcrun", "swiftc", "-parse-as-library", *flags, *sources, "-o", str(output)],
@@ -109,6 +111,14 @@ class RuntimeToolsTests(unittest.TestCase):
         result = subprocess.run([str(self.ipc)], capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("IPC server: 4 tests passed", result.stdout)
+
+    def test_preset_archive_rejects_http_metadata_and_hash_failures(self):
+        result = subprocess.run(
+            [str(self.presets), str(Path(self.temp.name) / "preset-fixtures")],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Preset archive validation: tests passed", result.stdout)
 
 
 if __name__ == "__main__":
