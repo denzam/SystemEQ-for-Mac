@@ -110,7 +110,7 @@ struct RoutingView: View {
             deviceSelectionCard(
                 title: localization.localized(.outputDevice),
                 subtitle: localization.localized(.routingDesc),
-                devices: audioRouter.outputDevices,
+                devices: audioRouter.outputDevices.filter(\.canBeProcessedOutput),
                 selectedDevice: audioRouter.selectedOutputDevice,
                 onSelect: { device in
                     audioRouter.selectOutputDevice(device)
@@ -187,9 +187,9 @@ struct RoutingView: View {
                 // Status indicator with refresh button
                 HStack {
                     Circle()
-                        .fill(audioRouter.isRoutingActive ? Color.green : Color.gray)
+                        .fill(Self.isEQActive(engine: core) ? Color.green : Color.gray)
                         .frame(width: 8, height: 8)
-                    Text(audioRouter.isRoutingActive ? "EQ Active" : "EQ Inactive")
+                    Text(localization.localized(Self.isEQActive(engine: core) ? .eqActive : .eqInactive))
                         .font(AppTypography.bodySmall)
                         .foregroundColor(.secondary)
 
@@ -239,7 +239,7 @@ struct RoutingView: View {
                             .font(AppTypography.body)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(!audioRouter.isRoutingActive)
+                    .disabled(!Self.isEQActive(engine: core))
 
                     Button(action: {
                         CoreAudioEngine.shared.stopTestTone()
@@ -248,13 +248,13 @@ struct RoutingView: View {
                             .font(AppTypography.body)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(!audioRouter.isRoutingActive)
+                    .disabled(!Self.isEQActive(engine: core))
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                if !audioRouter.isRoutingActive {
-                    Text("💡 Test Tone available only when EQ is enabled")
+                if !Self.isEQActive(engine: core) {
+                    Text(localization.localized(.testToneRequiresEQ))
                         .font(AppTypography.labelSmall)
                         .foregroundColor(.secondary)
                 }
@@ -485,6 +485,10 @@ struct RoutingView: View {
     }
 
     // MARK: - Peak Meter Helpers
+
+    static func isEQActive(engine: CoreAudioEngine) -> Bool {
+        engine.isRunning && engine.isEnabled
+    }
 
     static func setEQEnabled(_ enabled: Bool, engine: AudioEngine) {
         engine.setEnabled(enabled)

@@ -104,6 +104,9 @@ public enum LocalizedString: String, CaseIterable {
     case systemOutput
     case systemOutputDesc
     case enableEQ
+    case eqActive
+    case eqInactive
+    case testToneRequiresEQ
     case disableEQ
     case testTone
     case stopTone

@@ -907,6 +907,78 @@ final class AudioEngineBandModeTests: XCTestCase {
         ))
     }
 
+    func testNativeAggregateCannotWinOutputPreferenceOrFallback() {
+        let internalDevice = AudioDevice(
+            id: 1, name: "Scarlett USB", uid: "com.denzam.SystemEQ.native.test",
+            isInput: true, isOutput: true
+        )
+        let physical = AudioDevice(id: 2, name: "Speakers", uid: "physical", isInput: false, isOutput: true)
+        let devices = [internalDevice, physical]
+        XCTAssertTrue(AudioDevice.isInternalNativeDevice(uid: internalDevice.uid))
+        XCTAssertFalse(internalDevice.canBeProcessedOutput)
+        XCTAssertEqual(AudioOutputSelectionPolicy.bestAvailable(in: devices), physical)
+        for preferred in [internalDevice.uid, nil] {
+            for selected in [internalDevice.uid, nil] {
+                XCTAssertEqual(AudioOutputSelectionPolicy.preferred(
+                    in: devices, preferredUID: preferred, selectedUID: selected, activeUID: internalDevice.uid
+                ), physical)
+            }
+        }
+    }
+
+    func testOutputSelectionFailsClosedWithoutEligibleDevices() {
+        let devices = [
+            AudioDevice(
+                id: 1,
+                name: "SystemEQ Native",
+                uid: "com.denzam.SystemEQ.native.old",
+                isInput: true,
+                isOutput: true
+            ),
+            AudioDevice(id: 2, name: "Renamed virtual device", uid: "BlackHole2ch_UID", isInput: true, isOutput: true),
+            AudioDevice(id: 3, name: "Microphone", uid: "microphone", isInput: true, isOutput: false),
+            AudioDevice(id: 0, name: "Unknown", uid: "unknown", isInput: false, isOutput: true),
+            AudioDevice(id: 4, name: "Missing UID", uid: "", isInput: false, isOutput: true)
+        ]
+        XCTAssertTrue(devices.allSatisfy { !$0.canBeProcessedOutput })
+        XCTAssertNil(AudioOutputSelectionPolicy.bestAvailable(in: devices))
+        for device in devices {
+            XCTAssertNil(AudioOutputSelectionPolicy.preferred(
+                in: devices, preferredUID: device.uid, selectedUID: device.uid, activeUID: device.uid
+            ))
+        }
+    }
+
+    func testValidOutputPreferencesAndPhysicalDeviceNameRemainSupported() {
+        let wanted = AudioDevice(id: 1, name: "SystemEQ Native", uid: "physical-uid", isInput: false, isOutput: true)
+        let usb = AudioDevice(id: 2, name: "USB Output", uid: "usb-device", isInput: false, isOutput: true)
+        XCTAssertTrue(wanted.canBeProcessedOutput)
+        XCTAssertEqual(AudioOutputSelectionPolicy.preferred(
+            in: [usb, wanted], preferredUID: wanted.uid, selectedUID: usb.uid, activeUID: usb.uid
+        ), wanted)
+        XCTAssertEqual(AudioOutputSelectionPolicy.preferred(
+            in: [usb, wanted], preferredUID: "disconnected", selectedUID: wanted.uid, activeUID: usb.uid
+        ), wanted)
+        XCTAssertEqual(AudioOutputSelectionPolicy.preferred(
+            in: [usb, wanted], preferredUID: "disconnected", selectedUID: nil, activeUID: wanted.uid
+        ), wanted)
+    }
+
+    func testRoutingEQIndicatorFollowsProcessingAndBypassState() {
+        let core = CoreAudioEngine()
+        defer { core.stop() }
+        XCTAssertFalse(RoutingView.isEQActive(engine: core))
+        core.prepareProcessTap(sampleRate: 48000, outputDeviceID: 1, bufferFrames: 64)
+        core.markProcessTapStarted()
+        XCTAssertTrue(RoutingView.isEQActive(engine: core))
+        core.setEnabled(false)
+        XCTAssertFalse(RoutingView.isEQActive(engine: core))
+        core.setEnabled(true)
+        XCTAssertTrue(RoutingView.isEQActive(engine: core))
+        core.stop()
+        XCTAssertFalse(RoutingView.isEQActive(engine: core))
+    }
+
     func testFailedNativeStartRestoresPreviousPhysicalOutputOnly() {
         let previous = AudioDevice(
             id: 1,

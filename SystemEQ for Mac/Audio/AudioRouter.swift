@@ -29,6 +29,42 @@ public struct AudioDevice: Identifiable, Equatable {
         self.isInput = isInput
         self.isOutput = isOutput
     }
+
+    nonisolated static func isInternalNativeDevice(uid: String) -> Bool {
+        uid.hasPrefix("com.denzam.SystemEQ.native.")
+    }
+
+    nonisolated var canBeProcessedOutput: Bool {
+        isOutput && id != kAudioObjectUnknown && !uid.isEmpty &&
+            !Self.isInternalNativeDevice(uid: uid) &&
+            !name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) &&
+            !uid.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase)
+    }
+}
+
+enum AudioOutputSelectionPolicy {
+    nonisolated static func bestAvailable(in devices: [AudioDevice]) -> AudioDevice? {
+        let eligible = devices.filter(\.canBeProcessedOutput)
+        for priority in AppConstants.DeviceNames.priorityDevices {
+            if let device = eligible.first(where: { $0.name.lowercased().contains(priority) }) {
+                return device
+            }
+        }
+        return eligible.first(where: {
+            $0.name.lowercased().contains("usb") || $0.uid.lowercased().contains("usb")
+        }) ?? eligible.first
+    }
+
+    nonisolated static func preferred(
+        in devices: [AudioDevice], preferredUID: String?, selectedUID: String?, activeUID: String?
+    ) -> AudioDevice? {
+        for uid in [preferredUID, selectedUID, activeUID].compactMap(\.self) {
+            if let device = devices.first(where: { $0.uid == uid && $0.canBeProcessedOutput }) {
+                return device
+            }
+        }
+        return bestAvailable(in: devices)
+    }
 }
 
 struct OutputVolumeState: Equatable {
@@ -459,7 +495,8 @@ public final class AudioRouter: ObservableObject {
 
         return deviceIDs.compactMap { deviceID -> RawDeviceInfo? in
             guard let name = AudioRouter.getDeviceName(deviceID),
-                  let uid = AudioRouter.getDeviceUID(deviceID) else {
+                  let uid = AudioRouter.getDeviceUID(deviceID),
+                  !AudioDevice.isInternalNativeDevice(uid: uid) else {
                 return nil
             }
 
@@ -591,8 +628,8 @@ public final class AudioRouter: ObservableObject {
     }
 
     func selectOutputDevice(_ device: AudioDevice) {
-        guard !device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) else {
-            dlog("BlackHole cannot be selected as the processed output", level: .warning, category: .routing)
+        guard device.canBeProcessedOutput else {
+            dlog("Device cannot be selected as the processed output", level: .warning, category: .routing)
             return
         }
         selectedOutputDevice = device
@@ -614,57 +651,17 @@ public final class AudioRouter: ObservableObject {
     }
 
     private func findBestPhysicalOutputDevice() -> AudioDevice? {
-        // Пріоритетні аудіо інтерфейси
-        let priorityDevices = AppConstants.DeviceNames.priorityDevices
-
-        // Спочатку шукаємо пріоритетні пристрої
-        for priority in priorityDevices {
-            if let device = outputDevices.first(where: {
-                !$0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) &&
-                    $0.name.lowercased().contains(priority)
-            }) {
-                dlog("Found priority device: \(device.name)", category: .routing)
-                return device
-            }
-        }
-
-        // Якщо пріоритетних немає, шукаємо будь-який USB аудіо інтерфейс
-        if let usbDevice = outputDevices.first(where: {
-            !$0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) &&
-                ($0.name.lowercased().contains("usb") || $0.uid.lowercased().contains("usb"))
-        }) {
-            dlog("Found USB device: \(usbDevice.name)", category: .routing)
-            return usbDevice
-        }
-
-        // Якщо USB немає, беремо перший не-BlackHole пристрій
-        if let firstDevice = outputDevices
-            .first(where: { !$0.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) }) {
-            dlog("Using first available device: \(firstDevice.name)", category: .routing)
-            return firstDevice
-        }
-
-        return nil
+        AudioOutputSelectionPolicy.bestAvailable(in: outputDevices)
     }
 
     /// Output device the engine should feed. Prefers the device we actually want
     /// (survives a temporary fallback), then the one we were last routing
     /// through, and only auto-picks when both are really gone.
     private func preferredOutputDevice() -> AudioDevice? {
-        if let uid = preferredOutputUID,
-           let wanted = outputDevices.first(where: { $0.uid == uid }) {
-            return wanted
-        }
-        if let selectedOutputDevice,
-           !selectedOutputDevice.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase),
-           let selected = outputDevices.first(where: { $0.uid == selectedOutputDevice.uid }) {
-            return selected
-        }
-        if let uid = activeOutputUID,
-           let previous = outputDevices.first(where: { $0.uid == uid }) {
-            return previous
-        }
-        return findBestPhysicalOutputDevice()
+        AudioOutputSelectionPolicy.preferred(
+            in: outputDevices, preferredUID: preferredOutputUID,
+            selectedUID: selectedOutputDevice?.uid, activeUID: activeOutputUID
+        )
     }
 
     private func diagnosticDeviceKind(_ device: AudioDevice?) -> String {
