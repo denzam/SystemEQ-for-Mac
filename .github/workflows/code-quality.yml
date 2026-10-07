@@ -78,10 +78,49 @@ jobs:
             exit 1
           fi
 
+  sanitizers:
+    name: Sanitizer (${{ matrix.sanitizer }})
+    runs-on: macos-latest
+    timeout-minutes: 20
+    needs: [tooling, swiftlint, swiftformat]
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, thread]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Verify runtime tools under sanitizer
+        env:
+          SYSTEMEQ_TEST_SANITIZER: ${{ matrix.sanitizer }}
+        run: python3 Scripts/test_runtime_tools.py
+      - name: Verify audio and IPC tests under sanitizer
+        env:
+          SYSTEMEQ_TEST_SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          case "$SYSTEMEQ_TEST_SANITIZER" in
+            address) sanitizer_option=-enableAddressSanitizer ;;
+            thread) sanitizer_option=-enableThreadSanitizer ;;
+            *) exit 2 ;;
+          esac
+          xcodebuild test \
+            -project "SystemEQ for Mac.xcodeproj" \
+            -scheme "SystemEQ for Mac" \
+            -destination "platform=macOS" \
+            "$sanitizer_option" YES \
+            '-only-testing:SystemEQ for MacTests/CoreAudioOutputTests' \
+            '-only-testing:SystemEQ for MacTests/BiquadFilterTests' \
+            '-only-testing:SystemEQ for MacTests/AudioEngineBandModeTests/testConcurrentFilterSwapAndRenderStress' \
+            '-only-testing:SystemEQ for MacTests/AudioEngineBandModeTests/testConcurrentRoomFilterSwapAndRenderStress' \
+            '-only-testing:SystemEQ for MacTests/ProjectMHelperClientTests' \
+            CODE_SIGNING_ALLOWED=NO -quiet
+
   test:
     name: Test Check
     runs-on: macos-latest
-    needs: [tooling, swiftlint, swiftformat]
+    needs: [tooling, swiftlint, swiftformat, sanitizers]
     
     steps:
       - name: Checkout
