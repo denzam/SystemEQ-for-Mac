@@ -50,7 +50,7 @@ no telemetry.
 - **vDSP Biquad Filters** — Accelerate framework, 5-10× faster than scalar
 - **Peak Meters** — Real-time audio level monitoring
 - **Clipping Protection** — Automatic gain reduction and preamp control
-- **Media Key Support** — Volume control via keyboard shortcuts
+- **Keyboard Volume** — Uses macOS volume control when the selected device supports it; SystemEQ does not intercept media keys
 
 ### AutoEQ Integration
 
@@ -192,10 +192,14 @@ SystemEQ for Mac/
 
 ### Calibration
 
-1. Run hearing test (31 frequencies)
+1. Compare test frequencies against the fixed 1000 Hz reference
 2. Adjust volume per frequency to match reference
-3. Save profile for automatic application
+3. Save the profile, open Profiles, and activate it
 4. Use A/B comparison to test profiles
+
+Profiles store 31 frequency adjustments. The active EQ mode determines which
+frequencies are applied: 10-band mode uses matching frequencies, while 31-band
+mode applies all 31 adjustments. Choose 31-band mode to use the full profile.
 
 ### Visualizer
 

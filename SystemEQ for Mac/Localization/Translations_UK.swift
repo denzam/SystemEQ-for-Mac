@@ -204,7 +204,7 @@ enum UkrainianTranslations {
         .testAudioRouting: "Тест маршрутизації аудіо",
         .systemeqReady: "SystemEQ готовий до використання",
         .freeOpenSource: "Безкоштовний та з відкритим кодом",
-        .mitLicense: "Ліцензія MIT, 10,000+ зірок на GitHub",
+        .blackHoleLicense: "Вихідний код під ліцензією GPLv3",
         .safeTrusted: "Безпечний та надійний",
         .installationSteps: "Кроки встановлення:",
         .setBlackHoleAsSystemOutput: "Встановіть BlackHole як пристрій виводу системи, щоб SystemEQ міг обробляти все аудіо.",

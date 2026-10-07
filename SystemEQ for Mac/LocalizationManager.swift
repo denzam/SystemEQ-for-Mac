@@ -290,7 +290,7 @@ public enum LocalizedString: String, CaseIterable {
 
     // Common UI
     case freeOpenSource
-    case mitLicense
+    case blackHoleLicense
     case safeTrusted
     case installationSteps
     case setBlackHoleAsSystemOutput

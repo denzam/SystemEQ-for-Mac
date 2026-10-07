@@ -24,13 +24,15 @@ satisfies the attribution requirements of those licenses.
 - Used by: `Data/EQDatabase.swift`. Linked against the system SQLite that
   ships with macOS.
 
-## Required external software (not bundled)
+## Optional external software (not bundled)
 
 ### BlackHole 2ch
 - Source: https://github.com/ExistentialAudio/BlackHole
-- License: **GPL-3.0**
-- Role: virtual audio driver. Installed separately by the user via the
-  Setup Assistant; SystemEQ does not redistribute BlackHole.
+- License: source code under **GPL-3.0**; official binaries and installers
+  are subject to the upstream distribution terms.
+- Role: virtual audio driver for the BlackHole backend. Native capture on
+  macOS 14.4 and later does not require it. Installed separately by the user
+  via the Setup Assistant; SystemEQ does not redistribute BlackHole.
 
 ## Data
 

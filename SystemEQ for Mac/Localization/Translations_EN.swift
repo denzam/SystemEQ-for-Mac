@@ -204,7 +204,7 @@ enum EnglishTranslations {
         .testAudioRouting: "Test Audio Routing",
         .systemeqReady: "SystemEQ is ready to use",
         .freeOpenSource: "Free & Open-Source",
-        .mitLicense: "MIT License, 10,000+ GitHub stars",
+        .blackHoleLicense: "Source code licensed under GPLv3",
         .safeTrusted: "Safe & Trusted",
         .installationSteps: "Installation Steps:",
         .setBlackHoleAsSystemOutput: "Set BlackHole as your system output device so SystemEQ can process all audio.",

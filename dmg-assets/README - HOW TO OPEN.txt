@@ -27,9 +27,12 @@ STEP 3. (Optional, fastest) Open Terminal and paste:
     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
     Then double-click the app normally.
 
-STEP 4. Grant microphone / audio permissions when asked.
-        The app needs BlackHole 2ch installed (free, open-source).
-        On first launch you will see a Welcome screen explaining setup.
+STEP 4. Follow the Welcome screen and allow the requested audio permission.
+        On macOS 14.4+, Automatic tries Native capture without BlackHole.
+        Native capture needs System Audio Recording permission.
+        BlackHole is needed on macOS 13-14.3 or when Native cannot start
+        in Automatic mode; its virtual audio input needs Microphone permission.
+        Settings -> Audio Engine lets you choose the backend.
 
 ────────────────────────────────────────────────────────────────
   ITALIANO
@@ -51,9 +54,12 @@ PASSO 3. (Opzionale, piu' veloce) Apri Terminale e incolla:
     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
     Poi fai doppio clic sull'app normalmente.
 
-PASSO 4. Concedi i permessi microfono / audio quando richiesti.
-         L'app richiede BlackHole 2ch (gratuito, open-source).
-         Al primo avvio vedrai una schermata di benvenuto.
+PASSO 4. Segui la schermata di benvenuto e consenti il permesso audio richiesto.
+         Su macOS 14.4+, Automatico prova l'acquisizione nativa senza BlackHole.
+         L'acquisizione nativa richiede il permesso di registrare l'audio di sistema.
+         BlackHole serve su macOS 13-14.3 o se il motore nativo non si avvia
+         in modalita' Automatico; il suo ingresso virtuale richiede il permesso Microfono.
+         Impostazioni -> Motore audio permette di scegliere il backend.
 
 ────────────────────────────────────────────────────────────────
   УКРАЇНСЬКА
@@ -75,9 +81,12 @@ PASSO 4. Concedi i permessi microfono / audio quando richiesti.
     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
     Потім подвійний клік як зазвичай.
 
-КРОК 4. Дозволь доступ до мікрофона / звуку коли запитає.
-        Потрібен BlackHole 2ch (безкоштовно, open-source).
-        При першому запуску побачиш екран привітання.
+КРОК 4. Пройди екран привітання та надай запитаний дозвіл на аудіо.
+        На macOS 14.4+ Автоматично спершу пробує нативне захоплення без BlackHole.
+        Нативному захопленню потрібен дозвіл на запис системного аудіо.
+        BlackHole потрібен на macOS 13-14.3 або якщо нативний рушій не запускається
+        в автоматичному режимі; його віртуальний вхід потребує доступу до мікрофона.
+        Налаштування -> Аудіорушій дозволяють вибрати backend.
 
 ════════════════════════════════════════════════════════════════
   Why is this needed?

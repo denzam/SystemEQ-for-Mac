@@ -307,7 +307,7 @@ struct InstallBlackHoleStepView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(localization.localized(.freeOpenSource))
                             .fontWeight(.medium)
-                        Text(localization.localized(.mitLicense))
+                        Text(localization.localized(.blackHoleLicense))
                             .font(AppTypography.label)
                             .foregroundColor(.secondary)
                     }
