@@ -1040,9 +1040,10 @@ class VisualizerController: NSObject {
     }
 
     func randomPreset() {
-        guard presetCount > 0 else { return }
-        let randomIndex = Int.random(in: 0..<presetCount)
-        selectPreset(at: randomIndex)
+        guard let playlist = playlistHandle, !filteredPresets.isEmpty else { return }
+        let randomIndex = Int.random(in: filteredPresets.indices)
+        projectm_playlist_set_position(playlist, randomIndex, true)
+        updateCurrentPresetName()
     }
 
     /// index — глобальна позиція в allPresets (список у UI показує всі пресети).

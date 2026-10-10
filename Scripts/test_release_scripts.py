@@ -158,17 +158,30 @@ if [[ "${FAIL_STAGE:-}" == publish && "$1" == *systemeq-dmg*/SystemEQ-v1.4.4.dmg
         self.assertNotIn("успішно створені", result.stdout)
 
     def test_noninteractive_install_always_uses_sudo_n(self):
-        self.stub("git", 'mkdir -p "${@: -1}"')
+        self.stub("git", '''
+case "$1" in
+clone)
+    source_root="${@: -1}"
+    mkdir -p "$source_root/src/libprojectM/Renderer"
+    printf '    return m_texture->Empty();\\n' > "$source_root/src/libprojectM/Renderer/TextureSamplerDescriptor.cpp" ;;
+-C)
+    [[ "$3" == rev-parse && "$4" == HEAD ]] || exit 99
+    echo 3158ee615eaafd93a8912b5f6dd84a9c47b2e00a ;;
+*) exit 99 ;;
+esac''')
         self.stub("cmake", "exit 0")
         self.stub("sysctl", "echo 1")
         self.stub("sudo", 'echo "privilege denied fixture" >&2\nexit 7')
-        result = self.run_script("setup_projectm.sh", "--build")
-        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
-        calls = self.log.read_text().splitlines()
-        sudo = [call for call in calls if call.startswith("sudo ")]
-        self.assertEqual(len(sudo), 1)
-        self.assertTrue(sudo[0].startswith("sudo -n cmake --install "), sudo)
-        self.assertIn("privilege denied fixture", result.stderr)
+        for mode in ("--build", "--build-universal"):
+            with self.subTest(mode=mode):
+                self.log.write_text("")
+                result = self.run_script("setup_projectm.sh", mode)
+                self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+                calls = self.log.read_text().splitlines()
+                sudo = [call for call in calls if call.startswith("sudo ")]
+                self.assertEqual(len(sudo), 1)
+                self.assertTrue(sudo[0].startswith("sudo -n cmake --install "), sudo)
+                self.assertIn("privilege denied fixture", result.stderr)
 
 
 if __name__ == "__main__":

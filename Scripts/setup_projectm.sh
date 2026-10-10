@@ -14,6 +14,8 @@ shopt -s nullglob
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECTM_VERSION="4.1.6"
+PROJECTM_SOURCE_COMMIT="3158ee615eaafd93a8912b5f6dd84a9c47b2e00a"
+PROJECTM_TEXTURE_FIX_COMMIT="97bf8845f3c5684857e0cdef54f68942e54839b9"
 REQUIRED_MIN_VERSION="4.1.5"
 
 LIB_SEARCH_PATHS=(
@@ -62,6 +64,26 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+
+apply_texture_sampler_fix() {
+    python3 - "$1/src/libprojectM/Renderer/TextureSamplerDescriptor.cpp" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+source = path.read_text()
+original = "    return m_texture->Empty();"
+if source.count(original) != 1:
+    raise SystemExit("Unexpected TextureSamplerDescriptor source; refusing to build")
+path.write_text(source.replace(original, "    return !m_texture || m_texture->Empty();", 1))
+PY
+}
+
+configure_projectm() {
+    local source_root="$1"
+    shift
+    (cd "$source_root" && cmake "$@")
+}
 
 copy_missing_presets() {
     local copy_source_root="${1%/}" copy_destination_root="$2" copy_list="$3"
@@ -183,6 +205,13 @@ if [[ $WANT_BUILD -eq 1 ]]; then
 
     git clone --depth 1 --branch "v$PROJECTM_VERSION" --recurse-submodules \
         https://github.com/projectM-visualizer/projectm.git "$BUILD_SRC"
+    SOURCE_COMMIT="$(git -C "$BUILD_SRC" rev-parse HEAD)"
+    if [[ "$SOURCE_COMMIT" != "$PROJECTM_SOURCE_COMMIT" ]]; then
+        echo "Unexpected projectM source commit; refusing to build." >&2
+        exit 1
+    fi
+    apply_texture_sampler_fix "$BUILD_SRC"
+    echo "Applied upstream texture fix $PROJECTM_TEXTURE_FIX_COMMIT"
 
     CMAKE_ARGS=(
         -S "$BUILD_SRC"
@@ -195,7 +224,7 @@ if [[ $WANT_BUILD -eq 1 ]]; then
         CMAKE_ARGS+=(-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0)
     fi
 
-    cmake "${CMAKE_ARGS[@]}"
+    configure_projectm "$BUILD_SRC" "${CMAKE_ARGS[@]}"
     cmake --build "$BUILD_OUT" -j "$(sysctl -n hw.ncpu)"
     echo "🔐 Потрібен sudo для install у /usr/local..."
     if [[ ! -t 0 ]] || sudo -n true 2>/dev/null; then
