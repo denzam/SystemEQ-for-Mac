@@ -10,7 +10,9 @@ Calibration profile persistence, reliable audio-route changes, and ProjectM cras
 
 ### Fixed
 - Calibration profiles now remain applied on top of the base EQ after EQ restarts and routing changes in both 10-band and 31-band modes; saved adjustments can be viewed and edited
+- Looped calibration playback responds immediately to reference and band-level volume slider changes
 - Native-to-BlackHole switching negotiates mismatched device sample rates instead of stalling, and live sample-rate changes rebuild the active EQ and room filters
+- Resampler skips unused neighboring samples at zero interpolation phase, preventing stale NaN values from contaminating valid audio
 - BlackHole restarts preserve system volume and mute state without treating delayed device notifications as user volume changes
 - Internal Native capture devices are excluded from output selection, and routing status reflects the actual active EQ state
 - Mono outputs and stale sleep/wake recovery are handled without leaving an obsolete route active
