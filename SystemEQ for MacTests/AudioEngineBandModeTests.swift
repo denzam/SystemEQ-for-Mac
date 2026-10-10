@@ -13,6 +13,348 @@ import Darwin
 @testable import SystemEQ_for_Mac
 import XCTest
 
+@MainActor
+final class AudioDiagnosticAgeTests: XCTestCase {
+    func testNeverObservedRemainsUnavailable() {
+        XCTAssertEqual(CoreAudioEngine.ageDescription(0, now: 1_000_000), "not observed")
+    }
+
+    func testPastTimestampReportsElapsedSeconds() {
+        let timestamp: UInt64 = 100
+        let now = timestamp + AudioConvertNanosToHostTime(5_000_000_000)
+        XCTAssertEqual(
+            CoreAudioEngine.ageDescription(Int64(bitPattern: timestamp), now: now),
+            "5.0 seconds ago"
+        )
+    }
+
+    func testTimestampPublishedAfterSnapshotDoesNotWrap() {
+        XCTAssertEqual(CoreAudioEngine.ageDescription(1_000_001, now: 1_000_000), "0.0 seconds ago")
+        XCTAssertEqual(CoreAudioEngine.ageDescription(Int64(bitPattern: UInt64.max), now: 1), "0.0 seconds ago")
+    }
+
+    func testSignedStoragePreservesValidUnsignedHostTime() {
+        let timestamp = (UInt64(1) << 63) + 1
+        let now = timestamp + AudioConvertNanosToHostTime(5_000_000_000)
+        XCTAssertEqual(
+            CoreAudioEngine.ageDescription(Int64(bitPattern: timestamp), now: now),
+            "5.0 seconds ago"
+        )
+    }
+
+    func testEqualTimestampReportsZeroAge() {
+        XCTAssertEqual(CoreAudioEngine.ageDescription(123, now: 123), "0.0 seconds ago")
+    }
+}
+
+final class SampleRateNegotiationTests: XCTestCase {
+    func testAsynchronousHardwareChangeMustSettleBeforeSuccess() {
+        var output = 96000.0
+        var pending: Double?
+        var pauses = 0
+        let result = AudioSampleRateNegotiation.resolve(
+            read: { .init(input: 48000, output: output) },
+            setInput: { _ in XCTFail("Input already matches"); return false },
+            setOutput: { pending = $0; return true },
+            pause: {
+                pauses += 1
+                if pauses == 5, let pending { output = pending }
+            }
+        )
+        XCTAssertEqual(try? result.get(), 48000)
+        XCTAssertGreaterThanOrEqual(pauses, 7)
+        XCTAssertEqual(output, 48000)
+    }
+
+    func testRejectedSettersCannotConfirmMismatchedRates() {
+        var writes = 0
+        let result = AudioSampleRateNegotiation.resolve(
+            read: { .init(input: 48000, output: 96000) },
+            setInput: { _ in writes += 1; return false },
+            setOutput: { _ in writes += 1; return false },
+            pause: { XCTFail("Rejected setters must not be awaited") }
+        )
+        XCTAssertEqual(result, .failure(.setterRejected))
+        XCTAssertGreaterThan(writes, 0)
+    }
+
+    func testSuccessfulSetterWithUnchangedReadbackTimesOut() {
+        var pauses = 0
+        let result = AudioSampleRateNegotiation.resolve(
+            maximumReads: 5,
+            read: { .init(input: 48000, output: 96000) },
+            setInput: { _ in true },
+            setOutput: { _ in true },
+            pause: { pauses += 1 }
+        )
+        XCTAssertEqual(result, .failure(.didNotSettle))
+        XCTAssertEqual(pauses, 12)
+    }
+
+    func testMissingAndInvalidMetadataCannotWriteOrInvent48k() {
+        let cases: [AudioSampleRateNegotiation.Rates?] = [
+            nil, .init(input: .nan, output: 48000), .init(input: 48000, output: .infinity),
+            .init(input: 0, output: 48000), .init(input: 48000, output: -1)
+        ]
+        for rates in cases {
+            let result = AudioSampleRateNegotiation.resolve(
+                read: { rates },
+                setInput: { _ in XCTFail("Invalid metadata must not mutate hardware"); return true },
+                setOutput: { _ in XCTFail("Invalid metadata must not mutate hardware"); return true },
+                pause: { XCTFail("Invalid metadata must fail immediately") }
+            )
+            XCTAssertEqual(result, .failure(.invalidMetadata))
+        }
+    }
+
+    func testReadFailureAfterSetterIsNotSuccess() {
+        var readable = true
+        let result = AudioSampleRateNegotiation.resolve(
+            read: { readable ? .init(input: 48000, output: 96000) : nil },
+            setInput: { _ in true },
+            setOutput: { _ in readable = false; return true },
+            pause: {}
+        )
+        XCTAssertEqual(result, .failure(.invalidMetadata))
+    }
+
+    func testTransientMatchingReadbackDoesNotCountAsSettled() {
+        var reads = 0
+        let result = AudioSampleRateNegotiation.waitForRate(48000, maximumReads: 8, read: {
+            reads += 1
+            return .init(input: 48000, output: reads % 3 == 0 ? 96000 : 48000)
+        }, pause: {})
+        XCTAssertEqual(result, .failure(.didNotSettle))
+        XCTAssertEqual(reads, 8)
+    }
+
+    func testExternalRateChoiceIsAppliedToBothDevices() {
+        var input = 48000.0
+        var output = 44100.0
+        var requests: [Double] = []
+        let result = AudioSampleRateNegotiation.resolve(
+            preferredRate: 44100,
+            read: { .init(input: input, output: output) },
+            setInput: { input = $0; requests.append($0); return true },
+            setOutput: { output = $0; requests.append($0); return true },
+            pause: {}
+        )
+        XCTAssertEqual(try? result.get(), 44100)
+        XCTAssertEqual(requests, [44100])
+        XCTAssertEqual(input, output)
+    }
+
+    func testFixedMatchingHardwareCanUseItsSupportedRate() {
+        let result = AudioSampleRateNegotiation.resolve(
+            read: { .init(input: 96000, output: 96000) },
+            setInput: { _ in false },
+            setOutput: { _ in false },
+            pause: {}
+        )
+        XCTAssertEqual(try? result.get(), 96000)
+    }
+
+    func testLastUnchangedDeviceEventCannotHideOtherDeviceRateChange() {
+        let rates = AudioSampleRateNegotiation.Rates(input: 44100, output: 48000)
+        XCTAssertFalse(rates.matches(48000))
+        XCTAssertEqual(rates.recoveryRate(current: 48000, changed: 48000), 44100)
+        XCTAssertNil(AudioSampleRateNegotiation.Rates(input: 48000, output: 48000).recoveryRate(
+            current: 48000,
+            changed: 48000
+        ))
+    }
+
+    func testRollbackCaptureRequiresUIDAndValidOriginalRate() {
+        XCTAssertNil(AudioSampleRateNegotiation.originalRate(uid: nil, saved: [:], read: {
+            XCTFail("Missing UID must stop capture before reading a rate")
+            return 96000
+        }))
+        XCTAssertNil(AudioSampleRateNegotiation.originalRate(uid: "", saved: [:], read: { 96000 }))
+        XCTAssertNil(AudioSampleRateNegotiation.originalRate(uid: "device", saved: [:], read: { nil }))
+        XCTAssertNil(AudioSampleRateNegotiation.originalRate(uid: "device", saved: [:], read: { .nan }))
+        XCTAssertNil(AudioSampleRateNegotiation.originalRate(
+            uid: "device",
+            saved: ["device": .infinity],
+            read: { 48000 }
+        ))
+        let captured = AudioSampleRateNegotiation.originalRate(uid: "device", saved: [:], read: { 96000 })
+        XCTAssertEqual(captured?.uid, "device")
+        XCTAssertEqual(captured?.rate, 96000)
+        let preserved = AudioSampleRateNegotiation.originalRate(
+            uid: "device",
+            saved: ["device": 44100],
+            read: { 48000 }
+        )
+        XCTAssertEqual(preserved?.rate, 44100)
+    }
+}
+
+final class AudioClientFormatValidationTests: XCTestCase {
+    private var expected: AudioStreamBasicDescription {
+        AudioStreamBasicDescription(
+            mSampleRate: 48000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
+            mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+            mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0
+        )
+    }
+
+    func testExactFloat32PlanarAndInterleavedLayoutsAreAccepted() {
+        XCTAssertTrue(AudioClientFormatValidation.matches(expected, expected: expected))
+        var interleaved = expected
+        interleaved.mFormatFlags &= ~kAudioFormatFlagIsNonInterleaved
+        interleaved.mBytesPerFrame = 8
+        interleaved.mBytesPerPacket = 8
+        XCTAssertTrue(AudioClientFormatValidation.matches(interleaved, expected: interleaved))
+    }
+
+    func testInt16ReadbackWithMatchingRateAndChannelsIsRejected() {
+        var actual = expected
+        actual
+            .mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked |
+            kAudioFormatFlagIsNonInterleaved
+        actual.mBitsPerChannel = 16
+        actual.mBytesPerFrame = 2
+        actual.mBytesPerPacket = 2
+        XCTAssertFalse(AudioClientFormatValidation.matches(actual, expected: expected))
+    }
+
+    func testCompressedReadbackWithMatchingRateAndChannelsIsRejected() {
+        var actual = expected
+        actual.mFormatID = kAudioFormatMPEG4AAC
+        XCTAssertFalse(AudioClientFormatValidation.matches(actual, expected: expected))
+    }
+
+    func testDifferentInterleavingIsRejected() {
+        var actual = expected
+        actual.mFormatFlags &= ~kAudioFormatFlagIsNonInterleaved
+        actual.mBytesPerFrame = 8
+        actual.mBytesPerPacket = 8
+        XCTAssertFalse(AudioClientFormatValidation.matches(actual, expected: expected))
+    }
+
+    func testMalformedPacketLayoutAndNonfiniteRateAreRejected() {
+        var actual = expected
+        actual.mBytesPerPacket = 0
+        XCTAssertFalse(AudioClientFormatValidation.matches(actual, expected: expected))
+        for rate in [Double.nan, .infinity, 0] {
+            actual = expected
+            actual.mSampleRate = rate
+            XCTAssertFalse(AudioClientFormatValidation.matches(actual, expected: expected))
+        }
+    }
+
+    func testShortOrEmptyHardwareMetadataCannotInventMono() {
+        let size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        XCTAssertTrue(AudioClientFormatValidation.isValidHardwareFormat(expected, size: size))
+        XCTAssertFalse(AudioClientFormatValidation.isValidHardwareFormat(expected, size: 8))
+        XCTAssertFalse(AudioClientFormatValidation.isValidHardwareFormat(AudioStreamBasicDescription(), size: size))
+        var actual = expected
+        actual.mChannelsPerFrame = 0
+        XCTAssertFalse(AudioClientFormatValidation.isValidHardwareFormat(actual, size: size))
+        actual = expected
+        actual.mSampleRate = .nan
+        XCTAssertFalse(AudioClientFormatValidation.isValidHardwareFormat(actual, size: size))
+    }
+}
+
+@MainActor
+final class RoutingRateChangeRecoveryTests: XCTestCase {
+    private final class Gate {
+        let entered = XCTestExpectation(description: "rate-change delay entered")
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            await withCheckedContinuation {
+                continuation = $0
+                entered.fulfill()
+            }
+        }
+
+        func release() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    func testDisableDuringDelayRejectsPendingRestartAndStaleNotification() async {
+        let recovery = RoutingSampleRateRecovery()
+        let gate = Gate()
+        let oldGeneration = recovery.generation
+        var restarts = 0
+        let task = recovery.schedule(generation: oldGeneration, wait: { await gate.wait() }) { restarts += 1 }
+        await fulfillment(of: [gate.entered], timeout: 2)
+        recovery.cancel()
+        gate.release()
+        await task?.value
+        XCTAssertNil(recovery.schedule(generation: oldGeneration, wait: {}) { restarts += 1 })
+        XCTAssertEqual(restarts, 0)
+    }
+
+    func testRepeatedNotificationsCoalesceAndOldTaskCannotRestart() async {
+        let recovery = RoutingSampleRateRecovery()
+        let first = Gate()
+        let second = Gate()
+        var restarts = 0
+        let firstTask = recovery
+            .schedule(generation: recovery.generation, wait: { await first.wait() }) { restarts += 1 }
+        await fulfillment(of: [first.entered], timeout: 2)
+        let secondTask = recovery
+            .schedule(generation: recovery.generation, wait: { await second.wait() }) { restarts += 1 }
+        await fulfillment(of: [second.entered], timeout: 2)
+        first.release()
+        await firstTask?.value
+        XCTAssertEqual(restarts, 0)
+        second.release()
+        await secondTask?.value
+        XCTAssertEqual(restarts, 1)
+    }
+
+    func testBackendOrDeviceReplacementRejectsOldGeneration() async {
+        let recovery = RoutingSampleRateRecovery()
+        let oldGeneration = recovery.generation
+        recovery.cancel()
+        var restarts = 0
+        XCTAssertNil(recovery.schedule(generation: oldGeneration, wait: {}) { restarts += 100 })
+        let task = recovery.schedule(generation: recovery.generation, wait: {}) { restarts += 1 }
+        await task?.value
+        XCTAssertEqual(restarts, 1)
+    }
+
+    func testFailedDelayCannotRestart() async {
+        let recovery = RoutingSampleRateRecovery()
+        var restarts = 0
+        let task = recovery
+            .schedule(generation: recovery.generation, wait: { throw CancellationError() }) { restarts += 1 }
+        await task?.value
+        XCTAssertEqual(restarts, 0)
+    }
+
+    func testInitialReconciliationCatchesDriftWithoutADeviceNotification() {
+        let recovery = RoutingSampleRateRecovery()
+        var restarts = 0
+        XCTAssertTrue(recovery
+            .reconcile(rates: .init(input: 96000, output: 48000), currentRate: 48000) { restarts += 1 })
+        XCTAssertEqual(restarts, 1)
+    }
+
+    func testInitialReconciliationRejectsMissingOrInvalidMetadata() {
+        let recovery = RoutingSampleRateRecovery()
+        XCTAssertFalse(recovery
+            .reconcile(rates: nil, currentRate: 48000) { XCTFail("Invalid metadata cannot start recovery") })
+        XCTAssertFalse(recovery.reconcile(rates: .init(input: .nan, output: 48000), currentRate: 48000) {
+            XCTFail("Invalid metadata cannot start recovery")
+        })
+    }
+
+    func testInitialReconciliationLeavesMatchingRatesAlone() {
+        let recovery = RoutingSampleRateRecovery()
+        XCTAssertTrue(recovery.reconcile(rates: .init(input: 48000, output: 48000), currentRate: 48000) {
+            XCTFail("Stable startup must not restart")
+        })
+    }
+}
+
 final class CoreAudioOutputTests: XCTestCase {
     private func checkLayout(channels: [UInt32], frames: Int) {
         let ring = SPSCRingBuffer()
@@ -1121,6 +1463,93 @@ final class AudioEngineBandModeTests: XCTestCase {
         XCTAssertEqual(physicalState.isMuted, false)
     }
 
+    func testBlackHoleRateRestartPreservesVolumeAndMuteOverPhysicalUnity() throws {
+        let physical = AudioDeviceID(1)
+        let virtual = AudioDeviceID(2)
+        let preserved = try XCTUnwrap(OutputVolumeState(scalar: 0.37, isMuted: true))
+        var states: [AudioDeviceID: OutputVolumeState] = try [
+            physical: XCTUnwrap(OutputVolumeState(scalar: 1, isMuted: false)),
+            virtual: XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        ]
+        var writes: [AudioDeviceID] = []
+
+        XCTAssertTrue(BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: physical,
+            virtualDevice: virtual,
+            preserving: preserved,
+            read: { states[$0] },
+            write: { state, deviceID in
+                writes.append(deviceID)
+                states[deviceID] = state
+                return true
+            }
+        ))
+        XCTAssertEqual(states[virtual], preserved)
+        XCTAssertEqual(states[physical]?.scalar, 1)
+        XCTAssertEqual(writes, [virtual])
+    }
+
+    func testBlackHoleRateRestartPreservesVolumeWithoutPhysicalVolumeControl() throws {
+        let preserved = try XCTUnwrap(OutputVolumeState(scalar: 0.48, isMuted: false))
+        var observed = try XCTUnwrap(OutputVolumeState(scalar: 1, isMuted: false))
+
+        XCTAssertTrue(BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: 1,
+            virtualDevice: 2,
+            preserving: preserved,
+            read: { $0 == 2 ? observed : nil },
+            write: { state, deviceID in
+                XCTAssertEqual(deviceID, 2)
+                observed = state
+                return true
+            }
+        ))
+        XCTAssertEqual(observed, preserved)
+    }
+
+    func testBlackHoleRateRestartRejectsFailedVolumeWrite() throws {
+        let preserved = try XCTUnwrap(OutputVolumeState(scalar: 0.48, isMuted: false))
+        let observed = try XCTUnwrap(OutputVolumeState(scalar: 1, isMuted: false))
+
+        XCTAssertFalse(BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: 1,
+            virtualDevice: 2,
+            preserving: preserved,
+            read: { $0 == 2 ? observed : nil },
+            write: { _, _ in false }
+        ))
+    }
+
+    func testBlackHoleRateRestartRejectsMissingVolumeReadback() throws {
+        let preserved = try XCTUnwrap(OutputVolumeState(scalar: 0.48, isMuted: false))
+
+        XCTAssertFalse(BlackHoleGainStaging.prepareVirtualOutput(
+            physicalDevice: 1,
+            virtualDevice: 2,
+            preserving: preserved,
+            read: { _ in nil },
+            write: { _, _ in true }
+        ))
+    }
+
+    func testBlackHoleRateRestartRejectsUnchangedVolumeOrMute() throws {
+        let preserved = try XCTUnwrap(OutputVolumeState(scalar: 0.48, isMuted: true))
+        let wrongStates = try [
+            XCTUnwrap(OutputVolumeState(scalar: 1, isMuted: true)),
+            XCTUnwrap(OutputVolumeState(scalar: 0.48, isMuted: false))
+        ]
+
+        for observed in wrongStates {
+            XCTAssertFalse(BlackHoleGainStaging.prepareVirtualOutput(
+                physicalDevice: 1,
+                virtualDevice: 2,
+                preserving: preserved,
+                read: { $0 == 2 ? observed : nil },
+                write: { _, _ in true }
+            ))
+        }
+    }
+
     func testBlackHoleGainStagingRejectsUnverifiedPhysicalUnity() throws {
         let physical = AudioDeviceID(1)
         let state = try XCTUnwrap(OutputVolumeState(scalar: 0.181, isMuted: false))
@@ -1153,6 +1582,106 @@ final class AudioEngineBandModeTests: XCTestCase {
         ) else {
             return XCTFail("Output changes must win when both scopes are reported")
         }
+    }
+
+    func testBlackHoleInputResetEchoDoesNotBecomeUserVolume() throws {
+        let reset = try XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        let expected = try XCTUnwrap(OutputVolumeState(scalar: 0.5, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.record(reset, at: 0)
+
+        for scopes: Set<AudioObjectPropertyScope> in [
+            [kAudioObjectPropertyScopeOutput],
+            [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput]
+        ] {
+            guard case .restoreExpected = BlackHoleVolumeChangePolicy.action(
+                for: scopes, observed: reset, rejectedInput: echo.state(at: 35_000_000)
+            ) else { return XCTFail("The rejected input gain must not become the expected output gain") }
+        }
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeOutput], observed: expected, rejectedInput: echo.state(at: 35_000_000)
+        ) else { return XCTFail("The recovery acknowledgement must retain the restored value") }
+    }
+
+    func testBlackHoleInputEchoGuardAcceptsDifferentUserVolumeAndMute() throws {
+        let reset = try XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.record(reset, at: 0)
+        let changes = try [
+            XCTUnwrap(OutputVolumeState(scalar: 0.375, isMuted: false)),
+            XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: true))
+        ]
+
+        for observed in changes {
+            guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+                for: [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput],
+                observed: observed, rejectedInput: echo.state(at: 35_000_000)
+            ) else { return XCTFail("A different user volume or mute must be accepted") }
+        }
+    }
+
+    func testBlackHoleInputEchoGuardExpiresAndClearsAcrossRoutes() throws {
+        let reset = try XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.record(reset, at: 100)
+        XCTAssertEqual(echo.state(at: 99_999_999), reset)
+        XCTAssertNil(echo.state(at: 100_000_100))
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeOutput], observed: reset, rejectedInput: echo.state(at: 100_000_100)
+        ) else { return XCTFail("The guard must not fight volume keys after expiry") }
+        echo.reset()
+        XCTAssertNil(echo.state(at: 101))
+    }
+
+    func testBlackHoleCoalescedResetDuringRateRecoveryRetainsExpectedVolume() throws {
+        let reset = try XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.beginRecovery(at: 0)
+        XCTAssertNil(echo.state(at: 35_000_000))
+        guard case .restoreExpected = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput], observed: reset,
+            rejectedInput: echo.state(at: 35_000_000), preservingMixedScopes: echo.isRecovering(at: 35_000_000)
+        ) else { return XCTFail("The first coalesced rate-reset notification must retain the expected volume") }
+    }
+
+    func testBlackHoleRateRecoveryStillAcceptsOutputOnlyAdjustment() throws {
+        let userVolume = try XCTUnwrap(OutputVolumeState(scalar: 0.375, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.beginRecovery(at: 0)
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeOutput], observed: userVolume,
+            preservingMixedScopes: echo.isRecovering(at: 35_000_000)
+        ) else { return XCTFail("Output-only user volume changes must remain available during recovery") }
+    }
+
+    func testBlackHoleMixedVolumeKeysResumeAfterRateRecoveryWindow() {
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.beginRecovery(at: 0)
+        XCTAssertFalse(echo.isRecovering(at: 100_000_000))
+        guard case .acceptObserved = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput],
+            preservingMixedScopes: echo.isRecovering(at: 100_000_000)
+        ) else { return XCTFail("The settling guard must not permanently suppress mixed-scope volume keys") }
+        echo.reset()
+        XCTAssertFalse(echo.isRecovering(at: 1))
+    }
+
+    func testBlackHoleUserAdjustmentKeepsRateRecoveryDeadline() throws {
+        let reset = try XCTUnwrap(OutputVolumeState(scalar: 0.226, isMuted: false))
+        var echo = BlackHoleInputVolumeEchoGuard()
+        echo.beginRecovery(at: 0)
+        echo.record(reset, at: 1)
+        echo.acceptOutputChange()
+        XCTAssertNil(echo.state(at: 15_000_000))
+        XCTAssertTrue(echo.isRecovering(at: 15_000_000))
+        guard case .restoreExpected = BlackHoleVolumeChangePolicy.action(
+            for: [kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput], observed: reset,
+            rejectedInput: echo.state(at: 15_000_000), preservingMixedScopes: echo.isRecovering(at: 15_000_000)
+        )
+        else {
+            return XCTFail("A later reset must restore the latest user choice within the original recovery deadline")
+        }
+        XCTAssertFalse(echo.isRecovering(at: 100_000_000))
     }
 
     func testBlackHoleRecoveryWritesOnlyChangedProperties() {
@@ -1820,8 +2349,8 @@ final class CalibrationProfileTests: XCTestCase {
             let player = AVAudioPlayerNode()
             let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
             audio.attach(player)
-            audio.connect(player, to: audio.mainMixerNode, format: format)
             try audio.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
+            audio.connect(player, to: audio.mainMixerNode, format: format)
             try audio.start()
             defer { player.stop(); audio.stop() }
             let calibration = CalibrationEngine(audioEngine: audio, playerNode: player, loadStoredProfiles: false)

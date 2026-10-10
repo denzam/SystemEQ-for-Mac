@@ -14,6 +14,104 @@ import Combine
 import CoreAudio
 import Foundation
 
+enum AudioSampleRateNegotiation {
+    struct Rates {
+        let input: Double
+        let output: Double
+
+        var isValid: Bool {
+            input.isFinite && output.isFinite && input > 0 && output > 0
+        }
+
+        func matches(_ rate: Double) -> Bool {
+            isValid && rate.isFinite && rate > 0 && abs(input - rate) < 1 && abs(output - rate) < 1
+        }
+
+        func recoveryRate(current: Double, changed: Double?) -> Double? {
+            guard isValid, !matches(current) else { return nil }
+            if let changed, changed.isFinite, changed > 0, abs(changed - current) >= 1 { return changed }
+            return abs(input - current) >= 1 ? input : output
+        }
+    }
+
+    enum Failure: Error, Equatable {
+        case invalidMetadata
+        case setterRejected
+        case didNotSettle
+    }
+
+    static func originalRate(
+        uid: String?,
+        saved: [String: Double],
+        read: () -> Double?
+    ) -> (uid: String, rate: Double)? {
+        guard let uid, !uid.isEmpty, let rate = saved[uid] ?? read(), rate.isFinite, rate > 0 else { return nil }
+        return (uid, rate)
+    }
+
+    static func waitForRate(
+        _ rate: Double,
+        maximumReads: Int = 50,
+        read: () -> Rates?,
+        pause: () -> Void
+    ) -> Result<Double, Failure> {
+        var stableReads = 0
+        for index in 0..<max(0, maximumReads) {
+            guard let rates = read(), rates.isValid else { return .failure(.invalidMetadata) }
+            stableReads = rates.matches(rate) ? stableReads + 1 : 0
+            if stableReads == 3 { return .success(rate) }
+            if index + 1 < maximumReads { pause() }
+        }
+        return .failure(.didNotSettle)
+    }
+
+    static func resolve(
+        preferredRate: Double? = nil,
+        maximumReads: Int = 50,
+        read: () -> Rates?,
+        setInput: (Double) -> Bool,
+        setOutput: (Double) -> Bool,
+        pause: () -> Void
+    ) -> Result<Double, Failure> {
+        guard let initial = read(), initial.isValid else { return .failure(.invalidMetadata) }
+        let candidates = [preferredRate, 48000, 44100, initial.output, initial.input].compactMap(\.self)
+        var tried: Set<Double> = []
+        var failure = Failure.setterRejected
+        for rate in candidates where rate.isFinite && rate > 0 && tried.insert(rate).inserted {
+            guard let current = read(), current.isValid else { return .failure(.invalidMetadata) }
+            let outputAccepted = abs(current.output - rate) < 1 || setOutput(rate)
+            let inputAccepted = abs(current.input - rate) < 1 || setInput(rate)
+            guard outputAccepted, inputAccepted else { continue }
+            switch waitForRate(rate, maximumReads: maximumReads, read: read, pause: pause) {
+            case let .success(confirmed):
+                return .success(confirmed)
+            case .failure(.invalidMetadata):
+                return .failure(.invalidMetadata)
+            case let .failure(reason):
+                failure = reason
+            }
+        }
+        return .failure(failure)
+    }
+}
+
+enum AudioClientFormatValidation {
+    static func isValidHardwareFormat(_ format: AudioStreamBasicDescription, size: UInt32) -> Bool {
+        size == MemoryLayout<AudioStreamBasicDescription>.size &&
+            format.mChannelsPerFrame > 0 && format.mSampleRate.isFinite && format.mSampleRate > 0
+    }
+
+    static func matches(_ observed: AudioStreamBasicDescription, expected: AudioStreamBasicDescription) -> Bool {
+        observed.mSampleRate.isFinite && abs(observed.mSampleRate - expected.mSampleRate) < 1 &&
+            observed.mFormatID == expected.mFormatID && observed.mFormatFlags == expected.mFormatFlags &&
+            observed.mBytesPerPacket == expected.mBytesPerPacket && observed.mFramesPerPacket == expected
+            .mFramesPerPacket &&
+            observed.mBytesPerFrame == expected.mBytesPerFrame && observed.mChannelsPerFrame == expected
+            .mChannelsPerFrame &&
+            observed.mBitsPerChannel == expected.mBitsPerChannel
+    }
+}
+
 /// Core Audio based audio processing engine
 /// Uses AudioUnit (AUHAL) for direct hardware access
 public final class CoreAudioEngine: ObservableObject {
@@ -64,6 +162,10 @@ public final class CoreAudioEngine: ObservableObject {
 
     public var currentOutputDeviceID: AudioDeviceID {
         outputDeviceID
+    }
+
+    var processingSampleRate: Double {
+        currentSampleRate
     }
 
     // EQ processing — lock-free filter swap via C11 atomic pointer.
@@ -378,7 +480,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Device Sample Rate Helpers
 
-    private func getDeviceSampleRate(_ deviceID: AudioDeviceID) -> Double? {
+    func getDeviceSampleRate(_ deviceID: AudioDeviceID) -> Double? {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -387,11 +489,52 @@ public final class CoreAudioEngine: ObservableObject {
         var rate: Double = 0
         var size = UInt32(MemoryLayout<Double>.size)
         let status = AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &rate)
-        if status != noErr {
+        if status != noErr || size != MemoryLayout<Double>.size || !rate.isFinite || rate <= 0 {
             dlog("⚠️ Failed to get device sample rate (\(deviceID)): \(status)", category: .engine)
             return nil
         }
         return rate
+    }
+
+    func deviceSampleRates() -> AudioSampleRateNegotiation.Rates? {
+        guard let input = getDeviceSampleRate(inputDeviceID),
+              let output = getDeviceSampleRate(outputDeviceID) else { return nil }
+        return AudioSampleRateNegotiation.Rates(input: input, output: output)
+    }
+
+    private func verifyClientFormat(
+        _ unit: AudioUnit,
+        scope: AudioUnitScope,
+        element: AudioUnitElement,
+        expected: AudioStreamBasicDescription
+    ) -> Bool {
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, scope, element, &format, &size)
+        guard status == noErr, size == MemoryLayout<AudioStreamBasicDescription>.size,
+              AudioClientFormatValidation.matches(format, expected: expected) else {
+            recordSetupFailure("clientFormatReadback", status: status)
+            return false
+        }
+        return true
+    }
+
+    private func setClientFormat(
+        _ unit: AudioUnit,
+        scope: AudioUnitScope,
+        element: AudioUnitElement,
+        format: AudioStreamBasicDescription
+    ) -> Bool {
+        var requested = format
+        let status = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_StreamFormat, scope, element, &requested,
+            UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        )
+        guard status == noErr else {
+            recordSetupFailure("clientFormatSet", status: status)
+            return false
+        }
+        return verifyClientFormat(unit, scope: scope, element: element, expected: format)
     }
 
     private func getDeviceUID(_ deviceID: AudioDeviceID) -> String? {
@@ -405,7 +548,7 @@ public final class CoreAudioEngine: ObservableObject {
         let status = withUnsafeMutablePointer(to: &uid) { pointer in
             AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
         }
-        guard status == noErr, let uid else { return nil }
+        guard status == noErr, size == MemoryLayout<Unmanaged<CFString>>.size, let uid else { return nil }
         return uid.takeRetainedValue() as String
     }
 
@@ -522,12 +665,14 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Records a device's current nominal sample rate once, before we override it,
     /// so restoreDeviceSampleRates() can put it back when routing stops.
-    private func captureOriginalSampleRate(_ deviceID: AudioDeviceID) {
-        guard let uid = getDeviceUID(deviceID),
-              originalDeviceSampleRates[uid] == nil,
-              let rate = getDeviceSampleRate(deviceID) else { return }
-        originalDeviceSampleRates[uid] = rate
+    private func captureOriginalSampleRate(_ deviceID: AudioDeviceID) -> Bool {
+        guard let original = AudioSampleRateNegotiation.originalRate(
+            uid: getDeviceUID(deviceID), saved: originalDeviceSampleRates,
+            read: { self.getDeviceSampleRate(deviceID) }
+        ) else { return false }
+        originalDeviceSampleRates[original.uid] = original.rate
         persistOriginalDeviceSampleRates()
+        return true
     }
 
     /// Restores every device we changed back to its captured nominal rate. Call
@@ -541,9 +686,21 @@ public final class CoreAudioEngine: ObservableObject {
     public func restoreDeviceSampleRates() {
         var restoredUIDs: [String] = []
         for (uid, rate) in originalDeviceSampleRates {
+            guard rate.isFinite, rate > 0 else {
+                DiagnosticEventStore.shared.record("engine.restoreRate.failed", details: ["reason": "invalidMetadata"])
+                continue
+            }
             guard let deviceID = findDeviceID(uid: uid),
                   setDeviceSampleRate(deviceID, rate: rate) else { continue }
-            restoredUIDs.append(uid)
+            let result = AudioSampleRateNegotiation.waitForRate(rate, read: {
+                guard let observed = self.getDeviceSampleRate(deviceID) else { return nil }
+                return AudioSampleRateNegotiation.Rates(input: observed, output: observed)
+            }, pause: { Thread.sleep(forTimeInterval: 0.01) })
+            if case .success = result {
+                restoredUIDs.append(uid)
+            } else {
+                DiagnosticEventStore.shared.record("engine.restoreRate.failed")
+            }
         }
         for uid in restoredUIDs {
             originalDeviceSampleRates.removeValue(forKey: uid)
@@ -594,7 +751,7 @@ public final class CoreAudioEngine: ObservableObject {
         DiagnosticEventStore.shared.record("engine.setup.stepFailed", details: details)
     }
 
-    public func setup(inputDevice: AudioDeviceID, outputDevice: AudioDeviceID) {
+    public func setup(inputDevice: AudioDeviceID, outputDevice: AudioDeviceID, preferredSampleRate: Double? = nil) {
         DiagnosticEventStore.shared.record("engine.setup.request")
         dlog("🔧 Setting up Core Audio Engine...", category: .engine)
         dlog("   Input device: \(inputDevice)", category: .engine)
@@ -616,30 +773,30 @@ public final class CoreAudioEngine: ObservableObject {
             if !setupSucceeded {
                 DiagnosticEventStore.shared.record("engine.setup.failed")
                 cleanup()
+                restoreDeviceSampleRates()
             }
         }
 
         // Remember each device's nominal rate the first time we touch it, so we can
         // put it back when EQ is turned off (we force 48k below).
-        captureOriginalSampleRate(outputDevice)
-        captureOriginalSampleRate(inputDevice)
-
-        // Align hardware sample rates (prefer 48k, fallback to 44.1k)
-        let preferred = 48000.0
-        _ = setDeviceSampleRate(outputDevice, rate: preferred)
-        _ = setDeviceSampleRate(inputDevice, rate: preferred)
-        let inRate = getDeviceSampleRate(inputDevice) ?? preferred
-        let outRate = getDeviceSampleRate(outputDevice) ?? preferred
-        dlog("📊 Initial sample rates: input=\(inRate)Hz, output=\(outRate)Hz", category: .engine)
-
-        if abs(inRate - outRate) >= 1.0 {
-            dlog("⚠️ Sample rate mismatch detected! Attempting to align...", category: .engine)
-            if !setDeviceSampleRate(outputDevice, rate: inRate) {
-                _ = setDeviceSampleRate(inputDevice, rate: outRate)
-            }
+        guard captureOriginalSampleRate(outputDevice), captureOriginalSampleRate(inputDevice) else {
+            recordSetupFailure("originalSampleRates")
+            return
         }
-        let finalInRate = getDeviceSampleRate(inputDevice) ?? preferred
-        let finalOutRate = getDeviceSampleRate(outputDevice) ?? preferred
+
+        let negotiation = AudioSampleRateNegotiation.resolve(
+            preferredRate: preferredSampleRate,
+            read: { self.deviceSampleRates() },
+            setInput: { self.setDeviceSampleRate(inputDevice, rate: $0) },
+            setOutput: { self.setDeviceSampleRate(outputDevice, rate: $0) },
+            pause: { Thread.sleep(forTimeInterval: 0.01) }
+        )
+        guard case let .success(finalOutRate) = negotiation else {
+            recordSetupFailure("sampleRateNegotiation")
+            dlog("Sample rate negotiation failed: \(negotiation)", level: .error, category: .engine)
+            return
+        }
+        let finalInRate = finalOutRate
         self.currentSampleRate = finalOutRate
         rebuildActiveEQFilter(sampleRate: finalOutRate)
         rebuildRoomFilter(sampleRate: finalOutRate)
@@ -679,13 +836,6 @@ public final class CoreAudioEngine: ObservableObject {
         logDeviceBufferInfo(inputDevice, label: "INPUT")
         logDeviceBufferInfo(outputDevice, label: "OUTPUT")
 
-        if abs(finalInRate - finalOutRate) >= 1.0 {
-            DiagnosticEventStore.shared.record("engine.setup.rateMismatch")
-            dlog("⚠️ WARNING: Sample rate mismatch! This will cause audio quality degradation!", category: .engine)
-            dlog("   Input: \(finalInRate)Hz, Output: \(finalOutRate)Hz", category: .engine)
-            dlog("   Please set both devices to the same sample rate in Audio MIDI Setup", category: .engine)
-        }
-
         // Desired client format (Float32, non-interleaved, up to 2ch)
         let targetSampleRate: Double = self.currentSampleRate
         var clientFormat = AudioStreamBasicDescription(
@@ -699,7 +849,7 @@ public final class CoreAudioEngine: ObservableObject {
             mBitsPerChannel: 32,
             mReserved: 0
         )
-        let asbdSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var outputClientFormat = clientFormat
         var maxFramesPerSlice: UInt32 = 4096
         let mfsSize = UInt32(MemoryLayout<UInt32>.size)
 
@@ -785,7 +935,7 @@ public final class CoreAudioEngine: ObservableObject {
                 &inFormat,
                 &size
             )
-            if status == noErr {
+            if status == noErr, AudioClientFormatValidation.isValidHardwareFormat(inFormat, size: size) {
                 let isFloat = (inFormat.mFormatFlags & kAudioFormatFlagIsFloat) != 0
                 let bitsPerChannel = inFormat.mBitsPerChannel
                 dlog(
@@ -794,7 +944,8 @@ public final class CoreAudioEngine: ObservableObject {
                 )
                 self.channelCount = max(1, min(2, inFormat.mChannelsPerFrame))
             } else {
-                self.channelCount = 2
+                recordSetupFailure("inputDeviceFormat", status: status)
+                return
             }
             clientFormat.mChannelsPerFrame = self.channelCount
 
@@ -804,23 +955,7 @@ public final class CoreAudioEngine: ObservableObject {
             )
 
             // Configure client stream format on INPUT unit's output (element 1)
-            _ = AudioUnitSetProperty(
-                iu,
-                kAudioUnitProperty_StreamFormat,
-                kAudioUnitScope_Output,
-                1,
-                &clientFormat,
-                asbdSize
-            )
-            var sr = self.currentSampleRate
-            _ = AudioUnitSetProperty(
-                iu,
-                kAudioUnitProperty_SampleRate,
-                kAudioUnitScope_Output,
-                1,
-                &sr,
-                UInt32(MemoryLayout<Double>.size)
-            )
+            guard setClientFormat(iu, scope: kAudioUnitScope_Output, element: 1, format: clientFormat) else { return }
             _ = AudioUnitSetProperty(
                 iu,
                 kAudioUnitProperty_MaximumFramesPerSlice,
@@ -941,17 +1076,23 @@ public final class CoreAudioEngine: ObservableObject {
             // Match device interleaving to avoid conversion issues
             var deviceFmt = AudioStreamBasicDescription()
             var deviceFmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-            if AudioUnitGetProperty(
+            status = AudioUnitGetProperty(
                 ou,
                 kAudioUnitProperty_StreamFormat,
                 kAudioUnitScope_Output,
                 0,
                 &deviceFmt,
                 &deviceFmtSize
-            ) == noErr {
+            )
+            guard status == noErr,
+                  AudioClientFormatValidation.isValidHardwareFormat(deviceFmt, size: deviceFmtSize) else {
+                recordSetupFailure("outputDeviceFormat", status: status)
+                return
+            }
+            do {
                 let deviceInterleaved = (deviceFmt.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
                 let ch = max(UInt32(1), min(UInt32(2), deviceFmt.mChannelsPerFrame))
-                var clientOutFormat = AudioStreamBasicDescription(
+                let clientOutFormat = AudioStreamBasicDescription(
                     mSampleRate: targetSampleRate,
                     mFormatID: kAudioFormatLinearPCM,
                     mFormatFlags: deviceInterleaved ? (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked) :
@@ -963,41 +1104,9 @@ public final class CoreAudioEngine: ObservableObject {
                     mBitsPerChannel: 32,
                     mReserved: 0
                 )
-                _ = AudioUnitSetProperty(
-                    ou,
-                    kAudioUnitProperty_StreamFormat,
-                    kAudioUnitScope_Input,
-                    0,
-                    &clientOutFormat,
-                    asbdSize
-                )
-                var sr = self.currentSampleRate
-                _ = AudioUnitSetProperty(
-                    ou,
-                    kAudioUnitProperty_SampleRate,
-                    kAudioUnitScope_Input,
-                    0,
-                    &sr,
-                    UInt32(MemoryLayout<Double>.size)
-                )
-            } else {
-                _ = AudioUnitSetProperty(
-                    ou,
-                    kAudioUnitProperty_StreamFormat,
-                    kAudioUnitScope_Input,
-                    0,
-                    &clientFormat,
-                    asbdSize
-                )
-                var sr = self.currentSampleRate
-                _ = AudioUnitSetProperty(
-                    ou,
-                    kAudioUnitProperty_SampleRate,
-                    kAudioUnitScope_Input,
-                    0,
-                    &sr,
-                    UInt32(MemoryLayout<Double>.size)
-                )
+                outputClientFormat = clientOutFormat
+                guard setClientFormat(ou, scope: kAudioUnitScope_Input, element: 0, format: clientOutFormat)
+                else { return }
             }
             _ = AudioUnitSetProperty(
                 ou,
@@ -1060,6 +1169,16 @@ public final class CoreAudioEngine: ObservableObject {
                 dlog("❌ Failed to initialize OUTPUT unit: \(s)", category: .engine)
                 return
             }
+        }
+
+        guard case .success = AudioSampleRateNegotiation.waitForRate(
+            currentSampleRate, read: { self.deviceSampleRates() },
+            pause: { Thread.sleep(forTimeInterval: 0.01) }
+        ), let iu = inputUnit, let ou = outputUnit,
+        verifyClientFormat(iu, scope: kAudioUnitScope_Output, element: 1, expected: clientFormat),
+        verifyClientFormat(ou, scope: kAudioUnitScope_Input, element: 0, expected: outputClientFormat) else {
+            recordSetupFailure("initializedSampleRates")
+            return
         }
 
         // Diagnostic: Inspect output unit stream formats
@@ -1442,9 +1561,11 @@ public final class CoreAudioEngine: ObservableObject {
         """
     }
 
-    private static func ageDescription(_ timestamp: Int64, now: UInt64) -> String {
+    static func ageDescription(_ timestamp: Int64, now: UInt64) -> String {
         guard timestamp != 0 else { return "not observed" }
-        let elapsed = AudioConvertHostTimeToNanos(now &- UInt64(bitPattern: timestamp))
+        let observed = UInt64(bitPattern: timestamp)
+        let ticks = now >= observed ? now - observed : 0
+        let elapsed = AudioConvertHostTimeToNanos(ticks)
         return String(format: "%.1f seconds ago", Double(elapsed) / 1_000_000_000)
     }
 
