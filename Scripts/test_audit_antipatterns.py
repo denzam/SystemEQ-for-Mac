@@ -16,7 +16,9 @@ SCANNER = Path(__file__).resolve().parents[1] / ".agents/skills/independent-revi
 
 class AuditAntipatternTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="systemeq-antipattern-tests-", dir="/private/tmp")
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="systemeq-antipattern-tests-", dir=Path(tempfile.gettempdir()).resolve()
+        )
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
         self.root = self.base / "repo"
