@@ -4,6 +4,34 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] — 2026-10-10
+
+Calibration profile persistence, reliable audio-route changes, and ProjectM crash fixes.
+
+### Fixed
+- Calibration profiles now remain applied on top of the base EQ after EQ restarts and routing changes in both 10-band and 31-band modes; saved adjustments can be viewed and edited
+- Native-to-BlackHole switching negotiates mismatched device sample rates instead of stalling, and live sample-rate changes rebuild the active EQ and room filters
+- BlackHole restarts preserve system volume and mute state without treating delayed device notifications as user volume changes
+- Internal Native capture devices are excluded from output selection, and routing status reflects the actual active EQ state
+- Mono outputs and stale sleep/wake recovery are handled without leaving an obsolete route active
+- ProjectM no longer crashes when presets request missing random textures; the pinned 4.1.6 library includes the upstream null-pointer fix
+- Manual ProjectM Shuffle keeps the selected category and weight filters, and minimized visualizer windows can be restored from the control panel
+- Visualizer IPC callbacks and teardown release resources safely; permission-query errors no longer trigger false watchdog termination
+- Audio callback-age diagnostics no longer wrap into extremely large elapsed times during concurrent timestamp updates
+- AutoEQ snapshots preserve complete preset state and handle nullable database rows
+- Setup instructions and permission prompts match the selected Native or BlackHole backend
+
+### Added
+- VoiceOver descriptions for EQ curves and adjustable EQ sliders
+- Language-specific app icons with reproducible asset verification
+- Audio and IPC regression checks with Address Sanitizer and Thread Sanitizer in CI
+
+### Changed
+- Release and setup scripts fail on invalid inputs or failed dependencies and preserve previous builds and mounted work when packaging fails
+- ProjectM preset downloads are pinned and verified before extraction
+- Updated the bundled AutoEQ database from the October scheduled update
+- Removed unused legacy DSP, routing, localization, and design code
+
 ## [1.4.3] — 2026-09-27
 
 Audio engine stability, device buffer adaptation, and resampler boundary fixes.
@@ -269,6 +297,7 @@ First public release.
 - Buffer-size mismatch between input and output AUHAL units
 - Real-time thread policy now applied to the audio callback thread
 
+[1.4.4]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.4
 [1.4.1]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.1
 [1.4.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.4.0
 [1.3.0]: https://github.com/denzam/SystemEQ-for-Mac/releases/tag/v1.3.0
