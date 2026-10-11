@@ -88,23 +88,8 @@ struct RoutingView: View {
             // System Output Management
             systemOutputCard
 
-            if audioRouter.activeBackend == .native {
-                statusCheckCard(
-                    title: localization.localized(.audioBackend),
-                    status: .success,
-                    message: localization.localized(.audioBackendNative)
-                )
-            } else {
-                deviceSelectionCard(
-                    title: localization.localized(.inputDevice),
-                    subtitle: localization.localized(.routingDesc),
-                    devices: audioRouter.inputDevices,
-                    selectedDevice: audioRouter.selectedInputDevice,
-                    onSelect: { device in
-                        audioRouter.selectInputDevice(device)
-                    }
-                )
-            }
+            // Audio Capture Section
+            audioCaptureSection
 
             // Output Device Selection
             deviceSelectionCard(
@@ -317,6 +302,69 @@ struct RoutingView: View {
         }
     }
 
+    // MARK: - Audio Capture Section
+
+    private var audioCaptureSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(localization.localized(.inputDevice))
+                    .font(AppTypography.heading2)
+                Text(localization
+                    .localized(audioRouter.activeBackend == .native ? .nativeCaptureDesc : .inputCaptureDesc))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                Image(
+                    systemName: isInputCaptureAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                )
+                .foregroundColor(isInputCaptureAvailable ? .green : .orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(inputCaptureTitle)
+                        .font(AppTypography.body)
+                    Text(inputCaptureSubtitle)
+                        .font(AppTypography.labelSmall)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(isInputCaptureAvailable ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
+            .cornerRadius(6)
+        }
+        .padding(AppSpacing.lg)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+
+    private var isInputCaptureAvailable: Bool {
+        if audioRouter.activeBackend == .native {
+            return true
+        }
+        return audioRouter.blackHoleDetected
+    }
+
+    private var inputCaptureTitle: String {
+        if audioRouter.activeBackend == .native {
+            return localization.localized(.audioBackendNative)
+        }
+        return audioRouter.blackHoleDetected ? "BlackHole 2ch" : localization.localized(.notInstalled)
+    }
+
+    private var inputCaptureSubtitle: String {
+        if audioRouter.activeBackend == .native {
+            return localization.localized(.nativeCaptureActive)
+        }
+        return audioRouter.blackHoleDetected
+            ? localization.localized(.inputCaptureActive)
+            : localization.localized(.blackHoleRequiredForRouting)
+    }
+
     // MARK: - Device Selection Card
 
     private func deviceSelectionCard(
@@ -400,8 +448,10 @@ struct RoutingView: View {
             } else {
                 statusCheckCard(
                     title: localization.localized(.inputDevice),
-                    status: audioRouter.selectedInputDevice != nil ? .success : .warning,
-                    message: audioRouter.selectedInputDevice?.name ?? localization.localized(.notConfigured)
+                    status: audioRouter.blackHoleDetected ? .success : .warning,
+                    message: audioRouter.blackHoleDetected
+                        ? (audioRouter.selectedInputDevice?.name ?? "BlackHole 2ch")
+                        : localization.localized(.notConfigured)
                 )
             }
 

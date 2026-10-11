@@ -118,6 +118,10 @@ public enum LocalizedString: String, CaseIterable {
     case blackHole
     case inputDevice
     case outputDevice
+    case inputCaptureDesc
+    case inputCaptureActive
+    case nativeCaptureDesc
+    case nativeCaptureActive
     case installed
     case notInstalled
     case notConfigured

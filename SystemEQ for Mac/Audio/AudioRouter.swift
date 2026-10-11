@@ -67,7 +67,7 @@ enum AudioOutputSelectionPolicy {
     }
 }
 
-struct OutputVolumeState: Equatable {
+struct OutputVolumeState: Equatable, Sendable {
     let scalar: Float
     let isMuted: Bool?
 
