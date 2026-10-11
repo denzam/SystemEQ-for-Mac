@@ -198,3 +198,8 @@ Docs/internal/
 # Coverage artifacts
 default.profraw
 *.profraw
+
+# Scratch and generated media
+output/
+Docs/youtube_avatar*
+Docs/Immagine ChatGPT*
