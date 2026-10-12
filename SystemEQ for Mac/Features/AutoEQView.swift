@@ -848,7 +848,7 @@ struct AutoEQView: View {
                     let result = preparedImport.result(for: bandMode.audioEngineMode)
                     if let safe = preparedPreamp(result) {
                         preampDB = safe
-                        importNeedsApply = result.requiresApply || abs(safe - Double(result.preamp)) > 0.05
+                        importNeedsApply = false
                     } else {
                         showImportError(AutoEQImportError.insufficientHeadroom)
                         importNeedsApply = true
@@ -1745,9 +1745,7 @@ struct AutoEQView: View {
                 activePresetTarget = target
                 activePresetPath = path
                 importNeedsApply = !preservePlayback &&
-                    (result.requiresApply || abs(safePreamp - Double(result.preamp)) > 0.05
-                        || audioEngine.getCurrentEQValues() != previousGains || audioEngine
-                        .preampGain != previousPreamp)
+                    (audioEngine.getCurrentEQValues() != previousGains || audioEngine.preampGain != previousPreamp)
                 isSearching = false
                 if autoApply, !importNeedsApply { applyToAudioEngine() }
             } catch is CancellationError {
