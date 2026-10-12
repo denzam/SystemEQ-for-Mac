@@ -206,6 +206,12 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQImportFile
     case autoEQImportFileHelp
     case autoEQImportFileError
+    case autoEQImportLineError
+    case autoEQFitSummary
+    case autoEQPreampAdjusted
+    case autoEQLegacyPreamp
+    case autoEQApplyReview
+    case autoEQHeadroomError
     case autoEQSaveToFavorites
     case removeFromFavorites
     case addToFavorites

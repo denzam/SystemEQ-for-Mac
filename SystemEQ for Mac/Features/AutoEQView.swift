@@ -109,7 +109,12 @@ struct AutoEQView: View {
 
     // Відновлення UI при відкритті вікна ставить parsed, і вотчер .task(id: parsed)
     // застосував би пресет повторно поверх уже відновленого рушія — гасимо один раз.
-    @State private var suppressNextAutoApply = false
+    @State private var preparedImport: AutoEQPreparedPreset?
+    @State private var importTask: Task<Void, Never>?
+    @State private var importGeneration = UUID()
+    @State private var restoredMapping: [MappedBand]?
+    @State private var importNeedsApply = false
+    @State private var importCurveEdited = false
 
     @State private var bassBoost: Double = 0
     @State private var rawText: String = ""
@@ -184,14 +189,12 @@ struct AutoEQView: View {
 
     /// ✅ Import cache: prevents re-importing same preset and getting different values
     struct ImportCacheEntry {
-        let parsed10: [ParsedBand]
-        let parsed31: [ParsedBand]
-        let preampDB10: Double? // Preamp для 10-band
-        let preampDB31: Double? // Preamp для 31-band
+        let input: AutoEQImportedPreset
+        let text: String
         let name: String
         let source: String?
         let target: String?
-        let timestamp: Date
+        let path: String
     }
 
     @State private var importCache: [String: ImportCacheEntry] = [:]
@@ -271,28 +274,11 @@ struct AutoEQView: View {
             }
         }
         .task(id: normalizedQuery) { await searchDebounced() }
-        .task(id: parsed) {
-            let newMapped = mappedBands()
-            await MainActor.run {
-                self.mapped = newMapped
-
-                // Debounce: Apply to AudioEngine after 100ms to prevent overload
-                applyEQDebounceTask?.cancel()
-                applyEQDebounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        // Без завантаженого пресета mapped — це самі нулі: авто-застосування
-                        // тут означало б стерти відновлений стан рушія плоским EQ.
-                        guard !self.parsed.isEmpty, !self.mapped.isEmpty else { return }
-                        let suppressed = suppressNextAutoApply
-                        suppressNextAutoApply = false
-                        if !suppressed, audioEngine.isEnabled {
-                            applyToAudioEngine()
-                        }
-                    }
-                }
-            }
+        .onDisappear {
+            importTask?.cancel()
+            applyEQDebounceTask?.cancel()
+            importGeneration = UUID()
+            isSearching = false
         }
         .onReceive(audioEngine.$bandMode) { restoredMode in
             syncBandModeFromAudioEngine(restoredMode)
@@ -529,6 +515,28 @@ struct AutoEQView: View {
                 }
             }
 
+            if let preparedImport, !importCurveEdited {
+                let result = preparedImport.result(for: bandMode.audioEngineMode)
+                Text(String(format: localization.localized(.autoEQFitSummary), result.rms, result.maximumError))
+                    .font(AppTypography.bodySmall)
+                    .foregroundStyle(.secondary)
+                if preparedImport.input.legacyPreamp {
+                    Text(localization.localized(.autoEQLegacyPreamp)).font(AppTypography.bodySmall)
+                }
+                if result.preampAdjusted || abs((preampDB ?? Double(result.preamp)) - Double(result.preamp)) > 0.05 {
+                    Text(String(
+                        format: localization.localized(.autoEQPreampAdjusted),
+                        preparedImport.input.preamp ?? 0,
+                        preampDB ?? Double(result.preamp)
+                    ))
+                    .font(AppTypography.bodySmall)
+                }
+                if importNeedsApply {
+                    Text(localization.localized(.autoEQApplyReview)).font(AppTypography.bodySmall)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             EQGraphView(
                 bands: mappedAsEQBands,
                 gainBinding: { id in mappedGainBinding(id: id) }
@@ -540,7 +548,7 @@ struct AutoEQView: View {
                     applyToAudioEngine()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(mapped.isEmpty)
+                .disabled(mapped.isEmpty || isSearching)
 
                 if !mapped.isEmpty {
                     Text(String(
@@ -719,6 +727,7 @@ struct AutoEQView: View {
 
                 Slider(value: $bassBoost, in: 0...6, step: 0.5)
                     .onChange(of: bassBoost) { _ in
+                        guard !importNeedsApply else { return }
                         applyEQDebounceTask?.cancel()
                         applyEQDebounceTask = Task {
                             try? await Task.sleep(nanoseconds: 50_000_000)
@@ -832,25 +841,28 @@ struct AutoEQView: View {
 
     private func refreshDisplayedBands(shouldApply: Bool) {
         DispatchQueue.main.async {
-            if bandMode == .ten, !parsed10.isEmpty {
-                parsed = parsed10
-                preampDB = preampDB10
-            } else if bandMode == .thirtyOne, !parsed31.isEmpty {
-                parsed = parsed31
-                preampDB = preampDB31
-            }
-            mapped = mappedBands()
-            guard shouldApply else { return }
-            applyEQDebounceTask?.cancel()
-            applyEQDebounceTask = Task {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    if !mapped.isEmpty, audioEngine.isEnabled {
-                        applyToAudioEngine()
+            if shouldApply {
+                restoredMapping = nil
+                importCurveEdited = false
+                if let preparedImport {
+                    let result = preparedImport.result(for: bandMode.audioEngineMode)
+                    if let safe = preparedPreamp(result) {
+                        preampDB = safe
+                        importNeedsApply = result.requiresApply || abs(safe - Double(result.preamp)) > 0.05
+                    } else {
+                        showImportError(AutoEQImportError.insufficientHeadroom)
+                        importNeedsApply = true
+                        return
                     }
                 }
+            } else if preparedImport != nil {
+                restoredMapping = playbackMapping()
+                preampDB = Double(audioEngine.preampGain)
+                importCurveEdited = true
             }
+            mapped = mappedBands()
+            guard shouldApply, !mapped.isEmpty, !importNeedsApply, audioEngine.isEnabled else { return }
+            applyToAudioEngine()
         }
     }
 
@@ -1087,6 +1099,8 @@ struct AutoEQView: View {
                 let clamped = min(max(rawGain, -12), 12)
                 let stepped = (clamped / 0.5).rounded() * 0.5
                 if mapped[id].gain != stepped {
+                    restoredMapping = nil
+                    importCurveEdited = true
                     mapped[id].gain = stepped
                     scheduleLiveApply()
                 }
@@ -1256,6 +1270,8 @@ struct AutoEQView: View {
                 let clamped = min(max(rawGain, -12), 12)
                 let stepped = (clamped / 0.5).rounded() * 0.5
                 if mapped[index].gain != stepped {
+                    restoredMapping = nil
+                    importCurveEdited = true
                     mapped[index].gain = stepped
                     scheduleLiveApply()
                 }
@@ -1266,6 +1282,7 @@ struct AutoEQView: View {
     }
 
     private func scheduleLiveApply() {
+        guard !importNeedsApply else { return }
         applyEQDebounceTask?.cancel()
         applyEQDebounceTask = Task {
             try? await Task.sleep(nanoseconds: 30_000_000)
@@ -1396,238 +1413,102 @@ struct AutoEQView: View {
     }
 
     @MainActor
-    private func importCandidate(_ c: SearchCandidate) async {
+    private func importCandidate(_ candidate: SearchCandidate, preservePlayback: Bool = false) async {
+        importTask?.cancel()
+        let generation = UUID()
+        importGeneration = generation
         isSearching = true
-        defer { isSearching = false }
+        defer { if importGeneration == generation { isSearching = false } }
         searchError = nil
-
-        // ✅ Check cache first - prevents re-importing and getting different values
-        if let cached = importCache[c.path] {
-            self.parsed10 = cached.parsed10
-            self.parsed31 = cached.parsed31
-            self.parsed = (bandMode == .ten) ? cached.parsed10 : cached.parsed31
-
-            // ✅ Використовуємо правильний preamp для поточного режиму
-            self.preampDB10 = cached.preampDB10
-            self.preampDB31 = cached.preampDB31
-            self.preampDB = (bandMode == .ten) ? cached.preampDB10 : cached.preampDB31
-            self.rawText = "Imported from cache"
-            self.activePresetName = cached.name
-            self.activePresetSource = cached.source
-            self.activePresetTarget = cached.target
-            self.activePresetPath = c.path
-
-            // Update mapped bands
-            self.mapped = mappedBands()
-
+        if let cached = importCache[candidate.path] {
+            startPreparedImport(
+                cached.input,
+                text: cached.text,
+                name: cached.name,
+                source: cached.source,
+                target: cached.target,
+                path: cached.path,
+                autoApply: !preservePlayback,
+                preservePlayback: preservePlayback
+            )
             return
         }
-
-        // ✅ Очищаємо попередній активний пресет перед імпортом нового
-        self.activePresetName = nil
-        self.activePresetSource = nil
-        self.activePresetTarget = nil
-        self.activePresetPath = nil
-
-        // Request deduplication
-        if activeRequests.contains(c.path) {
-            return
-        }
-        activeRequests.insert(c.path)
-        defer { activeRequests.remove(c.path) }
-
-        if c.path.hasPrefix(Self.databaseCandidatePrefix) {
-            guard let headphoneID = databaseHeadphoneID(from: c) else {
-                searchError = localization.localized(.autoEQImportFileError)
+        if candidate.path.hasPrefix(Self.databaseCandidatePrefix) {
+            guard let id = databaseHeadphoneID(from: candidate) else {
+                showImportError(AutoEQImportError.invalidSource)
                 return
             }
-            importDatabaseCandidate(c, headphoneID: headphoneID)
+            importDatabaseCandidate(candidate, headphoneID: id, preservePlayback: preservePlayback)
             return
         }
-
-        // Знаходимо entry в offline index для отримання шляхів до .txt файлів
-        let entry = offlineIndex.first { entry in
-            entry.pathReadme?.contains(c.path) == true ||
-                entry.pathParametric?.contains(c.path) == true
-        }
-
-        // NOTE: TIER 0 (Python AutoEQ Server) removed - using SQLite database instead
-        // To restore: see git history for AutoEQServer.swift
-
-        // 🎯 TIER 1: Локальні .txt файли (основний fallback для legacy index)
-        if let entry {
-            // Завантажуємо обидва режими з локальних файлів
-            var loaded10: [ParsedBand]?
-            var loaded31: [ParsedBand]?
-            var loadedPreamp: Double?
-
-            // FixedBandEQ.txt для 10-band
-            if let fixedPath = entry.pathFixedBandEQ {
-                if let result = parseFixedBandEQFile(fromPath: fixedPath) {
-                    loaded10 = result.bands
-                    loadedPreamp = result.preamp
-                }
-            }
-
-            // GraphicEQ.txt для обох режимів
-            if let graphicPath = entry.pathGraphicEQ {
-                if let graphicBands = parseGraphicEQFile(fromPath: graphicPath) {
-                    // Маппимо на 10-band якщо не маємо FixedBandEQ
-                    if loaded10 == nil {
-                        var mapped10: [ParsedBand] = []
-                        for center in tenCenters {
-                            if let closest = graphicBands.min(by: { abs($0.freq - center) < abs($1.freq - center) }) {
-                                mapped10.append(ParsedBand(freq: center, gain: closest.gain))
-                            }
-                        }
-                        loaded10 = mapped10
-                    }
-
-                    // Маппимо на 31-band
-                    var mapped31: [ParsedBand] = []
-                    for center in thirtyOneCenters {
-                        if let closest = graphicBands.min(by: { abs($0.freq - center) < abs($1.freq - center) }) {
-                            mapped31.append(ParsedBand(freq: center, gain: closest.gain))
-                        }
-                    }
-                    loaded31 = mapped31
-                }
-            }
-
-            // Якщо щось завантажили - зберігаємо
-            if let bands10 = loaded10, let bands31 = loaded31 {
-                self.parsed10 = bands10
-                self.parsed31 = bands31
-                self.parsed = (bandMode == .ten) ? bands10 : bands31
-
-                // ✅ TIER 1 має однаковий preamp для обох режимів
-                self.preampDB10 = loadedPreamp
-                self.preampDB31 = loadedPreamp
-                self.preampDB = loadedPreamp
-                self.rawText = "Imported from local .txt files"
-
-                // Зберігаємо назву активного пресета
-                self.activePresetName = "\(entry.brand) \(entry.model)"
-                self.activePresetSource = entry.source
-                self.activePresetTarget = nil
-                self.activePresetPath = c.path
-
-                // ✅ Cache the import result
-                importCache[c.path] = ImportCacheEntry(
-                    parsed10: self.parsed10,
-                    parsed31: self.parsed31,
-                    preampDB10: loadedPreamp,
-                    preampDB31: loadedPreamp, // TIER 1 має однаковий preamp
-                    name: self.activePresetName ?? c.display,
-                    source: self.activePresetSource,
-                    target: self.activePresetTarget,
-                    timestamp: Date()
-                )
-
-                return
-            } else if let bands10 = loaded10 {
-                self.parsed10 = bands10
-                self.parsed = bands10
-                self.preampDB = loadedPreamp
-                self.rawText = "Imported from local FixedBandEQ.txt"
-
-                // Зберігаємо назву активного пресета
-                self.activePresetName = "\(entry.brand) \(entry.model)"
-                self.activePresetSource = entry.source
-                self.activePresetTarget = nil // TIER 1 doesn't specify target
-                self.activePresetPath = c.path
-
-                return
-            }
-        }
-
-        // 🎯 TIER 2: Cache hit (попередньо завантажений README)
-        if let cached = readmeCache[c.path] {
-            await processReadmeText(cached, candidate: c)
-            return
-        }
-
-        // 🎯 TIER 3: Завантаження з GitHub (fallback)
-
-        // Build URL to raw README/ParametricEQ
-        let decoded = c.path.removingPercentEncoding ?? c.path
-        let encoded = decoded.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? decoded
-        let raw = AppConstants.URLs.autoEQRawBase + encoded
-        guard let url = URL(string: raw) else { searchError = "Bad URL"; return }
-
         do {
-            var text = ""
-            var ok = false
-            var statusCode: Int?
-
-            // Try primary URL
-            let (data, resp) = try await legacyRepository.session.data(from: url)
-            if let http = resp as? HTTPURLResponse { statusCode = http.statusCode }
-            if let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-                text = String(data: data, encoding: .utf8) ?? ""
-                ok = true
-            }
-
-            // Fallback 1: if Parametric fetch failed, try README.md from same directory
-            if !ok, c.isParametric {
-                let dir = c.path.split(separator: "/").dropLast().joined(separator: "/")
-                let readmePath = dir + "/README.md"
-                let renc = readmePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? readmePath
-                let rraw = AppConstants.URLs.autoEQRawBase + renc
-                if let rurl = URL(string: rraw) {
-                    let (d2, r2) = try await legacyRepository.session.data(from: rurl)
-                    if let h2 = r2 as? HTTPURLResponse, (200...299).contains(h2.statusCode) {
-                        text = String(data: d2, encoding: .utf8) ?? ""
-                        ok = true
+            let localRoot = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("CascadeProjects/SystemEQ for Mac/AutoEq").resolvingSymlinksInPath()
+            if let entry = offlineIndex
+                .first(where: { $0.pathReadme == candidate.path || $0.pathParametric == candidate.path }) {
+                for path in [entry.pathParametric, entry.pathFixedBandEQ, entry.pathGraphicEQ, entry.pathReadme]
+                    .compactMap(\.self) {
+                    let file = localRoot.appendingPathComponent(path).resolvingSymlinksInPath()
+                    guard file.path.hasPrefix(localRoot.path + "/") else { throw AutoEQImportError.invalidSource }
+                    if FileManager.default.fileExists(atPath: file.path) {
+                        let text = try String(contentsOf: file, encoding: .utf8)
+                        guard importGeneration == generation else { return }
+                        try acceptImportedText(
+                            text,
+                            candidate: candidate,
+                            resolvedPath: path,
+                            preservePlayback: preservePlayback
+                        )
+                        return
                     }
                 }
             }
-
-            // Fallback 2: README.md from other sources with the same model folder
-            if !ok {
-                let parts = c.path.split(separator: "/").map(String.init)
-                if parts.count >= 2 {
-                    let modelFolder = parts[parts.count - 2]
-                    var alts: [String] = offlineIndex.compactMap(\.pathReadme)
-                        .filter { path in
-                            let ps = path.split(separator: "/").map(String.init)
-                            return ps.count >= 2 && ps[ps.count - 2] == modelFolder
-                        }
-                    func srcRank(_ s: String) -> Int {
-                        let ss = s.split(separator: "/").map(String.init)
-                        guard ss.count > 1 else { return 99 }
-                        let src = ss[1].lowercased()
-                        if src.contains("oratory1990") { return 0 }
-                        if src.contains("filk") { return 1 }
-                        if src.contains("rtings") { return 2 }
-                        return 9
-                    }
-                    alts.sort { srcRank($0) < srcRank($1) }
-                    for ap in alts.prefix(2) {
-                        let enc = ap.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ap
-                        let url2s = AppConstants.URLs.autoEQRawBase + enc
-                        guard let url2 = URL(string: url2s) else { continue }
-                        let (d3, r3) = try await legacyRepository.session.data(from: url2)
-                        if let h3 = r3 as? HTTPURLResponse, (200...299).contains(h3.statusCode) {
-                            text = String(data: d3, encoding: .utf8) ?? ""
-                            ok = true
-                            break
-                        }
-                    }
-                }
-            }
-
-            guard ok else {
-                let urlInfo = raw.replacingOccurrences(of: AppConstants.URLs.autoEQRawBase, with: "")
-                searchError = statusCode.map { "HTTP \($0): \(urlInfo)" } ?? "Import failed"
+            if let text = readmeCache[candidate.path] {
+                try acceptImportedText(
+                    text,
+                    candidate: candidate,
+                    resolvedPath: candidate.path,
+                    preservePlayback: preservePlayback
+                )
                 return
             }
-
-            // Cache and process
-            readmeCache[c.path] = text
-            await processReadmeText(text, candidate: c)
+            let path = candidate.path.removingPercentEncoding ?? candidate.path
+            guard !path.hasPrefix("/"), !path.split(separator: "/").contains(".."),
+                  let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: AppConstants.URLs.autoEQRawBase + encoded)
+            else { throw AutoEQImportError.invalidSource }
+            let (data, response) = try await legacyRepository.session.data(from: url)
+            try Task.checkCancellation()
+            guard importGeneration == generation else { return }
+            guard let http = response as? HTTPURLResponse else { throw AutoEQImportError.invalidSource }
+            var resolvedPath = candidate.path
+            var text: String
+            if http.statusCode == 200, let decoded = String(data: data, encoding: .utf8) {
+                text = decoded
+            } else if http.statusCode == 404, candidate.isParametric {
+                resolvedPath = candidate.path.split(separator: "/").dropLast().joined(separator: "/") + "/README.md"
+                guard let encodedFallback = resolvedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                      let fallbackURL = URL(string: AppConstants.URLs.autoEQRawBase + encodedFallback)
+                else { throw AutoEQImportError.invalidSource }
+                let (fallback, fallbackResponse) = try await legacyRepository.session.data(from: fallbackURL)
+                try Task.checkCancellation()
+                guard importGeneration == generation else { return }
+                guard (fallbackResponse as? HTTPURLResponse)?.statusCode == 200,
+                      let decoded = String(data: fallback, encoding: .utf8)
+                else { throw AutoEQImportError.invalidSource }
+                text = decoded
+            } else { throw AutoEQImportError.invalidSource }
+            try acceptImportedText(
+                text,
+                candidate: candidate,
+                resolvedPath: resolvedPath,
+                preservePlayback: preservePlayback
+            )
+            readmeCache[resolvedPath] = text
+        } catch is CancellationError {
+            return
         } catch {
-            searchError = error.localizedDescription
+            if importGeneration == generation { showImportError(error) }
         }
     }
 
@@ -1643,13 +1524,13 @@ struct AutoEQView: View {
         panel.message = localization.localized(.autoEQImportFileHelp)
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Реальні AutoEQ-пресети — кілобайти; більший файл або не текст, або DoS
-        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 1_000_000 {
-            searchError = localization.localized(.autoEQImportFileError)
-            return
-        }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            searchError = localization.localized(.autoEQImportFileError)
+        let text: String
+        do {
+            guard let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                  size <= 1_000_000 else { throw AutoEQImportError.invalidSource }
+            text = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            showImportError(error)
             return
         }
 
@@ -1661,76 +1542,23 @@ struct AutoEQView: View {
     /// відновленні при старті та завантаженні з обраних.
     @discardableResult
     private func applyCustomPreset(text: String, name: String, persist: Bool, autoApply: Bool) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var bands: [ParsedBand] = []
-        var preamp: Double?
-
-        let apo = parseEqualizerAPOFormat(text: trimmed)
-        if !apo.bands.isEmpty {
-            bands = apo.bands
-            preamp = apo.preamp
-        } else if trimmed.contains("GraphicEQ:") || trimmed.contains("FixedBandEQ:") {
-            bands = parseGraphicEQ(text: trimmed)
-        } else if trimmed.contains("### Fixed Band EQ") {
-            let parsedBands = parseFixedBandTable(text: trimmed, bands: bandMode == .ten ? 10 : 31)
-            if !parsedBands.isEmpty {
-                bands = parsedBands
-                preamp = parsePreamp(text: trimmed)
-            }
-        }
-
-        // Нечислові й екстремальні значення з файлу не мають дійти до DSP
-        bands = Array(bands.filter {
-            $0.freq.isFinite && $0.freq > 0 && $0.freq <= 30000
-                && $0.gain.isFinite && abs($0.gain) <= 40
-                && $0.q.isFinite && $0.q > 0 && $0.q <= 100
-        }.prefix(256))
-        if let p = preamp, !p.isFinite || abs(p) > 40 {
-            preamp = nil
-        }
-
-        guard !bands.isEmpty else {
-            searchError = localization.localized(.autoEQImportFileError)
+        do {
+            let input = try AutoEQImportParser.parse(text)
+            startPreparedImport(
+                input,
+                text: text,
+                name: name,
+                source: "Custom",
+                target: nil,
+                path: nil,
+                autoApply: autoApply,
+                preservePlayback: !autoApply
+            )
+            return true
+        } catch {
+            showImportError(error)
             return false
         }
-
-        parsed10 = bands
-        parsed31 = bands
-        parsed = bands
-        preampDB10 = preamp
-        preampDB31 = preamp
-        preampDB = preamp
-        rawText = text
-        activePresetName = name
-        activePresetSource = "Custom"
-        activePresetTarget = nil
-        activePresetPath = nil
-        searchError = nil
-        mapped = mappedBands()
-
-        if persist {
-            lastCustomPresetText = text
-            lastCustomPresetName = name
-        }
-
-        if autoApply {
-            applyEQDebounceTask?.cancel()
-            applyEQDebounceTask = Task {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                if !Task.isCancelled {
-                    await MainActor.run {
-                        applyToAudioEngine()
-                    }
-                }
-            }
-        }
-
-        dlog(
-            "Custom preset applied: \(name), \(bands.count) filters, preamp: \(preamp ?? 0)",
-            level: .info,
-            category: .network
-        )
-        return true
     }
 
     private func importFromDatabase(_ searchQuery: String) {
@@ -1767,192 +1595,178 @@ struct AutoEQView: View {
     }
 
     @MainActor
-    private func importDatabaseCandidate(_ candidate: SearchCandidate, headphoneID: Int) {
-        guard let imported = databaseService.load(headphoneID: headphoneID),
-              let bands10 = Self.directBands(
-                  centers: tenCenters,
-                  gains: imported.gains10
-              ),
-              let bands31 = Self.directBands(
-                  centers: thirtyOneCenters,
-                  gains: imported.gains31
-              ) else {
-            searchError = localization.localized(.autoEQImportFileError)
-            return
-        }
-
-        let preset = imported.preset
-        let name = candidate.display.components(separatedBy: " · ").first ?? candidate.display
-        parsed10 = bands10
-        parsed31 = bands31
-        parsed = bandMode == .ten ? bands10 : bands31
-        preampDB10 = Double(preset.preampGain)
-        preampDB31 = Double(preset.preampGain)
-        preampDB = Double(preset.preampGain)
-        rawText = "EQDatabase.db"
-        activePresetName = name
-        activePresetSource = if !preset.author.isEmpty {
-            preset.author
-        } else if !preset.source.isEmpty {
-            preset.source
-        } else {
-            Self.databaseSource(from: candidate)
-        }
-        activePresetTarget = preset.targetCurve.isEmpty ? targetProfile : preset.targetCurve
-        activePresetPath = candidate.path
-        mapped = mappedBands()
-
-        importCache[candidate.path] = ImportCacheEntry(
-            parsed10: bands10,
-            parsed31: bands31,
-            preampDB10: Double(preset.preampGain),
-            preampDB31: Double(preset.preampGain),
-            name: name,
-            source: activePresetSource,
-            target: activePresetTarget,
-            timestamp: Date()
-        )
+    private func importDatabaseCandidate(
+        _ candidate: SearchCandidate,
+        headphoneID: Int,
+        preservePlayback: Bool = false
+    ) {
+        do {
+            let imported = try databaseService.loadCanonical(headphoneID: headphoneID)
+            let preset = imported.preset
+            let name = candidate.display.components(separatedBy: " · ").first ?? candidate.display
+            let source = !preset.author.isEmpty ? preset.author : preset.source
+            let entry = ImportCacheEntry(
+                input: imported.input,
+                text: "EQDatabase.db",
+                name: name,
+                source: source,
+                target: preset.targetCurve,
+                path: candidate.path
+            )
+            importCache[candidate.path] = entry
+            startPreparedImport(
+                entry.input,
+                text: entry.text,
+                name: name,
+                source: source,
+                target: entry.target,
+                path: entry.path,
+                autoApply: !preservePlayback,
+                preservePlayback: preservePlayback
+            )
+        } catch { showImportError(error) }
     }
 
     @MainActor
-    private func processReadmeText(_ text: String, candidate: SearchCandidate) async {
-        // Parse both 10-band and 31-band versions
-        let bands10 = parseFixedBandTable(text: text, bands: 10)
-        let bands31 = parseFixedBandTable(text: text, bands: 31)
 
-        // Try old format if table parsing failed
-        var currentBands: [ParsedBand] = []
-        if bands10.isEmpty, bands31.isEmpty {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.contains("GraphicEQ:") || trimmed.contains("FixedBandEQ:") {
-                currentBands = parseGraphicEQ(text: trimmed)
+    private func showImportError(_ error: Error) {
+        if let value = error as? AutoEQImportError, case let .invalidLine(line) = value {
+            searchError = String(format: localization.localized(.autoEQImportLineError), line)
+        } else if error as? AutoEQImportError == .insufficientHeadroom {
+            searchError = localization.localized(.autoEQHeadroomError)
+        } else {
+            searchError = localization.localized(.autoEQImportFileError)
+        }
+    }
+
+    private func preparedPreamp(_ result: AutoEQFitResult) -> Double? {
+        let gains = zip(bandMode.audioEngineMode.frequencies, result.gains).map {
+            $0.1 + Float(bassBoostForFrequency(Double($0.0)))
+        }
+        guard let limit = audioEngine.importPreampLimit(mode: bandMode.audioEngineMode, gains: gains)
+        else { return nil }
+        let value = min(Double(result.preamp), Double(limit))
+        return value >= -20 && value.isFinite ? value : nil
+    }
+
+    private func playbackMapping() -> [MappedBand]? {
+        let centers = bandMode == .ten ? tenCenters : thirtyOneCenters
+        let gains = audioEngine.getCurrentEQValues()
+        guard gains.count == centers.count else { return nil }
+        return zip(centers, gains).map {
+            MappedBand(center: $0.0, gain: Double($0.1) - bassBoostForFrequency($0.0))
+        }
+    }
+
+    private func acceptImportedText(
+        _ text: String,
+        candidate: SearchCandidate,
+        resolvedPath: String,
+        preservePlayback: Bool
+    ) throws {
+        let input = try AutoEQImportParser.parse(text)
+        let components = resolvedPath.split(separator: "/")
+        let source = (components.first == "results" ? components.dropFirst().first : components.first).map(String.init)
+        let displayParts = candidate.display.components(separatedBy: " / ")
+        let name = displayParts.count > 1 ? displayParts.dropFirst().joined(separator: " / ")
+            : candidate.display.components(separatedBy: " · ").first ?? candidate.display
+        importCache[candidate.path] = ImportCacheEntry(
+            input: input,
+            text: text,
+            name: name,
+            source: source,
+            target: nil,
+            path: resolvedPath
+        )
+        startPreparedImport(
+            input,
+            text: text,
+            name: name,
+            source: source,
+            target: nil,
+            path: resolvedPath,
+            autoApply: !preservePlayback,
+            preservePlayback: preservePlayback
+        )
+    }
+
+    private func startPreparedImport(
+        _ input: AutoEQImportedPreset,
+        text: String,
+        name: String,
+        source: String?,
+        target: String?,
+        path: String?,
+        autoApply: Bool,
+        preservePlayback: Bool
+    ) {
+        importTask?.cancel()
+        applyEQDebounceTask?.cancel()
+        let generation = UUID()
+        importGeneration = generation
+        let rate = CoreAudioEngine.shared.processingSampleRate
+        let uid = AudioRouter.shared.selectedOutputDevice?.uid
+        let previousGains = audioEngine.getCurrentEQValues()
+        let previousPreamp = audioEngine.preampGain
+        isSearching = true
+        searchError = nil
+        importTask = Task { @MainActor in
+            defer { if importGeneration == generation { isSearching = false } }
+            let worker = Task.detached(priority: .userInitiated) { try EQConverter(sampleRate: rate).prepare(input) }
+            do {
+                let prepared = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: { worker.cancel() }
+                try Task.checkCancellation()
+                guard importGeneration == generation, AudioRouter.shared.selectedOutputDevice?.uid == uid,
+                      abs(CoreAudioEngine.shared.processingSampleRate - rate) < 1 else { return }
+                let result = prepared.result(for: bandMode.audioEngineMode)
+                let safePreamp: Double
+                if preservePlayback {
+                    safePreamp = Double(audioEngine.preampGain)
+                } else {
+                    guard let safe = preparedPreamp(result) else { throw AutoEQImportError.insufficientHeadroom }
+                    safePreamp = safe
+                }
+                preparedImport = prepared
+                importCurveEdited = preservePlayback
+                let display = input.displayBands
+                parsed = display.isEmpty ? [ParsedBand(freq: 1000, gain: 0)] : display
+                parsed10 = parsed
+                parsed31 = parsed
+                preampDB10 = Double(prepared.ten.preamp)
+                preampDB31 = Double(prepared.thirtyOne.preamp)
+                preampDB = safePreamp
+                restoredMapping = preservePlayback ? playbackMapping() : nil
+                mapped = mappedBands()
+                rawText = text
+                activePresetName = name
+                activePresetSource = source
+                activePresetTarget = target
+                activePresetPath = path
+                importNeedsApply = !preservePlayback &&
+                    (result.requiresApply || abs(safePreamp - Double(result.preamp)) > 0.05
+                        || audioEngine.getCurrentEQValues() != previousGains || audioEngine
+                        .preampGain != previousPreamp)
+                isSearching = false
+                if autoApply, !importNeedsApply { applyToAudioEngine() }
+            } catch is CancellationError {
+                return
+            } catch {
+                if importGeneration == generation { showImportError(error) }
             }
         }
-
-        if bands10.isEmpty, bands31.isEmpty, currentBands.isEmpty {
-            searchError = "No EQ data found in file"
-            return
-        }
-
-        // Parse preamp value
-        let preamp = parsePreamp(text: text)
-
-        // Update state
-        self.parsed10 = bands10.isEmpty ? currentBands : bands10
-        self.parsed31 = bands31.isEmpty ? currentBands : bands31
-        self.parsed = (bandMode == .ten) ? self.parsed10 : self.parsed31
-        self.preampDB = preamp
-        self.rawText = text
-
-        // Зберігаємо назву активного пресета (витягуємо з display name)
-        let displayParts = candidate.display.split(separator: "/").map(String.init)
-        if displayParts.count >= 2 {
-            self.activePresetSource = displayParts[0].trimmingCharacters(in: .whitespaces)
-            self.activePresetName = displayParts.dropFirst().joined(separator: " / ")
-                .trimmingCharacters(in: .whitespaces)
-        } else {
-            self.activePresetName = candidate.display
-            self.activePresetSource = nil
-        }
-        self.activePresetTarget = nil // README doesn't specify target
-        self.activePresetPath = candidate.path
-
-        dlog(
-            "Import successful - 10-band: \(self.parsed10.count), 31-band: \(self.parsed31.count)",
-            level: .info,
-            category: .network
-        )
     }
 
     // MARK: - Mapping
 
     private func mappedBands() -> [MappedBand] {
-        let centers = (bandMode == .ten) ? tenCenters : thirtyOneCenters
-        if activePresetPath?.hasPrefix(Self.databaseCandidatePrefix) == true {
-            let direct = bandMode == .ten ? parsed10 : parsed31
-            if direct.count == centers.count {
-                return zip(centers, direct).map { center, band in
-                    MappedBand(center: center, gain: band.gain)
-                }
-            }
+        if let restoredMapping { return restoredMapping }
+        guard let preparedImport else { return [] }
+        let centers = bandMode == .ten ? tenCenters : thirtyOneCenters
+        return zip(centers, preparedImport.result(for: bandMode.audioEngineMode).gains).map {
+            MappedBand(center: $0.0, gain: Double($0.1))
         }
-        let sampleRate: Double = 48000
-
-        return centers.map { c in
-            let total = parsed.reduce(0.0) { acc, b in
-                acc + Self.biquadGainDB(at: c, filter: b, sampleRate: sampleRate)
-            }
-            return MappedBand(center: c, gain: total)
-        }
-    }
-
-    private static func biquadGainDB(at freq: Double, filter b: ParsedBand, sampleRate: Double) -> Double {
-        let f0 = b.freq
-        let gain = b.gain
-        let q = max(b.q, 0.001)
-        let A = pow(10.0, gain / 40.0)
-        let w0 = 2.0 * .pi * f0 / sampleRate
-        let alpha = sin(w0) / (2.0 * q)
-        let cosW0 = cos(w0)
-
-        var b0 = 1.0, b1 = 0.0, b2 = 0.0
-        var a0 = 1.0, a1 = 0.0, a2 = 0.0
-
-        switch b.type {
-        case .allPassPEQ,
-             .peak:
-            b0 = 1 + alpha * A
-            b1 = -2 * cosW0
-            b2 = 1 - alpha * A
-            a0 = 1 + alpha / A
-            a1 = -2 * cosW0
-            a2 = 1 - alpha / A
-        case .lowShelf:
-            let beta = sqrt(A) / q
-            b0 = A * ((A + 1) - (A - 1) * cosW0 + beta * sin(w0))
-            b1 = 2 * A * ((A - 1) - (A + 1) * cosW0)
-            b2 = A * ((A + 1) - (A - 1) * cosW0 - beta * sin(w0))
-            a0 = (A + 1) + (A - 1) * cosW0 + beta * sin(w0)
-            a1 = -2 * ((A - 1) + (A + 1) * cosW0)
-            a2 = (A + 1) + (A - 1) * cosW0 - beta * sin(w0)
-        case .highShelf:
-            let beta = sqrt(A) / q
-            b0 = A * ((A + 1) + (A - 1) * cosW0 + beta * sin(w0))
-            b1 = -2 * A * ((A - 1) + (A + 1) * cosW0)
-            b2 = A * ((A + 1) + (A - 1) * cosW0 - beta * sin(w0))
-            a0 = (A + 1) - (A - 1) * cosW0 + beta * sin(w0)
-            a1 = 2 * ((A - 1) - (A + 1) * cosW0)
-            a2 = (A + 1) - (A - 1) * cosW0 - beta * sin(w0)
-        default:
-            return 0
-        }
-
-        let w = 2.0 * .pi * freq / sampleRate
-        let cosW = cos(w), cos2W = cos(2 * w)
-        let sinW = sin(w), sin2W = sin(2 * w)
-
-        let numRe = b0 + b1 * cosW + b2 * cos2W
-        let numIm = -(b1 * sinW + b2 * sin2W)
-        let denRe = a0 + a1 * cosW + a2 * cos2W
-        let denIm = -(a1 * sinW + a2 * sin2W)
-
-        let numMag = sqrt(numRe * numRe + numIm * numIm)
-        let denMag = sqrt(denRe * denRe + denIm * denIm)
-        guard denMag > 0 else { return 0 }
-        return 20.0 * log10(numMag / denMag)
-    }
-
-    private func nearestCenterIndex(for freq: Double, centers: [Double]) -> Int {
-        var best = 0
-        var bestDist = Double.greatestFiniteMagnitude
-        for (i, c) in centers.enumerated() {
-            let d = abs(freq - c)
-            if d < bestDist {
-                bestDist = d
-                best = i
-            }
-        }
-        return best
     }
 
     // MARK: - Apply to AudioEngine
@@ -1964,12 +1778,24 @@ struct AutoEQView: View {
         }
 
         let engine = AudioEngine.shared
+        guard !isSearching else { return }
+        if !importCurveEdited, let preparedImport,
+           abs(preparedImport.ten.sampleRate - CoreAudioEngine.shared.processingSampleRate) > 1 {
+            startPreparedImport(
+                preparedImport.input,
+                text: rawText,
+                name: activePresetName ?? "",
+                source: activePresetSource,
+                target: activePresetTarget,
+                path: activePresetPath,
+                autoApply: true,
+                preservePlayback: false
+            )
+            return
+        }
 
         // Переконуємось що bandMode співпадає з AudioEngine
         let targetBandMode: EQBandMode = (bandMode == .ten) ? .tenBand : .thirtyOneBand
-        if engine.bandMode != targetBandMode {
-            engine.bandMode = targetBandMode
-        }
 
         // Застосовуємо gain значення для кожної смуги (з Bass Boost)
         var eqValues: [Float] = []
@@ -1981,11 +1807,24 @@ struct AutoEQView: View {
             eqValues.append(Float(totalGain))
         }
 
-        if let preamp = preampDB {
-            engine.preampGain = Float(preamp)
-        } else {
-            let maxPositive = eqValues.max() ?? 0
-            engine.preampGain = maxPositive > 0 ? -maxPositive : 0
+        guard let limit = engine.importPreampLimit(mode: targetBandMode, gains: eqValues) else {
+            searchError = localization.localized(.autoEQHeadroomError)
+            return
+        }
+        let attenuation = min(Float(preampDB ?? 0), limit)
+        guard attenuation.isFinite, attenuation >= -20 else {
+            searchError = localization.localized(.autoEQHeadroomError)
+            return
+        }
+        if engine.bandMode != targetBandMode {
+            engine.bandMode = targetBandMode
+        }
+        engine.preampGain = attenuation
+        preampDB = Double(attenuation)
+        importNeedsApply = false
+        if activePresetSource == "Custom" {
+            lastCustomPresetText = rawText
+            lastCustomPresetName = activePresetName ?? ""
         }
 
         engine.applyEQValues(eqValues)
@@ -2053,40 +1892,27 @@ struct AutoEQView: View {
     /// уже відновив через PresetPersistence, тому вотчер parsed гаситься на один цикл.
     private func restoreLastAppliedPresetUI() {
         guard parsed.isEmpty else { return }
-
         if let data = lastAppliedPresetJSON.data(using: .utf8),
            let descriptor = try? JSONDecoder().decode(LastAppliedDescriptor.self, from: data) {
             if let text = descriptor.rawText, !text.isEmpty {
-                suppressNextAutoApply = true
-                if !applyCustomPreset(text: text, name: descriptor.name ?? "", persist: false, autoApply: false) {
-                    suppressNextAutoApply = false
-                }
+                _ = applyCustomPreset(text: text, name: descriptor.name ?? "", persist: false, autoApply: false)
             } else if let path = descriptor.path, !path.isEmpty {
-                suppressNextAutoApply = true
-                let isParametric = path.contains("ParametricEQ.txt")
+                let parametric = path.contains("ParametricEQ.txt")
                 let candidate = SearchCandidate(
                     path: path,
-                    name: isParametric ? "ParametricEQ.txt" : "README.md",
+                    name: parametric ? "ParametricEQ.txt" : "README.md",
                     display: descriptor.name ?? path,
-                    isParametric: isParametric
+                    isParametric: parametric
                 )
-                Task {
-                    await importCandidate(candidate)
-                    // Невдалий імпорт не ставить parsed — повертаємо вотчер до звичайної роботи
-                    if parsed.isEmpty { suppressNextAutoApply = false }
-                }
+                Task { await importCandidate(candidate, preservePlayback: true) }
             }
         } else if !lastCustomPresetText.isEmpty {
-            // Легасі-міграція: до появи дескриптора зберігався лише custom-імпорт
-            suppressNextAutoApply = true
-            if !applyCustomPreset(
+            _ = applyCustomPreset(
                 text: lastCustomPresetText,
                 name: lastCustomPresetName,
                 persist: false,
                 autoApply: false
-            ) {
-                suppressNextAutoApply = false
-            }
+            )
         }
     }
 
@@ -2116,416 +1942,15 @@ struct AutoEQView: View {
         }
     }
 
-    private func parseAutoEQ(text: String) -> [ParsedBand] {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Try modern table format first (Fixed Band EQs section)
-        if trimmed.contains("### Fixed Band EQ") {
-            let bands = parseFixedBandTable(text: trimmed, bands: bandMode == .ten ? 10 : 31)
-            if !bands.isEmpty {
-                return bands
-            }
-        }
-
-        // Try old inline format (GraphicEQ: or FixedBandEQ:)
-        if trimmed.contains("GraphicEQ:") || trimmed.contains("FixedBandEQ:") {
-            return parseGraphicEQ(text: trimmed)
-        }
-
-        return []
-    }
-
-    private func parseEqualizerAPOFormat(text: String) -> (bands: [ParsedBand], preamp: Double?) {
-        var bands: [ParsedBand] = []
-        var preamp: Double?
-
-        let filterPattern = #"Filter\s+\d+\s*:\s*ON\s+(\w+)\s+Fc\s+([\d.]+)\s*Hz\s+Gain\s+(-?[\d.]+)\s*dB\s+Q\s+([\d.]+)"#
-        let preampPattern = #"Preamp\s*:\s*(-?[\d.]+)\s*dB"#
-
-        if let regex = try? NSRegularExpression(pattern: preampPattern, options: .caseInsensitive) {
-            let nsRange = NSRange(text.startIndex..., in: text)
-            if let match = regex.firstMatch(in: text, range: nsRange),
-               let r = Range(match.range(at: 1), in: text),
-               let v = Double(text[r]) {
-                preamp = v
-            }
-        }
-
-        guard let regex = try? NSRegularExpression(pattern: filterPattern, options: .caseInsensitive) else {
-            return ([], preamp)
-        }
-
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: nsRange)
-        for m in matches {
-            guard m.numberOfRanges >= 5,
-                  let typeR = Range(m.range(at: 1), in: text),
-                  let fcR = Range(m.range(at: 2), in: text),
-                  let gainR = Range(m.range(at: 3), in: text),
-                  let qR = Range(m.range(at: 4), in: text),
-                  let fc = Double(text[fcR]),
-                  let gain = Double(text[gainR]),
-                  let q = Double(text[qR]) else { continue }
-
-            let type = mapAPOFilterType(String(text[typeR]))
-            bands.append(ParsedBand(freq: fc, gain: gain, q: q, type: type))
-        }
-
-        return (bands, preamp)
-    }
-
-    private func mapAPOFilterType(_ token: String) -> FilterType {
-        let upper = token.uppercased()
-        switch upper {
-        case "BELL",
-             "PEQ",
-             "PK": return .peak
-        case "LOWSHELF",
-             "LS",
-             "LSC": return .lowShelf
-        case "HIGHSHELF",
-             "HS",
-             "HSC": return .highShelf
-        case "LOWPASS",
-             "LP",
-             "LPQ": return .lowPass
-        case "HIGHPASS",
-             "HP",
-             "HPQ": return .highPass
-        case "AP": return .allPass
-        case "BP": return .bandPass
-        case "NO",
-             "NOTCH": return .notch
-        default: return .peak
-        }
-    }
-
-    private func parseGraphicEQ(text: String) -> [ParsedBand] {
-        // Expect format like: "GraphicEQ: 31.5 -5; 63 -4.3; 125 -3; ..." or "FixedBandEQ: ..."
-        let payload: Substring
-        if let r = text.range(of: "GraphicEQ:") {
-            payload = text[r.upperBound...]
-        } else if let r = text.range(of: "FixedBandEQ:") {
-            payload = text[r.upperBound...]
-        } else {
-            return []
-        }
-
-        let parts = payload.split(separator: ";")
-        var result: [ParsedBand] = []
-        for p in parts {
-            let toks = p.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
-            if toks.count >= 2, let f = Double(toks[0]), let g = Double(toks[1]) {
-                result.append(ParsedBand(freq: f, gain: g))
-            }
-        }
-        return result
-    }
-
-    private func parsePreamp(text: String) -> Double? {
-        // First, try to find preamp in Fixed Band EQ section
-        if let range = text.range(of: "### Fixed Band EQ", options: .caseInsensitive) {
-            let startIndex = range.lowerBound
-            let endIndex = text.index(
-                startIndex,
-                offsetBy: min(500, text.distance(from: startIndex, to: text.endIndex))
-            )
-            let fixedBandSection = String(text[startIndex..<endIndex])
-
-            // Pattern: "apply preamp of **-X.X dB**" or "apply preamp of -X.X dB"
-            let pattern1 = "apply preamp of \\*\\*(-?\\d+\\.?\\d*)\\s*dB\\*\\*"
-            if let regex = try? NSRegularExpression(pattern: pattern1, options: .caseInsensitive) {
-                let nsRange = NSRange(fixedBandSection.startIndex..., in: fixedBandSection)
-                if let match = regex.firstMatch(in: fixedBandSection, range: nsRange),
-                   let valueRange = Range(match.range(at: 1), in: fixedBandSection) {
-                    if let value = Double(fixedBandSection[valueRange]) {
-                        return value
-                    }
-                }
-            }
-        }
-
-        // Fallback: try to find preamp in the target profile section
-        var searchText = text
-        for variant in targetProfileVariants {
-            if let range = text.range(of: variant, options: .caseInsensitive) {
-                let startIndex = range.lowerBound
-                let endIndex = text.index(
-                    startIndex,
-                    offsetBy: min(500, text.distance(from: startIndex, to: text.endIndex))
-                )
-                searchText = String(text[startIndex..<endIndex])
-                break
-            }
-        }
-
-        // Look for "Preamp: -X.X dB" pattern
-        let pattern2 = "Preamp:\\s*(-?\\d+\\.?\\d*)\\s*dB"
-        if let regex = try? NSRegularExpression(pattern: pattern2, options: .caseInsensitive) {
-            let nsRange = NSRange(searchText.startIndex..., in: searchText)
-            if let match = regex.firstMatch(in: searchText, range: nsRange),
-               let valueRange = Range(match.range(at: 1), in: searchText) {
-                if let value = Double(searchText[valueRange]) {
-                    return value
-                }
-            }
-        }
-
-        return nil
-    }
-
     /// Парсить параметричний EQ в структуровані фільтри для EQProcessor
-    private func parseParametricFilters(text: String) -> [EQProcessor.ParametricFilter] {
-        var filters: [EQProcessor.ParametricFilter] = []
-        let lines = text.components(separatedBy: .newlines)
-
-        // Find the target profile section
-        let targetSectionStart = lines.firstIndex { line in
-            targetProfileVariants.contains { line.localizedCaseInsensitiveContains($0) }
-        }
-
-        // Extract lines after target profile mention
-        let relevantLines: [String]
-        if let startIdx = targetSectionStart {
-            let endIdx = min(startIdx + 100, lines.count)
-            relevantLines = Array(lines[startIdx..<endIdx])
-        } else {
-            relevantLines = lines
-        }
-
-        // Parse the parametric EQ table
-        var started = false
-        var lineCount = 0
-
-        for line in relevantLines {
-            lineCount += 1
-            if lineCount > 100 { break }
-
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Зупиняємося на наступній секції
-            if trimmed.hasPrefix("###"), started, !trimmed.contains("Fixed Band") {
-                break
-            }
-
-            if trimmed.hasPrefix("|") {
-                started = true
-                if trimmed.contains("Frequency") || trimmed.contains("Type") || trimmed.contains("Fc") { continue }
-                if trimmed.contains("---") { continue }
-
-                let cols = trimmed.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
-                if cols.count >= 5 {
-                    let typeStr = cols[1]
-                    let fcStr = cols[2].replacingOccurrences(of: ",", with: "")
-                    let qStr = cols[3].replacingOccurrences(of: ",", with: "")
-                    let gainStr = cols[4].replacingOccurrences(of: "dB", with: "").replacingOccurrences(
-                        of: ",",
-                        with: ""
-                    ).trimmingCharacters(in: .whitespaces)
-
-                    if let fc = Double(fcStr), let q = Double(qStr), let gain = Double(gainStr) {
-                        let type = parseFilterType(typeStr)
-                        filters.append(EQProcessor.ParametricFilter(type: type, frequency: fc, q: q, gain: gain))
-                    }
-                }
-            }
-        }
-
-        return filters
-    }
-
-    private func parseFilterType(_ str: String) -> EQProcessor.ProcessorFilterType {
-        let lower = str.lowercased()
-        if lower.contains("pk") || lower.contains("peaking") {
-            return .peaking
-        } else if lower.contains("lsh") || lower.contains("low shelf") || lower.contains("lowshelf") {
-            return .lowShelf
-        } else if lower.contains("hsh") || lower.contains("high shelf") || lower.contains("highshelf") {
-            return .highShelf
-        } else if lower.contains("lpf") || lower.contains("low pass") {
-            return .lowPass
-        } else if lower.contains("hpf") || lower.contains("high pass") {
-            return .highPass
-        }
-        return .peaking
-    }
-
-    private func parseFixedBandTable(text: String, bands: Int) -> [ParsedBand] {
-        // Шукаємо Fixed Band EQ секцію
-        var searchText = text
-
-        // Знаходимо "### Fixed Band EQ" секцію
-        if let range = text.range(of: "### Fixed Band EQ", options: .caseInsensitive) {
-            let startIndex = range.lowerBound
-            let endIndex = text.index(
-                startIndex,
-                offsetBy: min(1500, text.distance(from: startIndex, to: text.endIndex))
-            )
-            searchText = String(text[startIndex..<endIndex])
-        } else {
-            return []
-        }
-
-        let lines = searchText.components(separatedBy: .newlines)
-        var result: [ParsedBand] = []
-        var started = false
-        var lineCount = 0
-
-        for line in lines {
-            lineCount += 1
-            if lineCount > 100 { break }
-
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Зупиняємося на наступній секції
-            if trimmed.hasPrefix("###"), started, !trimmed.contains("Fixed Band") {
-                break
-            }
-
-            if trimmed.hasPrefix("|") {
-                // Пропускаємо заголовок та роздільник
-                if trimmed.contains("Type") || trimmed.contains("Fc") || trimmed.contains("Gain") { continue }
-                if trimmed.contains("---") { continue }
-
-                let cols = trimmed.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
-
-                // DEBUG для першого рядка (removed empty loop)
-
-                // Таблиця: | # | Type | Fc (Hz) | Q | Gain (dB) |
-                // Після split по "|": cols[0]="#", cols[1]="Type", cols[2]="Fc", cols[3]="Q", cols[4]="Gain"
-                if cols.count >= 5 {
-                    let fStr = cols[2].replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "Hz", with: "")
-                        .trimmingCharacters(in: .whitespaces)
-                    let gStr = cols[4].replacingOccurrences(of: "dB", with: "").replacingOccurrences(of: ",", with: "")
-                        .trimmingCharacters(in: .whitespaces)
-
-                    if result.isEmpty {}
-
-                    if let freq = Double(fStr), let gain = Double(gStr) {
-                        result.append(ParsedBand(freq: freq, gain: gain))
-                        started = true // Встановлюємо started тільки після успішного парсингу
-
-                    } else if result.isEmpty {}
-                }
-            }
-        }
-
-        // Filter by band count if specified
-        if bands == 10, result.count > 10 {
-            result = Array(result.prefix(10))
-        } else if bands == 31, result.count > 31 {
-            result = Array(result.prefix(31))
-        }
-
-        return result
-    }
 
     /// Застосовує корекцію JM-1 до Harman значень
-    private func applyJM1Correction(harmanBands: [ParsedBand]) -> [ParsedBand] {
-        harmanBands.map { band in
-            let jm1Target = EQProcessor.getJM1TargetGain(frequency: band.freq)
-            let harmanTarget = EQProcessor.getHarmanTargetGain(frequency: band.freq)
-            let targetDiff = jm1Target - harmanTarget
-            let correctedGain = band.gain + targetDiff
-            return ParsedBand(freq: band.freq, gain: correctedGain)
-        }
-    }
 
     /// Парсить FixedBandEQ.txt файл з локального AutoEq repo
     /// Формат: Filter 1: ON PK Fc 31 Hz Gain 6.4 dB Q 1.41
-    private func parseFixedBandEQFile(fromPath path: String) -> (bands: [ParsedBand], preamp: Double?)? {
-        // Визначаємо шлях до AutoEq repo відносно home directory
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        let projectPath = homeDir + "/CascadeProjects/SystemEQ for Mac"
-        let fullPath = projectPath + "/AutoEq/" + path
-
-        guard let content = try? String(contentsOfFile: fullPath, encoding: .utf8) else {
-            return nil
-        }
-
-        var preamp: Double?
-        var bands: [ParsedBand] = []
-
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Парсимо Preamp: -7.1 dB
-            if trimmed.hasPrefix("Preamp:") {
-                let parts = trimmed.split(separator: " ")
-                if parts.count >= 2,
-                   let value = Double(parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "dB "))) {
-                    preamp = value
-                }
-                continue
-            }
-
-            // Парсимо Filter 1: ON PK Fc 31 Hz Gain 6.4 dB Q 1.41
-            if trimmed.hasPrefix("Filter"), trimmed.contains("Fc"), trimmed.contains("Gain") {
-                let components = trimmed.split(separator: " ")
-                var freq: Double?
-                var gain: Double?
-
-                for (i, comp) in components.enumerated() {
-                    if comp == "Fc", i + 1 < components.count {
-                        freq = Double(components[i + 1])
-                    }
-                    if comp == "Gain", i + 1 < components.count {
-                        gain = Double(components[i + 1])
-                    }
-                }
-
-                if let f = freq, let g = gain {
-                    bands.append(ParsedBand(freq: f, gain: g))
-                }
-            }
-        }
-
-        dlog(
-            "DEBUG: Parsed FixedBandEQ.txt: \(bands.count) bands, preamp: \(preamp?.description ?? "nil")",
-            category: .network
-        )
-        return bands.isEmpty ? nil : (bands: bands, preamp: preamp)
-    }
 
     /// Парсить GraphicEQ.txt файл з локального AutoEq repo
     /// Формат: GraphicEQ: 20 -0.2; 21 -0.2; 22 -0.2; ...
-    private func parseGraphicEQFile(fromPath path: String) -> [ParsedBand]? {
-        // Визначаємо шлях до AutoEq repo відносно home directory
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        let projectPath = homeDir + "/CascadeProjects/SystemEQ for Mac"
-        let fullPath = projectPath + "/AutoEq/" + path
-
-        guard let content = try? String(contentsOfFile: fullPath, encoding: .utf8) else {
-            return nil
-        }
-
-        var bands: [ParsedBand] = []
-
-        // Знаходимо рядок що починається з "GraphicEQ:"
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("GraphicEQ:") {
-                // Витягуємо все після "GraphicEQ:"
-                let dataStr = trimmed.dropFirst("GraphicEQ:".count).trimmingCharacters(in: .whitespaces)
-
-                // Розбиваємо по ";"
-                let pairs = dataStr.split(separator: ";")
-                for pair in pairs {
-                    let components = pair.trimmingCharacters(in: .whitespaces).split(separator: " ")
-                    if components.count == 2,
-                       let freq = Double(components[0]),
-                       let gain = Double(components[1]) {
-                        bands.append(ParsedBand(freq: freq, gain: gain))
-                    }
-                }
-                break
-            }
-        }
-
-        return bands.isEmpty ? nil : bands
-    }
 
     // MARK: - Favorites Management
 
