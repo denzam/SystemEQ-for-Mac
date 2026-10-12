@@ -55,7 +55,7 @@ public struct EQPreset: Codable, Identifiable {
     }
 }
 
-public struct ParametricBand: Codable, Identifiable {
+nonisolated public struct ParametricBand: Codable, Identifiable {
     public let id: UUID = .init()
     public let frequency: Float
     public let gain: Float
@@ -136,7 +136,7 @@ public enum MeasurementRig: String, Codable, CaseIterable {
     case unknown = "Unknown"
 }
 
-public enum FilterType: String, Codable, CaseIterable {
+nonisolated public enum FilterType: String, Codable, CaseIterable, Sendable {
     case peak = "PK"
     case lowShelf = "LS"
     case highShelf = "HS"
@@ -150,7 +150,7 @@ public enum FilterType: String, Codable, CaseIterable {
 
 // MARK: - Helper Types for AutoEQView
 
-public struct ParsedBand: Identifiable, Equatable {
+nonisolated public struct ParsedBand: Identifiable, Equatable {
     public let id = UUID()
     public let freq: Double
     public let gain: Double

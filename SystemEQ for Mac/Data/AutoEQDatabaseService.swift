@@ -26,4 +26,10 @@ struct AutoEQDatabaseService {
               preset.preampGain.isFinite else { return nil }
         return AutoEQDatabaseImport(preset: preset, gains10: gains10, gains31: gains31)
     }
+
+    func loadCanonical(headphoneID: Int) throws -> (preset: DatabasePreset, input: AutoEQImportedPreset) {
+        guard let preset = database.getRecommendedPreset(for: headphoneID)
+        else { throw AutoEQImportError.invalidSource }
+        return try (preset, database.canonicalPreset(presetId: preset.id))
+    }
 }

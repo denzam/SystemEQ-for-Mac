@@ -14,7 +14,7 @@ import SwiftUI
 
 // MARK: - EQ Band Mode
 
-public enum EQBandMode: String, CaseIterable, Codable {
+nonisolated public enum EQBandMode: String, CaseIterable, Codable {
     case tenBand = "10-band"
     case thirtyOneBand = "31-band"
 
@@ -81,7 +81,7 @@ struct EQBand: Identifiable, Codable {
     }
 }
 
-enum FixedBandEQDefinition {
+nonisolated enum FixedBandEQDefinition {
     static func bands(mode: EQBandMode, gains: [Float]) -> [ParametricBand] {
         switch mode {
         case .tenBand:
@@ -452,6 +452,27 @@ public final class AudioEngine: ObservableObject {
 
     func recommendedPreampGain() -> Float {
         FixedBandAutoPreamp.recommendedGain(mode: bandMode, gains: bands.map(\.gain))
+    }
+
+    func importPreampLimit(mode: EQBandMode, gains: [Float]) -> Float? {
+        guard gains.count == mode.bandCount, gains.allSatisfy(\.isFinite) else { return nil }
+        let frequencies = EQBandMode.thirtyOneBand.frequencies
+        let effective = zip(mode.frequencies, gains).map { frequency, gain in
+            let correction = calibrationAdjustments.flatMap { adjustments in
+                frequencies.firstIndex(of: frequency).map { adjustments[$0] }
+            } ?? 0
+            return min(20, max(-20, gain + correction))
+        }
+        do {
+            return try EQConverter.preampLimit(
+                mode: mode,
+                gains: effective,
+                sampleRate: coreAudioEngine.processingSampleRate
+            )
+        } catch {
+            eqLog("Cannot compute imported EQ headroom", level: .error)
+            return nil
+        }
     }
 
     private static func sanitizedPreamp(_ gain: Float) -> Float {

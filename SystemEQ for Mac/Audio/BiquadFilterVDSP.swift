@@ -128,7 +128,7 @@ nonisolated struct OutputSafetyProcessor {
     }
 }
 
-struct BiquadCoefficients {
+nonisolated struct BiquadCoefficients {
     let b0: Float
     let b1: Float
     let b2: Float
@@ -136,7 +136,7 @@ struct BiquadCoefficients {
     let a2: Float
 }
 
-enum BiquadResponseCalculator {
+nonisolated enum BiquadResponseCalculator {
     static func maximumCombinedGainDB(
         bands: [ParametricBand],
         sampleRate: Float,

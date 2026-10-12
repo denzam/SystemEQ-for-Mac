@@ -509,6 +509,52 @@ class EQDatabase {
         return bands
     }
 
+    func canonicalPreset(presetId: Int) throws -> AutoEQImportedPreset {
+        let sql = """
+        SELECT b.filter_type, b.frequency, b.gain, b.q_factor, p.preamp_gain
+        FROM parametric_bands b JOIN presets p ON p.id = b.preset_id
+        WHERE b.preset_id = ? ORDER BY b.band_index
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            dlog(
+                "Cannot read canonical AutoEQ filters: \(db.map { String(cString: sqlite3_errmsg($0)) } ?? "closed database")",
+                level: .error,
+                category: .database
+            )
+            throw AutoEQImportError.invalidSource
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_bind_int(statement, 1, Int32(presetId)) == SQLITE_OK
+        else { throw AutoEQImportError.invalidSource }
+        var filters: [AutoEQSourceFilter] = []
+        var preamp: Double?
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            guard sqlite3_column_type(statement, 0) == SQLITE_TEXT,
+                  (1...4).allSatisfy({
+                      let type = sqlite3_column_type(statement, Int32($0))
+                      return type == SQLITE_FLOAT || type == SQLITE_INTEGER
+                  }),
+                  let kind = AutoEQImportParser.kind(columnText(statement, 0))
+            else { throw AutoEQImportError.invalidSource }
+            filters.append(AutoEQSourceFilter(
+                frequency: sqlite3_column_double(statement, 1),
+                gain: sqlite3_column_double(statement, 2),
+                q: sqlite3_column_double(statement, 3),
+                type: kind
+            ))
+            preamp = sqlite3_column_double(statement, 4)
+            guard filters.count <= 256 else { throw AutoEQImportError.invalidSource }
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else {
+            dlog("Canonical AutoEQ read failed: \(status)", level: .error, category: .database)
+            throw AutoEQImportError.invalidSource
+        }
+        return try AutoEQImportParser.validated(filters, preamp: preamp, legacy: true)
+    }
+
     // MARK: - Version & Updates
 
     /// Get database version (format: YYYY-MM-DD), or nil if it cannot be read.

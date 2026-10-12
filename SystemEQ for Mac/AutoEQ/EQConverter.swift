@@ -13,7 +13,7 @@ import Foundation
 /// Usage:
 ///   - `EQConverter.shared` for standard 48 kHz (backward-compatible singleton)
 ///   - `EQConverter(sampleRate: 44100)` for custom sample rates or testing
-class EQConverter {
+nonisolated final class EQConverter: Sendable {
     static let shared = EQConverter()
 
     let sampleRate: Double

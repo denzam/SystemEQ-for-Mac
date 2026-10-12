@@ -12,7 +12,7 @@ public enum BandMode: String, CaseIterable {
     case thirtyOne = "31"
 }
 
-public enum AutoEQConstants {
+nonisolated public enum AutoEQConstants {
     public static let tenBandFrequencies: [Float] = [
         31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000
     ]
