@@ -492,6 +492,197 @@ final class BiquadFilterTests: XCTestCase {
         }
     }
 
+    func testVDSPInvalidParametersBypassEveryFilterType() throws {
+        let invalid: [(Float, Float, Float, Float)] = [
+            (1000, 6, 2, 0), (1000, 6, 2, -48000),
+            (1000, 6, 2, .nan), (1000, 6, 2, .infinity),
+            (0, 6, 2, 48000), (-1000, 6, 2, 48000),
+            (.nan, 6, 2, 48000), (.infinity, 6, 2, 48000),
+            (24000, 6, 2, 48000), (Float(24000).nextUp, 6, 2, 48000),
+            (1000, .nan, 2, 48000), (1000, .infinity, 2, 48000),
+            (1000, 6, 0, 48000), (1000, 6, -1, 48000),
+            (1000, 6, .nan, 48000), (1000, 6, .infinity, 48000)
+        ]
+        for type in FilterType.allCases {
+            for (frequency, gain, q, rate) in invalid {
+                let band = try decodedBand(frequency: frequency, gain: gain, q: q, type: type)
+                let coefficients = BiquadResponseCalculator.coefficients(
+                    frequency: frequency, gain: gain, q: q, type: type, sampleRate: rate
+                )
+                XCTAssertTrue(coefficients.isIdentity, "\(type), \(frequency), \(gain), \(q), \(rate)")
+                XCTAssertEqual(BiquadResponseCalculator.maximumCombinedGainDB(bands: [band], sampleRate: rate), 0)
+                let filter = BiquadFilterVDSP()
+                filter.configure(bands: [band], preamp: -3, outputBoost: 3, sampleRate: rate)
+                XCTAssertEqual(filter.activeFilterCount, 0)
+                var left: [Float] = [2, 0.1, 0.1, .nan, .infinity]
+                var right = left
+                filter.processStereo(&left, &right, frameCount: left.count)
+                XCTAssertTrue(left.allSatisfy(\.isFinite))
+                XCTAssertEqual(left, right)
+                XCTAssertGreaterThan(left[1], 0)
+            }
+        }
+    }
+
+    func testVDSPRejectsOverflowAndRoundedUnstableCoefficients() {
+        for (frequency, gain, q) in [
+            (Float(1000), Float.greatestFiniteMagnitude, Float(2)),
+            (1000, 6, Float.leastNonzeroMagnitude),
+            (Float.leastNonzeroMagnitude, 6, 2),
+            (Float(24000).nextDown, 6, 2)
+        ] {
+            let coefficients = BiquadResponseCalculator.coefficients(
+                frequency: frequency, gain: gain, q: q, type: .peak, sampleRate: 48000
+            )
+            XCTAssertTrue(coefficients.isIdentity || coefficients.isStable)
+        }
+        XCTAssertTrue(BiquadResponseCalculator.coefficients(
+            frequency: 1000, gain: .greatestFiniteMagnitude, q: 2, type: .peak, sampleRate: 48000
+        ).isIdentity)
+        XCTAssertTrue(BiquadResponseCalculator.coefficients(
+            frequency: .leastNonzeroMagnitude, gain: 6, q: 2, type: .peak, sampleRate: 48000
+        ).isIdentity)
+    }
+
+    func testVDSPFixedBandsRemainQuietAcrossRatesAndMatchHeadroom() throws {
+        for mode in EQBandMode.allCases {
+            for rate: Float in [24000, 32000, 44100, 48000, 96000] {
+                for gain: Float in [-6, 6] {
+                    var gains = [Float](repeating: 0, count: mode.bandCount)
+                    gains[gains.count - 1] = gain
+                    let bands = FixedBandEQDefinition.bands(mode: mode, gains: gains)
+                    let bypassed = try XCTUnwrap(bands.last?.frequency) >= rate / 2
+                    let filter = BiquadFilterVDSP()
+                    filter.configure(bands: bands, preamp: 0, sampleRate: rate)
+                    XCTAssertEqual(filter.activeFilterCount, bypassed ? 0 : 1)
+                    let headroom = BiquadResponseCalculator.maximumCombinedGainDB(bands: bands, sampleRate: rate)
+                    let measured = measuredVDSPGain(filter: filter, frequency: 1000, rate: Double(rate))
+                    XCTAssertTrue(headroom.isFinite)
+                    XCTAssertLessThanOrEqual(measured, Double(headroom) + 1)
+                    if bypassed {
+                        XCTAssertEqual(headroom, 0)
+                        XCTAssertEqual(measured, 0, accuracy: 0.001)
+                    }
+                }
+            }
+        }
+    }
+
+    func testVDSPNyquistBoundaryIsSafeForEveryFilterType() {
+        for type in FilterType.allCases {
+            for frequency: Float in [15968, Float(16000).nextDown, 16000, Float(16000).nextUp] {
+                let band = ParametricBand(frequency: frequency, gain: 6, q: 2, filterType: type)
+                let filter = BiquadFilterVDSP()
+                filter.configure(bands: [band], preamp: 0, sampleRate: 32000)
+                let coefficients = BiquadResponseCalculator.coefficients(
+                    frequency: frequency, gain: 6, q: 2, type: type, sampleRate: 32000
+                )
+                XCTAssertTrue(coefficients.isStable)
+                if frequency >= 16000 {
+                    XCTAssertTrue(coefficients.isIdentity)
+                    XCTAssertEqual(filter.activeFilterCount, 0)
+                }
+                let gain = measuredVDSPGain(filter: filter, frequency: 1000, rate: 32000)
+                XCTAssertTrue(gain.isFinite)
+                XCTAssertLessThan(gain, 12)
+            }
+        }
+    }
+
+    func testCoreAudioRateTransitionsRestoreEQRoomFiltersAndGainStaging() throws {
+        for mode in EQBandMode.allCases {
+            let engine = CoreAudioEngine()
+            defer {
+                engine.setEnabled(false)
+                engine.clearRoomNotchFilters()
+                engine.clearEQ()
+            }
+            var gains = [Float](repeating: 0, count: mode.bandCount)
+            gains[gains.count - 1] = 6
+            if mode == .tenBand {
+                engine.applyFixedBandEQ(gains, preamp: -4.5, outputBoost: 1)
+            } else {
+                engine.applyGraphicEQ31(gains, preamp: -4.5, outputBoost: 1)
+            }
+            engine.applyRoomNotchFilters([(frequency: 16000, gain: -3, q: 4)])
+            engine.setEnabled(true)
+            let frequency: Double = mode == .tenBand ? 16000 : 20000
+            let baseline = measuredGain(engine: engine, frequency: frequency, rate: 48000)
+            for lowRate in [24000.0, 32000.0] {
+                engine.prepareProcessTap(sampleRate: lowRate, outputDeviceID: 0, bufferFrames: 256)
+                XCTAssertEqual(try XCTUnwrap(engine.vdspFilter).activeFilterCount, 0)
+                XCTAssertEqual(try XCTUnwrap(engine.roomFilter).activeFilterCount, 0)
+                XCTAssertEqual(measuredGain(engine: engine, frequency: 1000, rate: lowRate), -3.5, accuracy: 0.03)
+                engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 0, bufferFrames: 256)
+                XCTAssertEqual(try XCTUnwrap(engine.vdspFilter).activeFilterCount, 1)
+                XCTAssertEqual(try XCTUnwrap(engine.roomFilter).activeFilterCount, 1)
+                XCTAssertEqual(
+                    measuredGain(engine: engine, frequency: frequency, rate: 48000),
+                    baseline,
+                    accuracy: 0.03
+                )
+            }
+        }
+    }
+
+    func testVDSPBypassPreservesZeroOneFrameWindowsAndSkipsZeroGainInvalidBands() throws {
+        let filter = BiquadFilterVDSP()
+        let bands = try [decodedBand(frequency: .nan, gain: 0, q: .nan, type: .peak)]
+        filter.configure(bands: bands, preamp: -3, sampleRate: 48000)
+        XCTAssertEqual(filter.activeFilterCount, 0)
+        XCTAssertEqual(BiquadResponseCalculator.maximumCombinedGainDB(bands: bands, sampleRate: 48000), 0)
+        for count in [0, 1, 256] {
+            var left = [Float](repeating: 0.001, count: count + 1)
+            var right = left
+            filter.processStereo(&left, &right, frameCount: count)
+            XCTAssertEqual(left[count], 0.001)
+            XCTAssertEqual(right[count], 0.001)
+            for index in 0..<count {
+                XCTAssertEqual(left[index], 0.001 * pow(10, -3 / 20), accuracy: 0.0000001)
+                XCTAssertEqual(left[index], right[index])
+            }
+        }
+    }
+
+    private func decodedBand(frequency: Float, gain: Float, q: Float, type: FilterType) throws -> ParametricBand {
+        struct UnvalidatedBand: Encodable {
+            let frequency: Float
+            let gain: Float
+            let q: Float
+            let filterType: FilterType
+        }
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN"
+        )
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN"
+        )
+        let encoded = try encoder.encode(UnvalidatedBand(frequency: frequency, gain: gain, q: q, filterType: type))
+        return try decoder.decode(ParametricBand.self, from: encoded)
+    }
+
+    private func measuredVDSPGain(filter: BiquadFilterVDSP, frequency: Double, rate: Double) -> Double {
+        var inputEnergy = 0.0
+        var outputEnergy = 0.0
+        for block in 0..<160 {
+            let source = (0..<256).map { index in
+                Float(sin(2 * Double.pi * frequency * Double(block * 256 + index) / rate) * 0.001)
+            }
+            var left = source
+            var right = source
+            filter.processStereo(&left, &right, frameCount: left.count)
+            XCTAssertTrue(left.allSatisfy(\.isFinite))
+            XCTAssertEqual(left, right)
+            if block >= 150 {
+                inputEnergy += source.reduce(0) { $0 + Double($1) * Double($1) }
+                outputEnergy += left.reduce(0) { $0 + Double($1) * Double($1) }
+            }
+        }
+        return 10 * log10(outputEnergy / inputEnergy)
+    }
+
     func testVDSPFilter_lowPassAndHighPass_retainedWhenZeroGain() {
         let filter = BiquadFilterVDSP(sampleRate: 48000)
         let bands = [

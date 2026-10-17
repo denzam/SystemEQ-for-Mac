@@ -22,7 +22,7 @@ nonisolated struct OutputSafetyProcessor {
         let sanitizedBoost = boostDB.isFinite ? min(max(boostDB, 0), Self.maximumBoostDB) : 0
         boostLinear = pow(10.0, sanitizedBoost / 20.0)
         ceiling = sanitizedBoost > 0 ? Self.boostedCeiling : 1.0
-        let safeSampleRate = max(sampleRate, 1)
+        let safeSampleRate = sampleRate.isFinite && sampleRate > 0 ? sampleRate : 1
         releaseCoefficient = 1 - exp(-1 / (safeSampleRate * 0.1))
         limiterGain = 1.0
     }
@@ -134,41 +134,57 @@ nonisolated struct BiquadCoefficients {
     let b2: Float
     let a1: Float
     let a2: Float
+
+    static let identity = BiquadCoefficients(b0: 1, b1: 0, b2: 0, a1: 0, a2: 0)
+
+    var isIdentity: Bool {
+        b0 == 1 && b1 == 0 && b2 == 0 && a1 == 0 && a2 == 0
+    }
+
+    var isStable: Bool {
+        guard [b0, b1, b2, a1, a2].allSatisfy(\.isFinite) else { return false }
+        let first = Double(a1)
+        let second = Double(a2)
+        return abs(second) < 1 && 1 + first + second > 0 && 1 - first + second > 0
+    }
 }
 
 nonisolated enum BiquadResponseCalculator {
-    static func maximumCombinedGainDB(
-        bands: [ParametricBand],
-        sampleRate: Float,
-        pointCount: Int = 512
-    ) -> Float {
-        let activeBands = bands.filter { band in
+    static func preparedCoefficients(bands: [ParametricBand], sampleRate: Float) -> [BiquadCoefficients] {
+        bands.compactMap { band in
             switch band.filterType {
             case .highShelf,
                  .lowShelf,
                  .peak:
-                abs(band.gain) >= 0.01
+                guard abs(band.gain) >= 0.01 else { return nil }
             case .allPass,
                  .allPassPEQ,
                  .bandPass,
                  .highPass,
                  .lowPass,
                  .notch:
-                true
+                break
             }
-        }
-        guard !activeBands.isEmpty, sampleRate > 0, pointCount > 1 else { return 0 }
-        let filterCoefficients = activeBands.map {
-            Self.coefficients(
-                frequency: $0.frequency,
-                gain: $0.gain,
-                q: $0.q,
-                type: $0.filterType,
+            let result = coefficients(
+                frequency: band.frequency,
+                gain: band.gain,
+                q: band.q,
+                type: band.filterType,
                 sampleRate: sampleRate
             )
+            return result.isIdentity ? nil : result
         }
-        let minimumFrequency: Float = 20
+    }
+
+    static func maximumCombinedGainDB(
+        bands: [ParametricBand],
+        sampleRate: Float,
+        pointCount: Int = 512
+    ) -> Float {
+        let filterCoefficients = preparedCoefficients(bands: bands, sampleRate: sampleRate)
+        guard !filterCoefficients.isEmpty, sampleRate.isFinite, sampleRate > 0, pointCount > 1 else { return 0 }
         let maximumFrequency = min(20000, sampleRate * 0.49)
+        let minimumFrequency = min(20, maximumFrequency)
         let logMinimum = log(minimumFrequency)
         let logRange = log(maximumFrequency) - logMinimum
         var maximumGain: Float = 0
@@ -208,6 +224,9 @@ nonisolated enum BiquadResponseCalculator {
         type: FilterType,
         sampleRate: Float
     ) -> BiquadCoefficients {
+        guard sampleRate.isFinite, sampleRate > 0,
+              frequency.isFinite, frequency > 0, frequency < sampleRate / 2,
+              gain.isFinite, q.isFinite, q > 0 else { return .identity }
         let A = pow(10.0, gain / 40.0)
         let omega = 2.0 * Float.pi * frequency / sampleRate
         let sinW = sin(omega)
@@ -290,13 +309,14 @@ nonisolated enum BiquadResponseCalculator {
             a2 = 1.0 - alpha
         }
 
-        return BiquadCoefficients(
+        let result = BiquadCoefficients(
             b0: b0 / a0,
             b1: b1 / a0,
             b2: b2 / a0,
             a1: a1 / a0,
             a2: a2 / a0
         )
+        return result.isStable ? result : .identity
     }
 }
 
@@ -350,22 +370,8 @@ public final class BiquadFilterVDSP {
         self.preampLinear = pow(10.0, preamp / 20.0)
         outputSafety.configure(boostDB: outputBoost, sampleRate: sampleRate)
 
-        let activeBands = bands.filter { band in
-            switch band.filterType {
-            case .highShelf,
-                 .lowShelf,
-                 .peak:
-                abs(band.gain) >= 0.01
-            case .allPass,
-                 .allPassPEQ,
-                 .bandPass,
-                 .highPass,
-                 .lowPass,
-                 .notch:
-                true
-            }
-        }
-        let newCount = activeBands.count
+        let prepared = BiquadResponseCalculator.preparedCoefficients(bands: bands, sampleRate: sampleRate)
+        let newCount = prepared.count
 
         // Destroy previous setup before rebuilding.
         if let s = setupL { vDSP_biquad_DestroySetup(s); setupL = nil }
@@ -380,14 +386,7 @@ public final class BiquadFilterVDSP {
 
         // vDSP_biquad wants Double coefficients laid out per section: b0 b1 b2 a1 a2.
         var coeffs = [Double](repeating: 0, count: newCount * 5)
-        for (i, band) in activeBands.enumerated() {
-            let c = BiquadResponseCalculator.coefficients(
-                frequency: band.frequency,
-                gain: band.gain,
-                q: band.q,
-                type: band.filterType,
-                sampleRate: sampleRate
-            )
+        for (i, c) in prepared.enumerated() {
             let base = i * 5
             coeffs[base + 0] = Double(c.b0)
             coeffs[base + 1] = Double(c.b1)
