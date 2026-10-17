@@ -9,7 +9,14 @@ import AVFoundation
 import Foundation
 import SwiftUI
 
-private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+nonisolated enum TestHostRuntime {
+    static let isActive = detect(environment: ProcessInfo.processInfo.environment)
+
+    static func detect(environment: [String: String]) -> Bool {
+        ["SYSTEMEQ_TEST_HOST", "XCTestConfigurationFilePath", "XCTestBundlePath", "XCTestSessionIdentifier"]
+            .contains { environment[$0] != nil }
+    }
+}
 
 // MARK: - App Startup
 
@@ -21,7 +28,7 @@ enum AppStartup {
     private static var hasRun = false
 
     static func run() async {
-        guard !hasRun, !isRunningUnitTests else { return }
+        guard !hasRun, !TestHostRuntime.isActive else { return }
         hasRun = true
 
         // First, perform the async device scan to ensure the list is ready.
@@ -136,8 +143,30 @@ enum AppStartup {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let isTestHost: Bool
+    private let launchAction: (() -> Void)?
+    private let terminationAction: (() -> Void)?
+
+    override init() {
+        isTestHost = TestHostRuntime.isActive
+        launchAction = nil
+        terminationAction = nil
+        super.init()
+    }
+
+    init(isTestHost: Bool, launch: @escaping () -> Void, terminate: @escaping () -> Void) {
+        self.isTestHost = isTestHost
+        launchAction = launch
+        terminationAction = terminate
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard !isRunningUnitTests else { return }
+        guard !isTestHost else { return }
+        if let launchAction {
+            launchAction()
+            return
+        }
         DiagnosticEventStore.shared.startSession()
         MainThreadHealthMonitor.shared.start()
 
@@ -162,9 +191,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if !isRunningUnitTests {
-            MainThreadHealthMonitor.shared.stop()
+        guard !isTestHost else { return .terminateNow }
+        if let terminationAction {
+            terminationAction()
+            return .terminateNow
         }
+        MainThreadHealthMonitor.shared.stop()
         // While EQ routing is active the system default output is BlackHole.
         // Restore the real output device before quitting, otherwise the user is
         // left with no sound until they fix it manually in System Settings.
@@ -174,15 +206,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if AudioRouter.shared.isRoutingOwned {
             AudioRouter.shared.disableEQRouting(persistEnabledState: false)
         }
-        if !isRunningUnitTests {
-            ProjectMHelperClient.shared.stop()
-            DiagnosticEventStore.shared.finishSession()
-        }
+        ProjectMHelperClient.shared.stop()
+        DiagnosticEventStore.shared.finishSession()
         return .terminateNow
     }
 }
 
 @main
+enum SystemEQEntryPoint {
+    static func main() {
+        if TestHostRuntime.isActive {
+            IsolatedTestHostApp.main()
+        } else {
+            SystemEQ_for_MacApp.main()
+        }
+    }
+}
+
+private struct IsolatedTestHostApp: App {
+    var body: some Scene {
+        Settings { EmptyView() }
+    }
+}
+
 struct SystemEQ_for_MacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var featureRegistry = FeatureRegistry()
@@ -192,11 +238,11 @@ struct SystemEQ_for_MacApp: App {
 
     init() {
         #if DEBUG
-            if !isRunningUnitTests {
+            if !TestHostRuntime.isActive {
                 EQDatabaseTest.runTests()
             }
         #endif
-        if !isRunningUnitTests {
+        if !TestHostRuntime.isActive {
             WindowTitleManager.shared.setupObserver()
         }
     }

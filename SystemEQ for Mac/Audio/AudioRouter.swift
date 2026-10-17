@@ -369,6 +369,16 @@ final class RoutingSampleRateRecovery {
 // MARK: - Audio Router
 
 public final class AudioRouter: ObservableObject {
+    enum SystemEvent: CaseIterable {
+        case devicesChanged
+        case defaultOutputChanged
+        case willSleep
+        case didWake
+    }
+
+    private let isTestHost: Bool
+    private let eventHandler: ((SystemEvent) -> Void)?
+
     // MARK: - Published Properties
 
     @Published public var inputDevices: [AudioDevice] = []
@@ -436,23 +446,36 @@ public final class AudioRouter: ObservableObject {
     /// restart that failed). Quitting in that window must still restore the real
     /// output, which `CoreAudioEngine.isRunning` alone would not catch.
     public var isRoutingOwned: Bool {
-        activeBackend != .none || activeInputUID != nil || CoreAudioEngine.shared.isRunning
+        guard !isTestHost else { return false }
+        return activeBackend != .none || activeInputUID != nil || CoreAudioEngine.shared.isRunning
     }
 
     public static let shared = AudioRouter()
 
     // MARK: - Initialization
 
-    private init() {
-        // Setup listeners first to catch any device changes.
-        // The initial device refresh is now handled asynchronously from the UI layer.
-        setupDeviceChangeListener()
-        setupDefaultOutputChangeListener()
-        setupNotificationObservers()
-        setupSleepWakeObservers()
+    private convenience init() {
+        self.init(isTestHost: TestHostRuntime.isActive, installObservers: { router in
+            router.setupDeviceChangeListener()
+            router.setupDefaultOutputChangeListener()
+            router.setupNotificationObservers()
+            router.setupSleepWakeObservers()
+        })
+    }
+
+    init(
+        isTestHost: Bool,
+        installObservers: (AudioRouter) -> Void,
+        handleEvent: ((SystemEvent) -> Void)? = nil
+    ) {
+        self.isTestHost = isTestHost
+        eventHandler = handleEvent
+        guard !isTestHost else { return }
+        installObservers(self)
     }
 
     func setBackendPreference(_ preference: AudioRoutingBackendPreference) {
+        guard !isTestHost else { return }
         guard backendPreference != preference else { return }
         backendPreference = preference
         UserDefaults.standard.set(preference.rawValue, forKey: Self.backendPreferenceKey)
@@ -486,6 +509,7 @@ public final class AudioRouter: ObservableObject {
     // MARK: - Device Enumeration
 
     public func refreshDevices() async {
+        guard !isTestHost else { return }
         // Perform blocking CoreAudio calls on a background thread.
         let (rawInputs, rawOutputs) = await Task.detached {
             let inputs = AudioRouter.getDevices(isInput: true)
@@ -495,6 +519,7 @@ public final class AudioRouter: ObservableObject {
 
         // Update the UI and published properties on the Main Actor.
         await MainActor.run {
+            guard !self.isTestHost else { return }
             // Construct AudioDevice values on the MainActor to satisfy Swift concurrency.
             self.inputDevices = rawInputs.map { info in
                 AudioDevice(
@@ -708,6 +733,7 @@ public final class AudioRouter: ObservableObject {
     // MARK: - Device Selection
 
     func selectInputDevice(_ device: AudioDevice) {
+        guard !isTestHost else { return }
         selectedInputDevice = device
         dlog("Selected input: \(device.name)", category: .routing)
 
@@ -722,6 +748,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func selectOutputDevice(_ device: AudioDevice) {
+        guard !isTestHost else { return }
         guard device.canBeProcessedOutput else {
             dlog("Device cannot be selected as the processed output", level: .warning, category: .routing)
             return
@@ -779,6 +806,7 @@ public final class AudioRouter: ObservableObject {
         reason: RoutingRequestReason = .request,
         blackHoleSampleRate: Double? = nil
     ) -> Bool {
+        guard !isTestHost else { return false }
         guard let physicalOutput = preferredOutputDevice() else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: [
                 "reason": "noPhysicalOutput", "trigger": reason.rawValue
@@ -1129,12 +1157,14 @@ public final class AudioRouter: ObservableObject {
     }
 
     func testAudioRouting() {
+        guard !isTestHost else { return }
         dlog("🔊 Testing audio routing...", category: .general)
 
         Task { @MainActor in
             // Refresh device list
             dlog("🔄 Refreshing device list...", category: .general)
             await refreshDevices()
+            guard !isTestHost else { return }
 
             // Find BlackHole and a physical output
             guard let blackHoleInput = inputDevices.first(where: { $0.name.lowercased().contains("blackhole") }) else {
@@ -1165,6 +1195,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func disableEQRouting(persistEnabledState: Bool = true) {
+        guard !isTestHost else { return }
         let previousBackend = activeBackend
         DiagnosticEventStore.shared.record(
             "routing.disable.request",
@@ -1208,6 +1239,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func setAsDefaultOutputDevice(_ device: AudioDevice) {
+        guard !isTestHost else { return }
         defaultOutputRequestGeneration &+= 1
         let requestGeneration = defaultOutputRequestGeneration
         var propertyAddress = AudioObjectPropertyAddress(
@@ -1358,6 +1390,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func restoreOriginalSystemOutputDevice() {
+        guard !isTestHost else { return }
         // Only attempt a device that is actually enumerated right now — trying
         // one that just vanished (e.g. the USB DAC we're disabling EQ because
         // of) always fails and pops the "manual setup required" alert for a
@@ -1452,6 +1485,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     func diagnosticSummary() -> String {
+        guard !isTestHost else { return "Test host routing is isolated" }
         let systemInput = currentSystemInputDevice()
         let systemOutput = currentSystemOutputDevice()
         let blackHole = blackHoleOutputDevice()
@@ -1714,6 +1748,7 @@ public final class AudioRouter: ObservableObject {
     }
 
     private func handleBlackHoleSampleRateChange(deviceID: AudioDeviceID?, generation: UInt64) {
+        guard !isTestHost else { return }
         sampleRateRecovery.schedule(generation: generation) { [weak self] in
             guard let self, self.activeBackend == .blackHole, CoreAudioEngine.shared.isRunning else { return }
             let engine = CoreAudioEngine.shared
@@ -1770,6 +1805,7 @@ public final class AudioRouter: ObservableObject {
 
     @MainActor
     private func handleBlackHoleVolumeChange(scope: AudioObjectPropertyScope) {
+        guard !isTestHost else { return }
         guard isRoutingOwned, monitoredBlackHoleDeviceID != nil else { return }
         pendingBlackHoleVolumeChangeScopes.insert(scope)
         let generation = blackHoleVolumeGeneration
@@ -1875,6 +1911,38 @@ public final class AudioRouter: ObservableObject {
 
     // MARK: - Device Change Listener
 
+    func handleSystemEvent(_ event: SystemEvent) {
+        guard !isTestHost else { return }
+        if let eventHandler {
+            eventHandler(event)
+            return
+        }
+        switch event {
+        case .devicesChanged:
+            deviceChangeDebounceTask?.cancel()
+            deviceChangeDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled, let self else { return }
+                await refreshDevices()
+                guard !Task.isCancelled else { return }
+                handleDeviceTopologyChange()
+            }
+        case .defaultOutputChanged:
+            defaultOutputChangeTask?.cancel()
+            defaultOutputChangeTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, let self else { return }
+                await refreshDevices()
+                guard !Task.isCancelled else { return }
+                handleDefaultOutputChange()
+            }
+        case .willSleep:
+            suspendRoutingForSleep()
+        case .didWake:
+            resumeRoutingAfterWake()
+        }
+    }
+
     private func setupDeviceChangeListener() {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
@@ -1884,15 +1952,7 @@ public final class AudioRouter: ObservableObject {
 
         let listenerBlock: AudioObjectPropertyListenerBlock = { _, _ in
             Task { @MainActor in
-                let router = AudioRouter.shared
-                router.deviceChangeDebounceTask?.cancel()
-                router.deviceChangeDebounceTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 500_000_000) // 500ms debounce
-                    guard !Task.isCancelled else { return }
-                    await router.refreshDevices()
-                    guard !Task.isCancelled else { return }
-                    router.handleDeviceTopologyChange()
-                }
+                AudioRouter.shared.handleSystemEvent(.devicesChanged)
             }
         }
 
@@ -1917,21 +1977,14 @@ public final class AudioRouter: ObservableObject {
             DispatchQueue.main
         ) { _, _ in
             Task { @MainActor in
-                let router = AudioRouter.shared
-                router.defaultOutputChangeTask?.cancel()
-                router.defaultOutputChangeTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    guard !Task.isCancelled else { return }
-                    await router.refreshDevices()
-                    guard !Task.isCancelled else { return }
-                    router.handleDefaultOutputChange()
-                }
+                AudioRouter.shared.handleSystemEvent(.defaultOutputChanged)
             }
         }
     }
 
     @MainActor
     private func handleDefaultOutputChange() {
+        guard !isTestHost else { return }
         guard isRoutingOwned,
               let device = currentSystemOutputDevice(),
               !device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) else { return }
@@ -1959,6 +2012,7 @@ public final class AudioRouter: ObservableObject {
     /// its devices in time, so a later arrival still gets picked up.
     @MainActor
     private func handleDeviceTopologyChange() {
+        guard !isTestHost else { return }
         if activeBackend == .native {
             guard let outputUID = activeOutputUID else { return }
             if let wantedUID = preferredOutputUID,
@@ -2062,6 +2116,10 @@ public final class AudioRouter: ObservableObject {
 
     @objc
     private func handleWillSleep(_ notification: Notification) {
+        handleSystemEvent(.willSleep)
+    }
+
+    private func suspendRoutingForSleep() {
         // A pending wake restart means a previous sleep is still being recovered
         // from (e.g. the lid closed again inside the 2.5s post-wake wait). Cancel
         // it and treat this as "was routing" too, or the intent to resume gets
@@ -2081,6 +2139,10 @@ public final class AudioRouter: ObservableObject {
 
     @objc
     private func handleDidWake(_ notification: Notification) {
+        handleSystemEvent(.didWake)
+    }
+
+    private func resumeRoutingAfterWake() {
         guard wakeRecovery.shouldResume else { return }
         DiagnosticEventStore.shared.record("routing.wake.scheduled")
         wakeRecovery.resume(wait: {
@@ -2132,12 +2194,14 @@ public final class AudioRouter: ObservableObject {
     // MARK: - External Links
 
     func openBlackHoleDownload() {
+        guard !isTestHost else { return }
         if let url = URL(string: AppConstants.URLs.blackHoleReleases) {
             NSWorkspace.shared.open(url)
         }
     }
 
     func openAudioMIDISetup() {
+        guard !isTestHost else { return }
         let url = URL(fileURLWithPath: "/System/Applications/Utilities/Audio MIDI Setup.app")
         let configuration = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
