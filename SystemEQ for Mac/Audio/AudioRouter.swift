@@ -127,7 +127,7 @@ final class RoutingWakeRecovery {
     }
 }
 
-enum RoutingRequestReason: String {
+enum RoutingRequestReason: String, CaseIterable {
     case request
     case backendPreferenceChanged
     case outputSelected
@@ -292,6 +292,31 @@ struct BlackHoleInputVolumeEchoGuard {
     mutating func reset() {
         rejected = nil
         recoveryStartedAt = nil
+    }
+}
+
+enum AudioRoutingRequestPolicy {
+    static func start(
+        reason: RoutingRequestReason,
+        persistEnabledStateOnFailure: Bool,
+        operation: (Bool) -> Bool,
+        cleanup: (Bool) -> Void,
+        restoreSampleRates: () -> Void,
+        preservedOutputIsCurrent: () -> Bool,
+        restoreOutput: () -> Void
+    ) -> Bool {
+        let isRecovery = reason != .request
+        let succeeded = operation(isRecovery ? false : persistEnabledStateOnFailure)
+        if !succeeded, isRecovery {
+            stop(cleanup: cleanup)
+            restoreSampleRates()
+            if preservedOutputIsCurrent() { restoreOutput() }
+        }
+        return succeeded
+    }
+
+    static func stop(cleanup: (Bool) -> Void) {
+        cleanup(false)
     }
 }
 
@@ -807,6 +832,41 @@ public final class AudioRouter: ObservableObject {
         blackHoleSampleRate: Double? = nil
     ) -> Bool {
         guard !isTestHost else { return false }
+        let previouslyOwnedBlackHole = activeBackend == .blackHole
+        let previousVirtualOutputID = previouslyOwnedBlackHole ? blackHoleOutputDevice()?.id : nil
+        return AudioRoutingRequestPolicy.start(
+            reason: reason,
+            persistEnabledStateOnFailure: persistEnabledStateOnFailure,
+            operation: { persistFailure in
+                self.startEQRouting(
+                    forceRestart: forceRestart,
+                    persistEnabledStateOnFailure: persistFailure,
+                    reason: reason,
+                    blackHoleSampleRate: blackHoleSampleRate
+                )
+            },
+            cleanup: { persistFailure in
+                if self.isRoutingOwned || CoreAudioEngine.shared.isEnabled {
+                    self.disableEQRouting(persistEnabledState: persistFailure)
+                }
+            },
+            restoreSampleRates: {
+                if previouslyOwnedBlackHole { CoreAudioEngine.shared.restoreDeviceSampleRates() }
+            },
+            preservedOutputIsCurrent: {
+                guard let previousVirtualOutputID else { return false }
+                return self.currentSystemOutputDevice()?.id == previousVirtualOutputID
+            },
+            restoreOutput: { self.restoreOriginalSystemOutputDevice() }
+        )
+    }
+
+    private func startEQRouting(
+        forceRestart: Bool,
+        persistEnabledStateOnFailure: Bool,
+        reason: RoutingRequestReason,
+        blackHoleSampleRate: Double?
+    ) -> Bool {
         guard let physicalOutput = preferredOutputDevice() else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: [
                 "reason": "noPhysicalOutput", "trigger": reason.rawValue
@@ -2024,7 +2084,7 @@ public final class AudioRouter: ObservableObject {
             guard let output = outputDevices.first(where: { $0.uid == outputUID }) else {
                 activeOutputUID = nil
                 guard findBestPhysicalOutputDevice() != nil else {
-                    disableEQRouting()
+                    AudioRoutingRequestPolicy.stop(cleanup: disableEQRouting(persistEnabledState:))
                     return
                 }
                 enableEQRouting(forceRestart: true, reason: .outputDisconnected)
@@ -2048,7 +2108,7 @@ public final class AudioRouter: ObservableObject {
         // BlackHole gone (driver uninstalled or reset) — nothing left to capture.
         guard let input = inputDevices.first(where: { $0.uid == inputUID }) else {
             dlog("BlackHole disappeared while routing — disabling EQ", level: .warning, category: .routing)
-            disableEQRouting()
+            AudioRoutingRequestPolicy.stop(cleanup: disableEQRouting(persistEnabledState:))
             return
         }
 
@@ -2072,7 +2132,7 @@ public final class AudioRouter: ObservableObject {
                     level: .warning,
                     category: .routing
                 )
-                disableEQRouting()
+                AudioRoutingRequestPolicy.stop(cleanup: disableEQRouting(persistEnabledState:))
                 return
             }
             dlog(

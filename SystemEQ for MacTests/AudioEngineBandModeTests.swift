@@ -496,6 +496,195 @@ final class CoreAudioOutputTests: XCTestCase {
 
 @MainActor
 final class RoutingWakeRecoveryTests: XCTestCase {
+    func testAutomaticRecoveryFailuresPreserveEnabledIntentAcrossBackends() throws {
+        try withRoutingDefaults { defaults in
+            for reason in RoutingRequestReason.allCases where reason != .request {
+                for preference in [AudioRoutingBackendPreference.native, .blackHole, .automatic] {
+                    for initialIntent in [false, true] {
+                        for requestedPersistence in [false, true] {
+                            defaults.set(initialIntent, forKey: "eqWasEnabled")
+                            var enabled = true
+                            var running = true
+                            var active = true
+                            var attempts: [Bool] = []
+                            var cleanup: [Bool] = []
+                            var rateCleanupCalls = 0
+                            let failure: (Bool) -> Bool = { persist in
+                                attempts.append(persist)
+                                running = false
+                                active = false
+                                if persist { defaults.set(false, forKey: "eqWasEnabled") }
+                                return false
+                            }
+                            let result = AudioRoutingRequestPolicy.start(
+                                reason: reason,
+                                persistEnabledStateOnFailure: requestedPersistence,
+                                operation: { persist in
+                                    AudioRoutingStartPolicy.start(
+                                        preference: preference,
+                                        persistEnabledStateOnFailure: persist,
+                                        native: failure, blackHole: failure, onFallback: {}
+                                    )
+                                },
+                                cleanup: { persist in
+                                    cleanup.append(persist)
+                                    enabled = false
+                                    running = false
+                                    active = false
+                                    if persist { defaults.set(false, forKey: "eqWasEnabled") }
+                                },
+                                restoreSampleRates: { rateCleanupCalls += 1 },
+                                preservedOutputIsCurrent: { false },
+                                restoreOutput: { XCTFail("Unexpected output restoration") }
+                            )
+                            XCTAssertFalse(result)
+                            XCTAssertFalse(enabled)
+                            XCTAssertFalse(running)
+                            XCTAssertFalse(active)
+                            XCTAssertFalse(attempts.isEmpty)
+                            XCTAssertTrue(attempts.allSatisfy { !$0 })
+                            XCTAssertEqual(cleanup, [false])
+                            XCTAssertEqual(rateCleanupCalls, 1)
+                            XCTAssertEqual(defaults.bool(forKey: "eqWasEnabled"), initialIntent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testRecoveryPreflightFailureStopsBeforeRestoringPreservedOutput() {
+        var enabled = true
+        var rateDebt = true
+        var output = "virtual"
+        var calls: [String] = []
+        let result = AudioRoutingRequestPolicy.start(
+            reason: .sampleRateChanged,
+            persistEnabledStateOnFailure: true,
+            operation: { persist in calls.append("operation:\(persist)"); return false },
+            cleanup: { persist in
+                calls.append("cleanup:\(persist)")
+                enabled = false
+            },
+            restoreSampleRates: {
+                XCTAssertFalse(enabled)
+                calls.append("restoreRates")
+                rateDebt = false
+            },
+            preservedOutputIsCurrent: {
+                XCTAssertFalse(enabled)
+                calls.append("probe")
+                return output == "virtual"
+            },
+            restoreOutput: {
+                calls.append("restore")
+                output = "physical"
+            }
+        )
+        XCTAssertFalse(result)
+        XCTAssertFalse(rateDebt)
+        XCTAssertEqual(output, "physical")
+        XCTAssertEqual(calls, ["operation:false", "cleanup:false", "restoreRates", "probe", "restore"])
+    }
+
+    func testNativeRecoveryFailurePreservesBackendRestoredPhysicalOutput() {
+        var output = "attemptedPhysical"
+        var cleanups = 0
+        let result = AudioRoutingRequestPolicy.start(
+            reason: .deviceRecovery,
+            persistEnabledStateOnFailure: true,
+            operation: { _ in output = "previousPhysical"; return false },
+            cleanup: { persist in
+                XCTAssertFalse(persist)
+                cleanups += 1
+            },
+            restoreSampleRates: {},
+            preservedOutputIsCurrent: { output == "virtual" },
+            restoreOutput: { output = "wrongPhysical"; XCTFail("Must retain backend recovery output") }
+        )
+        XCTAssertFalse(result)
+        XCTAssertEqual(cleanups, 1)
+        XCTAssertEqual(output, "previousPhysical")
+    }
+
+    func testRecoveryFallbackSuccessDoesNotRunFinalCleanup() {
+        for nativeSucceeds in [false, true] {
+            var calls: [String] = []
+            let result = AudioRoutingRequestPolicy.start(
+                reason: .backendPreferenceChanged,
+                persistEnabledStateOnFailure: true,
+                operation: { persist in
+                    AudioRoutingStartPolicy.start(
+                        preference: .automatic,
+                        persistEnabledStateOnFailure: persist,
+                        native: { calls.append("native:\($0)"); return nativeSucceeds },
+                        blackHole: { calls.append("blackHole:\($0)"); return true },
+                        onFallback: { calls.append("fallback") }
+                    )
+                },
+                cleanup: { _ in XCTFail("Successful route must remain running") },
+                restoreSampleRates: { XCTFail("No rate restoration after success") },
+                preservedOutputIsCurrent: { XCTFail("No output probe after success"); return true },
+                restoreOutput: { XCTFail("No restoration after success") }
+            )
+            XCTAssertTrue(result)
+            XCTAssertEqual(calls, nativeSucceeds ? ["native:false"] : ["native:false", "fallback", "blackHole:false"])
+        }
+    }
+
+    func testManualRequestsRetainExplicitFailurePersistence() throws {
+        try withRoutingDefaults { defaults in
+            for persist in [false, true] {
+                defaults.set(true, forKey: "eqWasEnabled")
+                var observed: [Bool] = []
+                let result = AudioRoutingRequestPolicy.start(
+                    reason: .request,
+                    persistEnabledStateOnFailure: persist,
+                    operation: { effective in
+                        observed.append(effective)
+                        if effective { defaults.set(false, forKey: "eqWasEnabled") }
+                        return false
+                    },
+                    cleanup: { _ in XCTFail("Manual caller owns its failure policy") },
+                    restoreSampleRates: { XCTFail("Manual rate handling changed") },
+                    preservedOutputIsCurrent: { XCTFail("Manual output handling changed"); return true },
+                    restoreOutput: { XCTFail("Manual output handling changed") }
+                )
+                XCTAssertFalse(result)
+                XCTAssertEqual(observed, [persist])
+                XCTAssertEqual(defaults.bool(forKey: "eqWasEnabled"), !persist)
+            }
+        }
+    }
+
+    func testDeviceLossStopsRuntimeWithoutChangingSavedIntent() throws {
+        try withRoutingDefaults { defaults in
+            for initialIntent in [false, true] {
+                defaults.set(initialIntent, forKey: "eqWasEnabled")
+                var enabled = true
+                var running = true
+                var calls: [Bool] = []
+                AudioRoutingRequestPolicy.stop { persist in
+                    calls.append(persist)
+                    enabled = false
+                    running = false
+                    if persist { defaults.set(false, forKey: "eqWasEnabled") }
+                }
+                XCTAssertFalse(enabled)
+                XCTAssertFalse(running)
+                XCTAssertEqual(calls, [false])
+                XCTAssertEqual(defaults.bool(forKey: "eqWasEnabled"), initialIntent)
+            }
+        }
+    }
+
+    private func withRoutingDefaults(_ body: (UserDefaults) -> Void) throws {
+        let suite = "RoutingRequestPolicyTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        body(defaults)
+    }
+
     func testRoutingStartSelectsBackendAndPreservesFailurePersistence() {
         typealias Scenario = (AudioRoutingBackendPreference, Bool, Bool, Bool, Bool, [String])
         let scenarios: [Scenario] = [
