@@ -863,11 +863,18 @@ struct SubjectiveRoomTuningView: View {
     private func saveProfile() {
         // Create calibration profile with notch filters
         let profile = CalibrationProfile(
-            name: profileName,
+            name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
             type: .roomCorrection,
             bands: Array(repeating: 0.0, count: 31), // Notch filters work differently
-            notes: "Room calibration with \(appliedNotchFilters.count) notch filters"
+            notes: "Room calibration with \(appliedNotchFilters.count) notch filters",
+            notchFilters: appliedNotchFilters.map {
+                .init(frequency: Float($0.frequency), gain: $0.gain, q: $0.q)
+            }
         )
+        guard profile.isValid else {
+            dlog("Invalid room calibration profile", category: .calibration)
+            return
+        }
 
         // Save profile to CalibrationEngine
         calibration.profiles.append(profile)

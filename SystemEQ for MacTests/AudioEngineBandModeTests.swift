@@ -8,6 +8,7 @@
 //
 
 import AVFoundation
+import Combine
 import CoreAudio
 import Darwin
 @testable import SystemEQ_for_Mac
@@ -2157,6 +2158,215 @@ final class AudioEngineBandModeTests: XCTestCase {
 
 @MainActor
 final class CalibrationProfileTests: XCTestCase {
+    func testRoomProfileRoundTripLegacyDecodingAndDraftPreserveNotches() throws {
+        let profile = CalibrationProfile(
+            name: "Room", type: .roomCorrection, notes: "Saved room",
+            notchFilters: [.init(frequency: 63.5, gain: -6, q: 3.5), .init(frequency: 201.25, gain: -4, q: 7)]
+        )
+        let data = try JSONEncoder().encode(profile)
+        XCTAssertEqual(try JSONDecoder().decode(CalibrationProfile.self, from: data), profile)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "notchFilters")
+        let old = try JSONDecoder().decode(
+            CalibrationProfile.self, from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        XCTAssertTrue(old.notchFilters.isEmpty)
+        XCTAssertEqual(old.id, profile.id)
+        XCTAssertEqual(old.createdAt, profile.createdAt)
+        XCTAssertEqual(old.bands, profile.bands)
+        XCTAssertEqual(old.notes, profile.notes)
+        XCTAssertTrue(old.isValid)
+        for invalid: Any in [
+            NSNull(), "not filters", [["frequency": 63.5, "gain": -6]],
+            [["frequency": 0, "gain": -6, "q": 4]],
+            [["frequency": -1, "gain": -6, "q": 4]],
+            [["frequency": 63.5, "gain": -6, "q": -1]],
+            [["frequency": 63.5, "gain": -6, "q": 4], ["frequency": 125, "gain": -6, "q": 0]]
+        ] {
+            legacy["notchFilters"] = invalid
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                CalibrationProfile.self, from: JSONSerialization.data(withJSONObject: legacy)
+            ))
+        }
+        var draft = CalibrationProfileDraft(profile)
+        draft.name = "Edited room"
+        draft.bandInputs[0] = "2"
+        let edited = try XCTUnwrap(draft.updatedProfile)
+        XCTAssertEqual(edited.notchFilters, profile.notchFilters)
+        XCTAssertEqual(edited.id, profile.id)
+        XCTAssertEqual(edited.createdAt, profile.createdAt)
+    }
+
+    func testSavedRoomProfileLoadsAndAppliesToPlaybackWithoutChangingBaseEQ() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            do { try FileManager.default.removeItem(at: directory) } catch { XCTFail("Cleanup failed: \(error)") }
+        }
+        let url = directory.appendingPathComponent("profiles.json")
+        let suite = "RoomProfileTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let core = CoreAudioEngine()
+        let engine = AudioEngine(
+            defaults: defaults, coreAudioEngine: core,
+            enableRouting: { _ in core.clearEQ(); return true }, disableRouting: { _ in }
+        )
+        engine.applyEQValues([Float](repeating: 2, count: 10))
+        let profile = CalibrationProfile(
+            name: "Room", type: .roomCorrection, notchFilters: [.init(frequency: 125, gain: -8, q: 4)]
+        )
+        let writer = CalibrationEngine(eqEngine: engine, profilesURL: url, loadStoredProfiles: false)
+        writer.profiles.append(profile)
+        XCTAssertTrue(writer.updateProfile(profile))
+        writer.flushProfileWrites()
+        XCTAssertNil(core.roomFilter)
+        XCTAssertEqual(try JSONDecoder().decode([CalibrationProfile].self, from: Data(contentsOf: url)), [profile])
+        let restored = CalibrationEngine(eqEngine: engine, profilesURL: url)
+        defer { restored.flushProfileWrites() }
+        let loaded = expectation(description: "Room profile loaded")
+        let subscription = restored.$profiles.dropFirst().sink { values in
+            if values.count == 1 { loaded.fulfill() }
+        }
+        defer { subscription.cancel() }
+        await fulfillment(of: [loaded], timeout: 3)
+        XCTAssertEqual(restored.profiles, [profile])
+        XCTAssertNil(restored.activeProfile)
+        try restored.activateProfile(XCTUnwrap(restored.profiles.first))
+        XCTAssertEqual(
+            try measuredGain(core, frequency: 125, includingRoom: true) - measuredGain(core, frequency: 125),
+            -8, accuracy: 0.2
+        )
+        XCTAssertTrue(engine.setEnabled(false))
+        XCTAssertTrue(engine.setEnabled(true))
+        core.rebuildActiveEQFilter(sampleRate: 96000)
+        core.rebuildRoomFilter(sampleRate: 96000)
+        XCTAssertEqual(core.roomFilter?.sampleRate, 96000)
+        XCTAssertEqual(
+            try measuredGain(core, frequency: 125, includingRoom: true) - measuredGain(core, frequency: 125),
+            -8, accuracy: 0.2
+        )
+        XCTAssertEqual(restored.activeProfile?.notchFilters, profile.notchFilters)
+        XCTAssertEqual(engine.bands.map(\.gain), [Float](repeating: 2, count: 10))
+        XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.gains, [Float](repeating: 2, count: 10))
+    }
+
+    func testRoomProfileSwitchesReplaceFiltersAndEmptyDeactivateDeleteClearThem() throws {
+        for mode in [EQBandMode.tenBand, .thirtyOneBand] {
+            try withProfile(mode: mode) { _, calibration, core, _ in
+                let first = CalibrationProfile(
+                    name: "First", type: .roomCorrection, notchFilters: [.init(frequency: 125, gain: -6, q: 4)]
+                )
+                var second = CalibrationProfile(
+                    name: "Second", type: .roomCorrection, notchFilters: [.init(frequency: 250, gain: -10, q: 7)]
+                )
+                calibration.profiles = [first, second]
+                for _ in 0..<3 {
+                    calibration.activateProfile(first)
+                }
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: 125, includingRoom: true) - measuredGain(core, frequency: 125),
+                    -6, accuracy: 0.2
+                )
+                let firstFilter = core.roomFilter
+                second.notchFilters[0].q = 5
+                XCTAssertTrue(calibration.updateProfile(second))
+                XCTAssertTrue(core.roomFilter === firstFilter)
+                calibration.activateProfile(second)
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: 250, includingRoom: true) - measuredGain(core, frequency: 250),
+                    -10, accuracy: 0.2
+                )
+                let reference = CoreAudioEngine()
+                if mode == .tenBand {
+                    reference.applyFixedBandEQ([Float](repeating: 2, count: 10))
+                } else {
+                    reference.applyGraphicEQ31([Float](repeating: 2, count: 31))
+                }
+                reference.applyRoomNotchFilters([(frequency: 250, gain: -10, q: 5)])
+                reference.setEnabled(true)
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: 125, includingRoom: true),
+                    try measuredGain(reference, frequency: 125, includingRoom: true), accuracy: 0.05
+                )
+                for type in [CalibrationType.equalLoudness, .roomCorrection] {
+                    calibration.activateProfile(CalibrationProfile(name: "No notches", type: type))
+                    XCTAssertNil(core.roomFilter)
+                    calibration.activateProfile(first)
+                    XCTAssertNotNil(core.roomFilter)
+                }
+                calibration.deactivateProfile()
+                XCTAssertNil(core.roomFilter)
+                XCTAssertNil(calibration.activeProfile)
+                calibration.activateProfile(first)
+                calibration.deleteProfile(first)
+                XCTAssertNil(core.roomFilter)
+                XCTAssertNil(calibration.activeProfile)
+                XCTAssertEqual(core.getBandGain(index: 0), 2)
+            }
+        }
+    }
+
+    func testInvalidRoomProfileDoesNotPartiallyChangeActiveDSPOrPersistence() throws {
+        try withProfile { _, calibration, core, defaults in
+            let original = CalibrationProfile(
+                name: "Original", type: .roomCorrection, notchFilters: [.init(frequency: 125, gain: -6, q: 4)]
+            )
+            calibration.profiles.append(original)
+            XCTAssertTrue(calibration.updateProfile(original))
+            calibration.activateProfile(original)
+            calibration.flushProfileWrites()
+            core.setEnabled(false)
+            let room = core.roomFilter
+            let eq = core.vdspFilter
+            let playback = defaults.data(forKey: "lastPlayback.snapshot")
+            let invalid: [CalibrationProfile.NotchFilter] = [
+                .init(frequency: 0, gain: -6, q: 4), .init(frequency: -1, gain: -6, q: 4),
+                .init(frequency: .nan, gain: -6, q: 4), .init(frequency: .infinity, gain: -6, q: 4),
+                .init(frequency: Float(Double.greatestFiniteMagnitude), gain: -6, q: 4),
+                .init(frequency: 125, gain: .nan, q: 4), .init(frequency: 125, gain: .infinity, q: 4),
+                .init(frequency: 125, gain: -6, q: 0), .init(frequency: 125, gain: -6, q: -1),
+                .init(frequency: 125, gain: -6, q: .nan), .init(frequency: 125, gain: -6, q: .infinity)
+            ]
+            for notch in invalid {
+                var changed = original
+                changed.bands[0] = 7
+                changed.notchFilters = [original.notchFilters[0], notch]
+                XCTAssertFalse(changed.isValid)
+                XCTAssertFalse(calibration.updateProfile(changed))
+                calibration.activateProfile(changed)
+                XCTAssertEqual(calibration.activeProfile, original)
+                XCTAssertEqual(calibration.profiles, [original])
+                XCTAssertTrue(core.roomFilter === room)
+                XCTAssertTrue(core.vdspFilter === eq)
+                XCTAssertFalse(core.isEnabled)
+                XCTAssertEqual(defaults.data(forKey: "lastPlayback.snapshot"), playback)
+            }
+        }
+    }
+
+    func testRoomNotchesSurviveTemporaryNyquistBypass() throws {
+        try withProfile { _, calibration, core, _ in
+            let profile = CalibrationProfile(
+                name: "High notch", type: .roomCorrection, notchFilters: [.init(frequency: 16000, gain: -6, q: 4)]
+            )
+            calibration.activateProfile(profile)
+            core.rebuildActiveEQFilter(sampleRate: 24000)
+            core.rebuildRoomFilter(sampleRate: 24000)
+            XCTAssertEqual(
+                try measuredGain(core, frequency: 4000, includingRoom: true) - measuredGain(core, frequency: 4000),
+                0, accuracy: 0.1
+            )
+            XCTAssertEqual(calibration.activeProfile?.notchFilters, profile.notchFilters)
+            core.rebuildActiveEQFilter(sampleRate: 48000)
+            core.rebuildRoomFilter(sampleRate: 48000)
+            XCTAssertEqual(
+                try measuredGain(core, frequency: 16000, includingRoom: true) - measuredGain(core, frequency: 16000),
+                -6, accuracy: 0.2
+            )
+        }
+    }
+
     func testEditorReportsDiskFailureRollsBackAndCanRetry() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let profileURL = directory.appendingPathComponent("profiles.json")
@@ -2180,18 +2390,25 @@ final class CalibrationProfileTests: XCTestCase {
         engine.applyEQValues([Float](repeating: 2, count: 10))
         let calibration = CalibrationEngine(eqEngine: engine, profilesURL: profileURL, loadStoredProfiles: false)
         defer { calibration.flushProfileWrites() }
-        let original = calibration.createProfile(name: "Original", type: .equalLoudness)
+        var original = calibration.createProfile(name: "Original", type: .roomCorrection)
+        original.notchFilters = [.init(frequency: 125, gain: -6, q: 4)]
+        XCTAssertTrue(calibration.updateProfile(original))
         calibration.activateProfile(original)
+        let originalRoom = try measuredGain(core, frequency: 125, includingRoom: true)
         core.setEnabled(false)
         var changed = original
         changed.name = "Changed"
         changed.bands[17] = 4
+        changed.notchFilters = [.init(frequency: 250, gain: -10, q: 7)]
         let failed = await calibration.saveEditedProfile(changed)
         XCTAssertFalse(failed)
         XCTAssertEqual(calibration.profiles.first, original)
         XCTAssertEqual(calibration.activeProfile, original)
         XCTAssertEqual(core.getBandGain(index: 5), 2)
         XCTAssertFalse(core.isEnabled)
+        core.setEnabled(true)
+        XCTAssertEqual(try measuredGain(core, frequency: 125, includingRoom: true), originalRoom, accuracy: 0.2)
+        core.setEnabled(false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: profileURL.path))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let saved = await calibration.saveEditedProfile(changed)
@@ -2202,6 +2419,12 @@ final class CalibrationProfileTests: XCTestCase {
         XCTAssertEqual(calibration.activeProfile, changed)
         XCTAssertEqual(core.getBandGain(index: 5), 6)
         XCTAssertFalse(core.isEnabled)
+        core.setEnabled(true)
+        XCTAssertEqual(
+            try measuredGain(core, frequency: 250, includingRoom: true) - measuredGain(core, frequency: 250),
+            -10, accuracy: 0.2
+        )
+        core.setEnabled(false)
         var draft = CalibrationProfileDraft(changed)
         draft.name = "Cancelled"
         draft.bandInputs[17] = "8"
@@ -2326,7 +2549,9 @@ final class CalibrationProfileTests: XCTestCase {
         }
     }
 
-    private func measuredGain(_ core: CoreAudioEngine, frequency: Double) throws -> Double {
+    private func measuredGain(
+        _ core: CoreAudioEngine, frequency: Double, includingRoom: Bool = false
+    ) throws -> Double {
         let filter = try XCTUnwrap(core.vdspFilter)
         let rate = Double(filter.sampleRate)
         var inputEnergy = 0.0
@@ -2339,7 +2564,17 @@ final class CalibrationProfileTests: XCTestCase {
             var right = source
             _ = try left.withUnsafeMutableBufferPointer { l in
                 try right.withUnsafeMutableBufferPointer { r in
-                    try filter.processStereo(XCTUnwrap(l.baseAddress), XCTUnwrap(r.baseAddress), frameCount: 512)
+                    if includingRoom {
+                        try core.processStereoInPlace(
+                            left: XCTUnwrap(l.baseAddress), right: XCTUnwrap(r.baseAddress), frameCount: 512
+                        )
+                    } else {
+                        _ = try filter.processStereo(
+                            XCTUnwrap(l.baseAddress),
+                            XCTUnwrap(r.baseAddress),
+                            frameCount: 512
+                        )
+                    }
                 }
             }
             if block > 7 {

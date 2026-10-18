@@ -12,6 +12,16 @@ import Foundation
 
 /// Calibration profile for equal loudness calibration or room correction
 public struct CalibrationProfile: Codable, Identifiable, Hashable {
+    public struct NotchFilter: Codable, Hashable {
+        public var frequency: Float
+        public var gain: Float
+        public var q: Float
+
+        var isValid: Bool {
+            frequency.isFinite && frequency > 0 && gain.isFinite && q.isFinite && q > 0
+        }
+    }
+
     public let id: UUID
     public var name: String
     public var createdAt: Date
@@ -22,10 +32,21 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
 
     /// Metadata
     public var notes: String
+    public var notchFilters: [NotchFilter]
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt
+        case type
+        case bands
+        case notes
+        case notchFilters
+    }
 
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            bands.count == 31 && bands.allSatisfy(\.isFinite)
+            bands.count == 31 && bands.allSatisfy(\.isFinite) && notchFilters.allSatisfy(\.isValid)
     }
 
     public init(
@@ -33,7 +54,8 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         name: String,
         type: CalibrationType,
         bands: [Float] = Array(repeating: 0.0, count: 31),
-        notes: String = ""
+        notes: String = "",
+        notchFilters: [NotchFilter] = []
     ) {
         self.id = id
         self.name = name
@@ -41,6 +63,24 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         self.type = type
         self.bands = bands
         self.notes = notes
+        self.notchFilters = notchFilters
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        type = try container.decode(CalibrationType.self, forKey: .type)
+        bands = try container.decode([Float].self, forKey: .bands)
+        notes = try container.decode(String.self, forKey: .notes)
+        notchFilters = try container.contains(.notchFilters)
+            ? container.decode([NotchFilter].self, forKey: .notchFilters) : []
+        guard notchFilters.allSatisfy(\.isValid) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .notchFilters, in: container, debugDescription: "Invalid room notch filter parameters"
+            )
+        }
     }
 }
 
@@ -601,7 +641,7 @@ public final class CalibrationEngine: ObservableObject {
     public func updateProfile(_ profile: CalibrationProfile) -> Bool {
         guard profile.isValid, let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return false }
         if activeProfile?.id == profile.id {
-            guard eqEngine.setCalibrationAdjustments(profile.bands) else { return false }
+            guard applyProfile(profile) else { return false }
             activeProfile = profile
         }
         profiles[index] = profile
@@ -613,7 +653,7 @@ public final class CalibrationEngine: ObservableObject {
     @MainActor
     func saveEditedProfile(_ profile: CalibrationProfile) async -> Bool {
         guard let original = profiles.first(where: { $0.id == profile.id }),
-              original.bands.count == 31, original.bands.allSatisfy(\.isFinite),
+              original.isValid,
               updateProfile(profile) else { return false }
         let state = profilePersistenceState
         return await withCheckedContinuation { continuation in
@@ -623,7 +663,7 @@ public final class CalibrationEngine: ObservableObject {
                     guard let self else { continuation.resume(returning: false); return }
                     if !saved, let index = self.profiles.firstIndex(where: { $0 == profile }) {
                         if self.activeProfile?.id == profile.id {
-                            if self.eqEngine.setCalibrationAdjustments(original.bands) {
+                            if self.applyProfile(original) {
                                 self.activeProfile = original
                             } else {
                                 dlog("Failed to restore calibration correction", category: .calibration)
@@ -650,8 +690,8 @@ public final class CalibrationEngine: ObservableObject {
 
     /// Activate profile
     public func activateProfile(_ profile: CalibrationProfile) {
-        guard eqEngine.setCalibrationAdjustments(profile.bands) else {
-            dlog("Invalid calibration profile bands", category: .calibration)
+        guard applyProfile(profile) else {
+            dlog("Invalid calibration profile", category: .calibration)
             return
         }
         activeProfile = profile
@@ -670,7 +710,16 @@ public final class CalibrationEngine: ObservableObject {
     public func deactivateProfile() {
         activeProfile = nil
         eqEngine.setCalibrationAdjustments(nil)
+        eqEngine.coreAudioEngine.clearRoomNotchFilters()
         dlog("🔄 Deactivated calibration profile", category: .calibration)
+    }
+
+    private func applyProfile(_ profile: CalibrationProfile) -> Bool {
+        guard profile.isValid, eqEngine.setCalibrationAdjustments(profile.bands) else { return false }
+        eqEngine.coreAudioEngine.applyRoomNotchFilters(profile.notchFilters.map {
+            (frequency: $0.frequency, gain: $0.gain, q: $0.q)
+        })
+        return true
     }
 
     // MARK: - Persistence

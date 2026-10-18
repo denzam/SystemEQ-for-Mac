@@ -920,6 +920,7 @@ class CalibrationSessionTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         view = (root / "SystemEQ for Mac/Features/CalibrationView.swift").read_text()
         engine = (root / "SystemEQ for Mac/Audio/CalibrationEngine.swift").read_text()
+        room = (root / "SystemEQ for Mac/Features/SubjectiveRoomTuningView.swift").read_text()
 
         def block(source, signature):
             start = source.index(signature)
@@ -933,6 +934,7 @@ class CalibrationSessionTests(unittest.TestCase):
         fixture = cls.TEMPLATE
         for marker, text in (
             ("__PROFILE__", block(engine, "public struct CalibrationProfile:")[0]),
+            ("__ROOM_SAVE__", block(room, "    private func saveProfile() {")[0]),
             ("__ENGINE_METHODS__", "\n".join(block(engine, signature)[0] for signature in (
                 "    public func startCalibration(mode:", "    public func endCalibration(mode:",
                 "    func equalLoudnessProfile(name:",
@@ -991,11 +993,17 @@ class CalibrationSessionTests(unittest.TestCase):
     def test_repeated_close_is_idle_and_new_session_can_start(self):
         self.check_session("restart")
 
+    def test_room_save_serializes_real_notch_parameters(self):
+        self.check_session("roomSave")
+
+    def test_room_save_rejects_invalid_notches_before_mutation(self):
+        self.check_session("roomInvalid")
+
     TEMPLATE = r"""
 import Foundation
 enum LogCategory { case calibration }
 func dlog(_ text: String, category: LogCategory) {}
-public enum CalibrationType: String, Codable { case equalLoudness }
+public enum CalibrationType: String, Codable { case equalLoudness, roomCorrection }
 public enum CalibrationMode { case clean, combined }
 __PROFILE__
 final class Core {
@@ -1022,6 +1030,17 @@ final class CalibrationEngine {
     __ENGINE_METHODS__
 }
 enum Tab { case equalLoudness, profiles }
+final class RoomWizard {
+    let calibration: CalibrationEngine
+    var profileName = "  Room  "
+    var showSaveProfileSheet = true
+    var appliedNotchFilters: [(frequency: Double, gain: Float, q: Float)] = [
+        (frequency: 63.5, gain: -6, q: 3.5), (frequency: 201.25, gain: -4, q: 7)
+    ]
+    init(_ calibration: CalibrationEngine) { self.calibration = calibration }
+    func save() { saveProfile() }
+    __ROOM_SAVE__
+}
 final class Wizard {
     let calibration = CalibrationEngine()
     var selectedCalibrationMode = CalibrationMode.clean
@@ -1125,6 +1144,42 @@ for mode in [CalibrationMode.clean, .combined] {
                 require(!engine.tonePlaying && !engine.comparisonMode, "close left playback active")
                 engine.tonePlaying = true
                 engine.comparisonMode = true
+            }
+        case "roomSave":
+            let room = RoomWizard(engine)
+            room.save()
+            require(engine.profiles.count == 1 && engine.updates == 1, "room profile not saved")
+            if let profile = engine.profiles.first {
+                require(profile.name == "Room" && profile.type == .roomCorrection, "room metadata changed")
+                require(profile.bands == [Float](repeating: 0, count: 31), "room changed band gains")
+                require(profile.notchFilters.count == 2, "room notches not saved")
+                if profile.notchFilters.count == 2 {
+                    require(profile.notchFilters[0].frequency == 63.5 && profile.notchFilters[0].gain == -6
+                        && profile.notchFilters[0].q == 3.5, "first notch parameters lost")
+                    require(profile.notchFilters[1].frequency == 201.25 && profile.notchFilters[1].gain == -4
+                        && profile.notchFilters[1].q == 7, "second notch parameters lost")
+                }
+                do {
+                    let data = try JSONEncoder().encode(profile)
+                    let loaded = try JSONDecoder().decode(CalibrationProfile.self, from: data)
+                    require(loaded == profile, "saved room JSON did not round trip")
+                } catch { errors.append("room serialization failed: \(error)") }
+            }
+            require(!room.showSaveProfileSheet && room.profileName.isEmpty, "room save did not reset sheet")
+        case "roomInvalid":
+            for invalid in 0..<6 {
+                let room = RoomWizard(engine)
+                switch invalid {
+                case 0: room.appliedNotchFilters[0].frequency = .nan
+                case 1: room.appliedNotchFilters[0].frequency = Double.greatestFiniteMagnitude
+                case 2: room.appliedNotchFilters[0].q = 0
+                case 3: room.appliedNotchFilters[0].gain = .infinity
+                case 4: room.appliedNotchFilters[0].frequency = -1
+                default: room.profileName = " "
+                }
+                room.save()
+                require(engine.profiles.isEmpty && engine.updates == 0, "invalid room save mutated profiles")
+                require(room.showSaveProfileSheet && !room.profileName.isEmpty, "invalid room save discarded progress")
             }
         default:
             errors.append("unknown scenario")
