@@ -888,6 +888,79 @@ struct AutoEQView: View {
         )
     }
 
+    static func fallbackIndexEntries(from data: Data) throws -> [OfflineIndexEntry] {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        var map: [String: OfflineIndexEntry] = [:]
+        let linkPattern = #"\[[^\n]+?\]\((\./[^\n]+?)\)(?:\s|$)"#
+        let re = try NSRegularExpression(pattern: linkPattern, options: [])
+        do {
+            let nsr = NSRange(text.startIndex..<text.endIndex, in: text)
+            re.enumerateMatches(in: text, options: [], range: nsr) { m, _, _ in
+                guard let m, m.numberOfRanges >= 2, let r1 = Range(m.range(at: 1), in: text) else { return }
+                let rel =
+                    String(text[r1])
+                let relPath = String(rel.dropFirst(2))
+                guard let decodedRelPath = relPath.removingPercentEncoding else { return }
+                let comps = decodedRelPath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                guard comps.count == 3,
+                      comps.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains(where: \.isNewline) }),
+                      ["in-ear", "over-ear", "earbud"].contains(where: {
+                          comps[1] == $0 || comps[1].hasSuffix(" " + $0)
+                      })
+                else { return }
+                guard let lastSeg = comps.last else { return }
+                guard !["md", "txt", "json", "csv", "png", "jpg", "jpeg", "pdf"].contains(
+                    (lastSeg as NSString).pathExtension.lowercased()
+                ) else { return }
+                var guessedBrand = ""
+                var guessedModel = lastSeg
+
+                let words = lastSeg.split(separator: " ").map(String.init)
+                if words.count >= 2 {
+                    let twoWords = words[0] + " " + words[1]
+                    let knownTwoWordBrands = [
+                        "Audio Technica",
+                        "Beats by",
+                        "Sony WH",
+                        "Bose QuietComfort",
+                        "Bang Olufsen"
+                    ]
+                    if knownTwoWordBrands.contains(where: { twoWords.hasPrefix($0) }), words.count > 2 {
+                        guessedBrand = twoWords
+                        guessedModel = words.dropFirst(2).joined(separator: " ")
+                    } else {
+                        guessedBrand = words[0]
+                        guessedModel = words.dropFirst().joined(separator: " ")
+                    }
+                }
+
+                let key = decodedRelPath
+
+                let source = comps[0]
+                let type = comps[1]
+                let basePath = "results/" + decodedRelPath
+
+                let entry = OfflineIndexEntry(
+                    brand: guessedBrand,
+                    model: guessedModel,
+                    source: source,
+                    type: type,
+                    pathFixedBandEQ: basePath + "/" + lastSeg + " FixedBandEQ.txt",
+                    pathGraphicEQ: basePath + "/" + lastSeg + " GraphicEQ.txt",
+                    pathParametric: basePath + "/" + lastSeg + " ParametricEQ.txt",
+                    pathReadme: basePath + "/README.md"
+                )
+
+                map[key] = entry
+            }
+        }
+        let entries = Array(map.values).filter { $0.pathReadme != nil || $0.pathParametric != nil }
+        guard !entries.isEmpty else { throw URLError(.cannotParseResponse) }
+        return entries
+    }
+
     private func buildOrUpdateIndex() async {
         guard !isBuildingIndex else { return }
         isBuildingIndex = true
@@ -900,70 +973,8 @@ struct AutoEQView: View {
             guard let http = resp as? HTTPURLResponse,
                   (200...299).contains(http.statusCode)
             else { indexStatusRaw = .error(localization.localized(.httpError)); return }
-            let text = String(data: data, encoding: .utf8) ?? ""
-            var map: [String: OfflineIndexEntry] = [:]
-            // Match markdown links: [text](./path) - capture everything between (./ and ) at end of line
-            // Pattern matches: ( then ./ then any chars until ) followed by space, newline, or end
-            let linkPattern = #"\((\./[^\n]+?)\)(?:\s|$)"#
-            if let re = try? NSRegularExpression(pattern: linkPattern, options: []) {
-                let nsr = NSRange(text.startIndex..<text.endIndex, in: text)
-                re.enumerateMatches(in: text, options: [], range: nsr) { m, _, _ in
-                    guard let m, m.numberOfRanges >= 2, let r1 = Range(m.range(at: 1), in: text) else { return }
-                    let rel =
-                        String(text[r1]) // e.g. "./oratory1990/over-ear/HIFIMAN%20HE400se%20(non-stealth%20magnet)"
-                    let relPath = String(rel.dropFirst(2)) // drop "./"
-                    // Decode the entire path first, then split
-                    let decodedRelPath = relPath.removingPercentEncoding ?? relPath
-                    let comps = decodedRelPath.split(separator: "/").map(String.init)
-                    guard comps.count >= 2 else { return }
-                    guard let lastSeg = comps.last else { return }
-                    // Покращений парсинг: зберігаємо повну назву як бренд+модель
-                    var guessedBrand = ""
-                    var guessedModel = lastSeg
-
-                    // Спробувати виділити бренд (перше слово або перші два слова)
-                    let words = lastSeg.split(separator: " ").map(String.init)
-                    if words.count >= 2 {
-                        // Перевірити чи перші 2 слова - це бренд (наприклад "Audio Technica")
-                        let twoWords = words[0] + " " + words[1]
-                        let knownTwoWordBrands = [
-                            "Audio Technica",
-                            "Beats by",
-                            "Sony WH",
-                            "Bose QuietComfort",
-                            "Bang Olufsen"
-                        ]
-                        if knownTwoWordBrands.contains(where: { twoWords.hasPrefix($0) }), words.count > 2 {
-                            guessedBrand = twoWords
-                            guessedModel = words.dropFirst(2).joined(separator: " ")
-                        } else {
-                            guessedBrand = words[0]
-                            guessedModel = words.dropFirst().joined(separator: " ")
-                        }
-                    }
-
-                    let key = decodedRelPath // unique per source/category/model
-
-                    // Визначаємо source та type з шляху
-                    let source = comps.count >= 1 ? comps[0] : "unknown"
-                    let type = comps.count >= 2 ? comps[1] : "unknown"
-                    let basePath = "results/" + decodedRelPath
-
-                    let entry = OfflineIndexEntry(
-                        brand: guessedBrand,
-                        model: guessedModel,
-                        source: source,
-                        type: type,
-                        pathFixedBandEQ: basePath + "/" + lastSeg + " FixedBandEQ.txt",
-                        pathGraphicEQ: basePath + "/" + lastSeg + " GraphicEQ.txt",
-                        pathParametric: basePath + "/" + lastSeg + " ParametricEQ.txt",
-                        pathReadme: basePath + "/README.md"
-                    )
-
-                    map[key] = entry
-                }
-            }
-            let out = Array(map.values).filter { $0.pathReadme != nil || $0.pathParametric != nil }
+            try Task.checkCancellation()
+            let out = try Self.fallbackIndexEntries(from: data)
             legacyRepository.saveOfflineIndex(out)
             offlineIndex = out
             indexTruncated = false
