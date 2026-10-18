@@ -914,6 +914,229 @@ if !errors.isEmpty { exit(1) }
 """
 
 
+class CalibrationSessionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent
+        view = (root / "SystemEQ for Mac/Features/CalibrationView.swift").read_text()
+        engine = (root / "SystemEQ for Mac/Audio/CalibrationEngine.swift").read_text()
+
+        def block(source, signature):
+            start = source.index(signature)
+            opening = source.index("{", start)
+            end, depth = opening + 1, 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end], source[opening + 1:end - 1]
+
+        fixture = cls.TEMPLATE
+        for marker, text in (
+            ("__PROFILE__", block(engine, "public struct CalibrationProfile:")[0]),
+            ("__ENGINE_METHODS__", "\n".join(block(engine, signature)[0] for signature in (
+                "    public func startCalibration(mode:", "    public func endCalibration(mode:",
+                "    func equalLoudnessProfile(name:",
+            ))),
+            ("__VIEW_METHODS__", "\n".join(block(view, signature)[0] for signature in (
+                "    private func finishCalibration()", "    private func saveProfile()",
+            ))),
+            ("__DISAPPEAR__", block(view, ".onDisappear {")[1]),
+            ("__PREVIOUS__", block(view[view.index("// Navigation"):], "Button(action: {")[1]),
+            ("__CONTINUE__", block(view[view.index("// Continue button"):], "Button(action: {")[1]),
+            ("__CANCEL__", block(view[view.index("private var newProfileSheet:"):],
+                                 "Button(localization.localized(.cancel)) {")[1]),
+        ):
+            if fixture.count(marker) != 1:
+                raise ValueError("Unexpected calibration fixture marker: " + marker)
+            fixture = fixture.replace(marker, text)
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-calibration-session-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        source = directory / "calibration.swift"
+        source.write_text(fixture)
+        cls.binary = directory / "calibration"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-module-cache-path", str(directory / "module-cache"),
+             str(source), "-o", str(cls.binary)], capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def check_session(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed["scenario"], scenario)
+        self.assertEqual(observed["cases"], 4)
+        self.assertEqual(observed["assertionErrors"], [])
+
+    def test_save_restores_eq_without_activating_profile(self):
+        self.check_session("save")
+
+    def test_close_restores_eq_and_stops_playback(self):
+        self.check_session("close")
+
+    def test_previous_band_keeps_session_and_back_ends_it(self):
+        self.check_session("back")
+
+    def test_back_allows_a_different_calibration_mode(self):
+        self.check_session("modeChange")
+
+    def test_cancel_profile_sheet_keeps_session_until_close(self):
+        self.check_session("cancel")
+
+    def test_invalid_profile_keeps_progress_until_close(self):
+        self.check_session("invalid")
+
+    def test_repeated_close_is_idle_and_new_session_can_start(self):
+        self.check_session("restart")
+
+    TEMPLATE = r"""
+import Foundation
+enum LogCategory { case calibration }
+func dlog(_ text: String, category: LogCategory) {}
+public enum CalibrationType: String, Codable { case equalLoudness }
+public enum CalibrationMode { case clean, combined }
+__PROFILE__
+final class Core {
+    var isEnabled = false
+    var changes: [Bool] = []
+    func setEnabled(_ value: Bool) { isEnabled = value; changes.append(value) }
+}
+final class AudioEngine { let coreAudioEngine = Core() }
+final class CalibrationEngine {
+    let eqEngine = AudioEngine()
+    var savedEQEnabled = false
+    var isCalibrating = false
+    var isReferenceSet = false
+    var profiles: [CalibrationProfile] = []
+    let standardFrequencies: [Double] = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200,
+        250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000,
+        6300, 8000, 10000, 12500, 16000, 20000]
+    var tonePlaying = false
+    var comparisonMode = false
+    var updates = 0
+    func stopTestTone() { tonePlaying = false }
+    func stopComparisonMode() { comparisonMode = false }
+    @discardableResult func updateProfile(_ profile: CalibrationProfile) -> Bool { updates += 1; return true }
+    __ENGINE_METHODS__
+}
+enum Tab { case equalLoudness, profiles }
+final class Wizard {
+    let calibration = CalibrationEngine()
+    var selectedCalibrationMode = CalibrationMode.clean
+    var profileName = "  Saved  "
+    var profileNotes = "Notes"
+    var testBands = [Float](repeating: 2, count: 31)
+    var isReferenceStep = true
+    var currentTestBandIndex = 0
+    var showNewProfileSheet = false
+    var selectedTab = Tab.equalLoudness
+    func save() { saveProfile() }
+    func disappear() { __DISAPPEAR__ }
+    func previous() { __PREVIOUS__ }
+    func begin() { __CONTINUE__ }
+    func cancel() { __CANCEL__ }
+    __VIEW_METHODS__
+}
+var errors: [String] = []
+func require(_ value: Bool, _ message: String) { if !value { errors.append(message) } }
+let scenario = CommandLine.arguments[1]
+var cases = 0
+for mode in [CalibrationMode.clean, .combined] {
+    for enabled in [false, true] {
+        cases += 1
+        let wizard = Wizard()
+        let engine = wizard.calibration
+        let core = engine.eqEngine.coreAudioEngine
+        core.isEnabled = enabled
+        wizard.selectedCalibrationMode = mode
+        wizard.begin()
+        require(engine.isCalibrating && !wizard.isReferenceStep, "session did not start")
+        require(core.isEnabled == (mode == .clean ? false : enabled), "wrong initial bypass")
+        engine.tonePlaying = true
+        engine.comparisonMode = true
+        switch scenario {
+        case "save", "restart":
+            wizard.showNewProfileSheet = true
+            wizard.save()
+            require(!engine.isCalibrating && core.isEnabled == enabled, "save did not restore session")
+            require(!engine.tonePlaying && !engine.comparisonMode, "save left playback active")
+            require(wizard.isReferenceStep && wizard.currentTestBandIndex == 0, "save did not reset step")
+            require(!wizard.showNewProfileSheet && wizard.selectedTab == .profiles, "save did not navigate")
+            require(wizard.profileName.isEmpty && wizard.profileNotes.isEmpty, "save metadata not reset")
+            require(wizard.testBands == [Float](repeating: 0, count: 31), "save gains not reset")
+            require(engine.profiles.count == 1 && engine.updates == 1, "profile not saved exactly once")
+            if let profile = engine.profiles.first {
+                require(profile.name == "Saved" && profile.notes == "Notes", "saved metadata changed")
+                require(profile.bands[17] == 0 && profile.bands[0] == 2, "saved gains changed")
+            }
+            if scenario == "restart" {
+                core.isEnabled = !enabled
+                let count = core.changes.count
+                wizard.disappear()
+                wizard.disappear()
+                require(core.isEnabled == !enabled && core.changes.count == count, "idle exit restored stale state")
+                wizard.begin()
+                require(engine.isCalibrating, "second session blocked")
+                wizard.disappear()
+                require(!engine.isCalibrating && core.isEnabled == !enabled, "second session restoration failed")
+            }
+        case "back", "modeChange":
+            wizard.currentTestBandIndex = 1
+            wizard.previous()
+            require(wizard.currentTestBandIndex == 0 && !wizard.isReferenceStep, "previous skipped step")
+            require(engine.isCalibrating, "previous ended session early")
+            wizard.previous()
+            require(wizard.isReferenceStep && !engine.isCalibrating, "back left session active")
+            require(core.isEnabled == enabled, "back did not restore bypass")
+            if scenario == "modeChange" {
+                wizard.selectedCalibrationMode = mode == .clean ? .combined : .clean
+                wizard.begin()
+                require(engine.isCalibrating, "mode change blocked next session")
+                require(core.isEnabled == (wizard.selectedCalibrationMode == .clean ? false : enabled), "mode change bypass wrong")
+                wizard.disappear()
+                require(core.isEnabled == enabled, "mode change restored wrong state")
+            }
+        case "cancel":
+            wizard.showNewProfileSheet = true
+            wizard.cancel()
+            require(!wizard.showNewProfileSheet && engine.isCalibrating && !wizard.isReferenceStep, "cancel ended session")
+            require(engine.profiles.isEmpty && engine.updates == 0, "cancel saved profile")
+            wizard.disappear()
+            require(!engine.isCalibrating && core.isEnabled == enabled, "close after cancel did not restore")
+        case "invalid":
+            wizard.showNewProfileSheet = true
+            for invalid in 0..<3 {
+                wizard.profileName = invalid == 0 ? " " : "Saved"
+                wizard.testBands = [Float](repeating: 2, count: invalid == 1 ? 30 : 31)
+                if invalid == 2 { wizard.testBands[0] = .nan }
+                wizard.save()
+                require(engine.isCalibrating && !wizard.isReferenceStep && wizard.showNewProfileSheet, "invalid save discarded progress")
+                require(engine.profiles.isEmpty && engine.updates == 0, "invalid profile saved")
+            }
+            wizard.disappear()
+            require(!engine.isCalibrating && core.isEnabled == enabled, "invalid save close did not restore")
+        case "close":
+            for reference in [false, true] {
+                wizard.isReferenceStep = reference
+                wizard.disappear()
+                require(!engine.isCalibrating && core.isEnabled == enabled, "close did not restore")
+                require(!engine.tonePlaying && !engine.comparisonMode, "close left playback active")
+                engine.tonePlaying = true
+                engine.comparisonMode = true
+            }
+        default:
+            errors.append("unknown scenario")
+        }
+    }
+}
+print(String(data: try! JSONSerialization.data(withJSONObject: ["scenario": scenario, "cases": cases,
+    "assertionErrors": errors], options: [.sortedKeys]), encoding: .utf8)!)
+if !errors.isEmpty { exit(1) }
+"""
+
+
 class TextureSamplerFixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

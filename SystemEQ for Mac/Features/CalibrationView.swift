@@ -108,10 +108,7 @@ struct CalibrationView: View {
             }
         }
         .onDisappear {
-            // Restore EQ state if calibration was interrupted
-            if !isReferenceStep {
-                calibration.endCalibration(mode: selectedCalibrationMode)
-            }
+            finishCalibration()
         }
         .sheet(isPresented: $showNewProfileSheet) {
             newProfileSheet
@@ -918,12 +915,13 @@ struct CalibrationView: View {
                 // Navigation
                 HStack(spacing: 12) {
                     Button(action: {
-                        calibration.stopTestTone()
-                        calibration.stopComparisonMode()
                         if currentTestBandIndex > 0 {
+                            calibration.stopTestTone()
+                            calibration.stopComparisonMode()
                             currentTestBandIndex -= 1
                         } else {
                             // Back to reference setup
+                            finishCalibration()
                             isReferenceStep = true
                         }
                     }) {
@@ -1376,6 +1374,12 @@ struct CalibrationView: View {
         calibrationStepIndices[localIndex]
     }
 
+    private func finishCalibration() {
+        calibration.stopTestTone()
+        calibration.stopComparisonMode()
+        calibration.endCalibration(mode: selectedCalibrationMode)
+    }
+
     private func saveProfile() {
         guard let profile = calibration.equalLoudnessProfile(name: profileName, bands: testBands, notes: profileNotes)
         else {
@@ -1383,6 +1387,7 @@ struct CalibrationView: View {
         }
         calibration.profiles.append(profile)
         calibration.updateProfile(profile)
+        finishCalibration()
 
         showNewProfileSheet = false
         profileName = ""
