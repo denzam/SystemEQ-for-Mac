@@ -79,6 +79,7 @@ final class ProcessTapEngine {
         case createTap(OSStatus)
         case createAggregate(OSStatus)
         case unsupportedTopology
+        case sampleRate
         case createIOProc(OSStatus)
         case startDevice(OSStatus)
     }
@@ -209,7 +210,10 @@ final class ProcessTapEngine {
         }
         inputSelection = selection
 
-        let sampleRate = nominalSampleRate(outputDeviceID)
+        guard let sampleRate = nominalSampleRate(outputDeviceID) else {
+            cleanup()
+            return .failure(.sampleRate)
+        }
         let bufferFrames = deviceBufferFrames(aggregateID)
         prepareProcessing(sampleRate, max(originalBufferFrames, bufferFrames))
 
@@ -259,7 +263,8 @@ final class ProcessTapEngine {
     private func installSampleRateListener(sampleRate: Double) {
         let deviceID = outputDeviceID
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self, self.nominalSampleRate(deviceID) != sampleRate else { return }
+            guard let self else { return }
+            if let observedRate = self.nominalSampleRate(deviceID), observedRate == sampleRate { return }
             self.onSampleRateChange?()
         }
         var address = AudioObjectPropertyAddress(
@@ -418,15 +423,23 @@ final class ProcessTapEngine {
         return value.takeRetainedValue() as String
     }
 
-    private func nominalSampleRate(_ deviceID: AudioDeviceID) -> Double {
+    private func nominalSampleRate(_ deviceID: AudioDeviceID) -> Double? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var sampleRate = 48000.0
+        var sampleRate = Double.nan
         var size = UInt32(MemoryLayout<Double>.size)
-        _ = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &sampleRate)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &sampleRate)
+        guard status == noErr, size == UInt32(MemoryLayout<Double>.size),
+              sampleRate.isFinite, sampleRate > 0 else {
+            dlog(
+                "Native sample rate unavailable: status=\(status), size=\(size), value=\(sampleRate)",
+                level: .error, category: .engine
+            )
+            return nil
+        }
         return sampleRate
     }
 

@@ -338,6 +338,299 @@ if !errors.isEmpty {
 }'''
 
 
+class NativeSampleRateMetadataTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "SystemEQ for Mac/Audio/ProcessTapEngine.swift").read_text()
+        methods = []
+        for signature in (
+            "    struct StartInfo {", "    enum StartError:", "    func start(",
+            "    func stop() {", "    private func cleanup() {", "    private func cleanupTap() {",
+            "    private func nominalSampleRate(", "    private func installSampleRateListener(",
+            "    private func removeSampleRateListener() {",
+        ):
+            start = source.index(signature)
+            end = source.index("{", start) + 1
+            depth = 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            methods.append(source[start:end])
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-native-metadata-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        probe = Path(cls.temp.name) / "native-metadata.swift"
+        cls.binary = Path(cls.temp.name) / "native-metadata"
+        probe.write_text(cls.TEMPLATE.replace("__NATIVE_METHODS__", "\n".join(methods)))
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-module-cache-path", str(Path(cls.temp.name) / "module-cache"),
+             str(probe), "-o", str(cls.binary)],
+            cwd=root, capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def check_native_metadata(self, mode, scenario, rate=48000):
+        result = subprocess.run(
+            [str(self.binary), mode, scenario, str(rate)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed["mode"], mode)
+        self.assertEqual(observed["scenario"], scenario)
+        return observed
+
+    def test_valid_native_rates_preserve_exact_values(self):
+        for rate in (44100, 48000, 96000):
+            with self.subTest(rate=rate):
+                self.check_native_metadata("start", "valid", rate)
+
+    def test_invalid_native_rate_metadata_aborts_before_processing(self):
+        for scenario in ("status", "empty", "nan", "infinity", "negativeInfinity", "zero", "negative", "short", "oversized"):
+            with self.subTest(scenario=scenario):
+                self.check_native_metadata("start", scenario)
+
+    def test_unchanged_native_rate_does_not_request_recovery(self):
+        self.check_native_metadata("listener", "valid")
+
+    def test_changed_or_invalid_native_rate_requests_recovery(self):
+        for scenario in ("changed", "status", "empty", "nan", "zero", "short", "oversized"):
+            with self.subTest(scenario=scenario):
+                self.check_native_metadata("listener", scenario)
+
+    TEMPLATE = r"""
+import Foundation
+
+typealias AudioObjectID = UInt32
+typealias AudioDeviceID = UInt32
+typealias OSStatus = Int32
+typealias AudioDeviceIOProcID = Int
+typealias AudioObjectPropertySelector = UInt32
+typealias AudioObjectPropertyListenerBlock = (UInt32, UnsafePointer<AudioObjectPropertyAddress>?) -> Void
+typealias CFDictionary = [String: Any]
+let noErr: OSStatus = 0
+let kAudioObjectUnknown: UInt32 = 0
+let kAudioDevicePropertyDeviceUID: UInt32 = 1
+let kAudioDevicePropertyBufferFrameSize: UInt32 = 2
+let kAudioDevicePropertyNominalSampleRate: UInt32 = 3
+let kAudioObjectPropertyScopeGlobal: UInt32 = 4
+let kAudioObjectPropertyElementMain: UInt32 = 5
+let kAudioTapPropertyFormat: UInt32 = 6
+let processTapIOProc = 0
+let kAudioAggregateDeviceNameKey = "name"
+let kAudioAggregateDeviceUIDKey = "uid"
+let kAudioAggregateDeviceIsPrivateKey = "private"
+let kAudioAggregateDeviceIsStackedKey = "stacked"
+let kAudioAggregateDeviceMainSubDeviceKey = "main"
+let kAudioAggregateDeviceSubDeviceListKey = "subdevices"
+let kAudioSubDeviceUIDKey = "deviceUID"
+let kAudioSubDeviceInputChannelsKey = "inputchannels"
+let kAudioAggregateDeviceTapListKey = "taps"
+let kAudioSubTapUIDKey = "tapUID"
+let kAudioSubTapDriftCompensationKey = "drift"
+let kAudioAggregateDeviceTapAutoStartKey = "autostart"
+struct AudioObjectPropertyAddress {
+    var mSelector: UInt32
+    var mScope: UInt32
+    var mElement: UInt32
+}
+struct AudioStreamBasicDescription {}
+enum Category { case engine }
+enum Level { case error, debug }
+func dlog(_ text: String, level: Level = .debug, category: Category) {}
+class CATapDescription {
+    enum MuteBehavior { case mutedWhenTapped }
+    var name = ""
+    var muteBehavior = MuteBehavior.mutedWhenTapped
+    var isPrivate = false
+    let uuid = UUID()
+    init(stereoGlobalTapButExcludeProcesses: [AudioObjectID]) {}
+}
+struct ProcessTapInputSelection {
+    let bufferIndex: Int
+    static func select(tapFormat: AudioStreamBasicDescription, aggregateFormats: [AudioStreamBasicDescription], aggregateChannelCounts: [UInt32], aggregateStartingChannels: [UInt32], physicalInputChannelCount: UInt32?) -> ProcessTapInputSelection? {
+        ProcessTapInputSelection(bufferIndex: 0)
+    }
+}
+var trace: [String] = []
+var reportedRate = 48000.0
+var reportedSize = UInt32(MemoryLayout<Double>.size)
+var metadataStatus: OSStatus = noErr
+var metadataWritesValue = true
+var installedListener: AudioObjectPropertyListenerBlock?
+func AudioObjectGetPropertyData(_ device: AudioObjectID, _ address: inout AudioObjectPropertyAddress, _ qualifierSize: UInt32, _ qualifier: UnsafeRawPointer?, _ size: inout UInt32, _ value: inout Double) -> OSStatus {
+    trace.append("metadata.read")
+    size = reportedSize
+    if metadataStatus == noErr && metadataWritesValue { value = reportedRate }
+    return metadataStatus
+}
+func AudioObjectSetPropertyData(_ device: AudioObjectID, _ address: inout AudioObjectPropertyAddress, _ qualifierSize: UInt32, _ qualifier: UnsafeRawPointer?, _ size: UInt32, _ value: inout UInt32) -> OSStatus { noErr }
+@discardableResult func AudioObjectAddPropertyListenerBlock(_ device: AudioObjectID, _ address: inout AudioObjectPropertyAddress, _ queue: DispatchQueue, _ block: @escaping AudioObjectPropertyListenerBlock) -> OSStatus {
+    trace.append("listener.add")
+    installedListener = block
+    return noErr
+}
+@discardableResult func AudioObjectRemovePropertyListenerBlock(_ device: AudioObjectID, _ address: inout AudioObjectPropertyAddress, _ queue: DispatchQueue, _ block: AudioObjectPropertyListenerBlock) -> OSStatus {
+    trace.append("listener.remove")
+    installedListener = nil
+    return noErr
+}
+func fakeCreateTap(_ description: CATapDescription, _ id: inout AudioObjectID) -> OSStatus {
+    trace.append("tap.create")
+    id = 10
+    return noErr
+}
+func AudioHardwareCreateAggregateDevice(_ description: CFDictionary, _ id: inout AudioObjectID) -> OSStatus {
+    trace.append("aggregate.create")
+    id = 20
+    return noErr
+}
+@discardableResult func AudioHardwareDestroyAggregateDevice(_ id: AudioObjectID) -> OSStatus {
+    trace.append("aggregate.destroy")
+    return noErr
+}
+@discardableResult func AudioHardwareDestroyProcessTap(_ id: AudioObjectID) -> OSStatus {
+    trace.append("tap.destroy")
+    return noErr
+}
+func AudioDeviceCreateIOProcID(_ device: AudioDeviceID, _ proc: Int, _ user: UnsafeMutableRawPointer, _ id: inout AudioDeviceIOProcID?) -> OSStatus {
+    trace.append("ioproc.create")
+    id = 30
+    return noErr
+}
+func AudioDeviceStart(_ device: AudioDeviceID, _ id: AudioDeviceIOProcID) -> OSStatus {
+    trace.append("device.start")
+    return noErr
+}
+@discardableResult func AudioDeviceStop(_ device: AudioDeviceID, _ id: AudioDeviceIOProcID) -> OSStatus {
+    trace.append("device.stop")
+    return noErr
+}
+@discardableResult func AudioDeviceDestroyIOProcID(_ device: AudioDeviceID, _ id: AudioDeviceIOProcID) -> OSStatus {
+    trace.append("ioproc.destroy")
+    return noErr
+}
+class ProcessTapEngine {
+    private let createTap = fakeCreateTap
+    private let deviceUIDProvider: ((AudioDeviceID) -> String?)? = { _ in "fixture-device" }
+    private var tapID: AudioObjectID = 0
+    private var aggregateID: AudioObjectID = 0
+    private var ioProcID: AudioDeviceIOProcID?
+    private var outputDeviceID: AudioDeviceID = 0
+    private var sampleRateListener: AudioObjectPropertyListenerBlock?
+    private var inputSelection = ProcessTapInputSelection(bufferIndex: 0)
+    var onSampleRateChange: (() -> Void)?
+    var resourcesRemain: Bool { tapID != 0 || aggregateID != 0 || ioProcID != nil || sampleRateListener != nil || outputDeviceID != 0 }
+    func stringProperty(_ objectID: AudioObjectID, selector: UInt32) -> String? { "fixture-device" }
+    func ownProcessObject() -> AudioObjectID? { nil }
+    func deviceBufferFrames(_ device: AudioDeviceID) -> UInt32 { 128 }
+    func audioFormat(_ objectID: AudioObjectID, selector: UInt32) -> AudioStreamBasicDescription? { AudioStreamBasicDescription() }
+    func inputStreams(_ device: AudioDeviceID) -> [AudioObjectID]? { [1] }
+    func streamFormats(_ streams: [AudioObjectID]) -> [AudioStreamBasicDescription]? { [AudioStreamBasicDescription()] }
+    func inputStreamChannelCounts(_ device: AudioDeviceID) -> [UInt32]? { [2] }
+    func streamStartingChannels(_ streams: [AudioObjectID]) -> [UInt32]? { [1] }
+    func inputChannelCount(_ device: AudioDeviceID) -> UInt32? { 0 }
+__NATIVE_METHODS__
+}
+let mode = CommandLine.arguments[1]
+let scenario = CommandLine.arguments[2]
+let validRate = Double(CommandLine.arguments[3])!
+func configure(_ scenario: String) {
+    reportedRate = validRate
+    reportedSize = UInt32(MemoryLayout<Double>.size)
+    metadataStatus = noErr
+    metadataWritesValue = true
+    switch scenario {
+    case "status": metadataStatus = -50
+    case "empty": metadataWritesValue = false
+    case "nan": reportedRate = .nan
+    case "infinity": reportedRate = .infinity
+    case "negativeInfinity": reportedRate = -.infinity
+    case "zero": reportedRate = 0
+    case "negative": reportedRate = -1
+    case "short": reportedSize = 4
+    case "oversized": reportedSize = 16
+    case "changed": reportedRate = 96000
+    default: break
+    }
+}
+let engine = ProcessTapEngine()
+var recoveryCount = 0
+engine.onSampleRateChange = { recoveryCount += 1 }
+var preparedRates: [Double] = []
+func prepare(_ rate: Double, _ frames: UInt32) {
+    trace.append("processor.prepare")
+    preparedRates.append(rate)
+}
+var errors: [String] = []
+func require(_ condition: Bool, _ text: String) { if !condition { errors.append(text) } }
+if mode == "start" { configure(scenario) }
+let result = engine.start(outputDeviceID: 77, prepareProcessing: prepare)
+let succeeded: Bool
+let sampleRate: String
+let errorText: String
+switch result {
+case let .success(info):
+    succeeded = true
+    sampleRate = String(info.sampleRate)
+    errorText = ""
+case let .failure(error):
+    succeeded = false
+    sampleRate = ""
+    errorText = String(describing: error)
+}
+if mode == "listener" {
+    require(succeeded, "listener seed start failed")
+    require(installedListener != nil, "sample rate listener absent")
+    configure(scenario)
+    installedListener?(0, nil)
+    require(recoveryCount == (scenario == "valid" ? 0 : 1), "listener recovery count mismatch")
+    require(trace.filter { $0 == "processor.prepare" }.count == 1, "listener rebuilt DSP inline")
+    require(trace.filter { $0 == "device.start" }.count == 1, "listener started device inline")
+} else if scenario == "valid" {
+    require(succeeded, "valid rate start failed")
+    require(sampleRate == String(validRate), "valid rate changed")
+    require(preparedRates == [validRate], "valid DSP rate mismatch")
+    require(trace.filter { $0 == "ioproc.create" }.count == 1, "valid IOProc count")
+    require(trace.filter { $0 == "device.start" }.count == 1, "valid start count")
+    require(trace.filter { $0 == "listener.add" }.count == 1, "valid listener count")
+} else {
+    require(!succeeded, "invalid metadata start succeeded")
+    require(errorText == "sampleRate", "invalid metadata wrong failure")
+    require(preparedRates.isEmpty, "invalid metadata prepared DSP")
+    require(!trace.contains("ioproc.create"), "invalid metadata created IOProc")
+    require(!trace.contains("device.start"), "invalid metadata started device")
+    require(!trace.contains("listener.add"), "invalid metadata installed listener")
+    require(trace.filter { $0 == "tap.create" }.count == 1, "tap creation count")
+    require(trace.filter { $0 == "aggregate.create" }.count == 1, "aggregate creation count")
+    require(trace.filter { $0 == "tap.destroy" }.count == 1, "tap destruction count")
+    require(trace.filter { $0 == "aggregate.destroy" }.count == 1, "aggregate destruction count")
+    require(!engine.resourcesRemain, "invalid metadata retains resources")
+}
+let beforeStop = trace
+let resourcesBeforeStop = engine.resourcesRemain
+engine.stop()
+require(!engine.resourcesRemain, "stop retains resources")
+require(installedListener == nil, "stop retains HAL listener")
+require(trace.filter { $0 == "tap.destroy" }.count == 1, "stop double destroys tap")
+require(trace.filter { $0 == "aggregate.destroy" }.count == 1, "stop double destroys aggregate")
+if succeeded {
+    require(trace.filter { $0 == "ioproc.destroy" }.count == 1, "stop IOProc destruction count")
+    require(trace.filter { $0 == "device.stop" }.count == 1, "stop device count")
+    require(trace.filter { $0 == "listener.remove" }.count == 1, "stop listener removal count")
+}
+let observed: [String: Any] = [
+    "mode": mode, "scenario": scenario, "succeeded": succeeded,
+    "sampleRate": sampleRate, "error": errorText, "preparedRates": preparedRates.map { String($0) },
+    "recoveryCount": recoveryCount, "resourcesBeforeStop": resourcesBeforeStop,
+    "traceBeforeStop": beforeStop, "trace": trace, "assertionErrors": errors
+]
+print(String(data: try! JSONSerialization.data(withJSONObject: observed, options: [.sortedKeys]), encoding: .utf8)!)
+if !errors.isEmpty { exit(1) }
+"""
+
+
 class TextureSamplerFixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
