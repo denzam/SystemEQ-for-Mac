@@ -21,8 +21,23 @@ struct DevicePresetRecord: Codable, Equatable {
 }
 
 @MainActor
-final class DevicePresetManager {
+final class DevicePresetManager: ObservableObject {
     static let shared = DevicePresetManager()
+
+    struct OutputContext: Equatable {
+        let outputUID: String
+        let revision: UInt64
+    }
+
+    struct AppliedPreset: Equatable {
+        let context: OutputContext
+        let record: DevicePresetRecord?
+    }
+
+    @Published private(set) var outputContext: OutputContext?
+    @Published private(set) var appliedPreset: AppliedPreset?
+
+    private var outputRevision: UInt64 = 0
 
     static let autoSwitchKey = "autoSwitchPresetPerDevice"
     private static let mapKey = "devicePresets.v1"
@@ -32,7 +47,7 @@ final class DevicePresetManager {
 
     private var cancellable: AnyCancellable?
 
-    private init() {}
+    init() {}
 
     /// Стежити за зміною пристрою виводу. Викликається один раз з AppStartup.
     func bind() {
@@ -68,9 +83,13 @@ final class DevicePresetManager {
     }
 
     func outputChanged(to uid: String, engine: AudioEngine) {
+        outputRevision += 1
+        let context = OutputContext(outputUID: uid, revision: outputRevision)
+        outputContext = context
         guard Self.defaults.bool(forKey: Self.autoSwitchKey) else { return }
         guard let record = loadMap()[uid] else {
             applyFlat(to: engine, outputUID: uid)
+            appliedPreset = AppliedPreset(context: context, record: nil)
             return
         }
         guard let mode = EQBandMode(rawValue: record.mode),
@@ -81,6 +100,7 @@ final class DevicePresetManager {
               record.preamp.isFinite,
               record.bassBoost.isFinite else {
             applyFlat(to: engine, outputUID: uid)
+            appliedPreset = AppliedPreset(context: context, record: nil)
             return
         }
 
@@ -96,6 +116,7 @@ final class DevicePresetManager {
             bassBoost: record.bassBoost
         )
         Self.defaults.set(record.descriptorJSON, forKey: "lastAppliedPresetJSON")
+        appliedPreset = AppliedPreset(context: context, record: record)
 
         dlog("Device preset applied for output \(uid)", level: .info, category: .preset)
     }
