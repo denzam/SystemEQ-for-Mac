@@ -29,6 +29,7 @@ struct SubjectiveRoomTuningView: View {
     @State private var gainMatchOffset: Float = 0.0
     @State private var abIsFiltered: Bool = true
     @State private var abTimer: Timer?
+    @State private var abComparisonProfile: CalibrationProfile?
 
     enum TuningTab: String, CaseIterable, FeatureTab, Identifiable {
         case tuning = "Tuning"
@@ -76,7 +77,13 @@ struct SubjectiveRoomTuningView: View {
             }
         }
         .onDisappear {
+            stopABComparison()
             sineSweep.stopSweep()
+        }
+        .onChange(of: calibration.activeProfile) { _ in
+            if isComparing, calibration.activeProfile != abComparisonProfile {
+                stopABComparison(restoreFilters: false)
+            }
         }
         .sheet(isPresented: $showAddResonanceSheet) {
             addResonanceSheet
@@ -810,6 +817,9 @@ struct SubjectiveRoomTuningView: View {
     }
 
     private func applyNotchFilters() {
+        if appliedNotchFilters.isEmpty {
+            stopABComparison(restoreFilters: false)
+        }
         let tuples = appliedNotchFilters.map { f in
             (frequency: Float(f.frequency), gain: f.gain, q: f.q)
         }
@@ -818,16 +828,18 @@ struct SubjectiveRoomTuningView: View {
     }
 
     private func toggleComparison() {
-        isComparing.toggle()
         if isComparing {
-            startABComparison()
-        } else {
             stopABComparison()
+        } else {
+            startABComparison()
         }
     }
 
     private func startABComparison() {
+        stopABComparison(restoreFilters: false)
         guard !appliedNotchFilters.isEmpty else { return }
+        isComparing = true
+        abComparisonProfile = calibration.activeProfile
 
         // Average notch gain across all filters to estimate loudness change
         let avgGain = appliedNotchFilters.map(\.gain).reduce(0, +) / Float(appliedNotchFilters.count)
@@ -836,23 +848,36 @@ struct SubjectiveRoomTuningView: View {
         abIsFiltered = true
         applyNotchFilters()
 
-        abTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            abIsFiltered.toggle()
-            if abIsFiltered {
-                let tuples = appliedNotchFilters.map { (frequency: Float($0.frequency), gain: $0.gain, q: $0.q) }
-                CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
-            } else {
-                CoreAudioEngine.shared.clearRoomNotchFilters()
+        abTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard isComparing, timer === abTimer else { return }
+                guard calibration.activeProfile == abComparisonProfile else {
+                    stopABComparison(restoreFilters: false)
+                    return
+                }
+                abIsFiltered.toggle()
+                if abIsFiltered {
+                    let tuples = appliedNotchFilters.map { (frequency: Float($0.frequency), gain: $0.gain, q: $0.q) }
+                    CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
+                } else {
+                    CoreAudioEngine.shared.clearRoomNotchFilters()
+                }
             }
         }
         dlog("▶️ A/B comparison started (2s interval, gain offset: \(gainMatchOffset) dB)", category: .calibration)
     }
 
-    private func stopABComparison() {
+    private func stopABComparison(restoreFilters: Bool = true) {
+        let shouldRestore = isComparing && restoreFilters && calibration.activeProfile == abComparisonProfile
+        isComparing = false
         abTimer?.invalidate()
         abTimer = nil
+        abComparisonProfile = nil
         abIsFiltered = true
-        applyNotchFilters()
+        gainMatchOffset = 0
+        if shouldRestore {
+            applyNotchFilters()
+        }
         dlog("⏹ A/B comparison stopped", category: .calibration)
     }
 

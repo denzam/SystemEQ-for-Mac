@@ -1192,6 +1192,317 @@ if !errors.isEmpty { exit(1) }
 """
 
 
+class RoomComparisonTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "SystemEQ for Mac/Features/SubjectiveRoomTuningView.swift").read_text()
+
+        def block(signature):
+            start = source.index(signature)
+            opening = source.index("{", start)
+            end, depth = opening + 1, 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end], source[opening + 1:end - 1]
+
+        header, profile_change = block(".onChange(of: calibration.activeProfile)")[1].split(" in\n", 1)
+        if header.strip() != "_":
+            raise ValueError("Unexpected profile change callback arguments")
+        fixture = cls.TEMPLATE
+        for marker, value in (
+            ("__METHODS__", "\n".join(block(signature)[0] for signature in (
+                "    private func applyNotchFilters()", "    private func toggleComparison()",
+                "    private func startABComparison()", "    private func stopABComparison(",
+            ))),
+            ("__DISAPPEAR__", block(".onDisappear {")[1]),
+            ("__PROFILE_CHANGE__", profile_change),
+        ):
+            if fixture.count(marker) != 1:
+                raise ValueError("Unexpected room comparison fixture marker: " + marker)
+            fixture = fixture.replace(marker, value)
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-room-comparison-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        path = directory / "comparison.swift"
+        path.write_text(fixture)
+        cls.binary = directory / "comparison"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-module-cache-path", str(directory / "module-cache"),
+             str(path), "-o", str(cls.binary)], capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def check_comparison(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed["scenario"], scenario)
+        self.assertEqual(observed["assertionErrors"], [])
+        self.assertEqual(observed["validTimers"], 0)
+
+    def test_close_stops_both_phases_and_late_callbacks(self):
+        self.check_comparison("phasesClose")
+
+    def test_idle_close_preserves_unrelated_profile_filters(self):
+        self.check_comparison("idleClose")
+
+    def test_empty_start_remains_idle(self):
+        self.check_comparison("emptyStart")
+
+    def test_repeated_start_rejects_previous_timer_callbacks(self):
+        self.check_comparison("doubleStart")
+
+    def test_last_filter_removal_ends_comparison(self):
+        self.check_comparison("removeFilters")
+
+    def test_comparison_restarts_after_stop_and_close(self):
+        self.check_comparison("restart")
+
+    def test_new_or_edited_profile_cancels_without_overwriting_dsp(self):
+        self.check_comparison("profileEvent")
+
+    def test_close_before_profile_notification_preserves_new_profile(self):
+        self.check_comparison("profileRaceClose")
+
+    def test_tick_before_profile_notification_preserves_new_profile(self):
+        self.check_comparison("profileRaceTick")
+
+    def test_delayed_profile_notification_preserves_restarted_comparison(self):
+        self.check_comparison("profileNotificationAfterRestart")
+
+    def test_foundation_runloop_has_no_writes_after_close(self):
+        self.check_comparison("realRunLoop")
+
+    TEMPLATE = r"""
+import Foundation
+enum LogCategory { case calibration }
+func dlog(_ text: String, category: LogCategory) {}
+struct NotchFilterConfig: Equatable {
+    var frequency: Double
+    var gain: Float
+    var q: Float
+}
+struct CalibrationProfile: Equatable {
+    var id: Int
+    var revision = 0
+}
+final class CalibrationEngine { var activeProfile: CalibrationProfile? }
+final class Sweep {
+    var stops = 0
+    func stopSweep() { stops += 1 }
+}
+final class CoreAudioEngine {
+    static let shared = CoreAudioEngine()
+    var filters: [NotchFilterConfig] = []
+    var writes = 0
+    func applyRoomNotchFilters(_ values: [(frequency: Float, gain: Float, q: Float)]) {
+        filters = values.map { .init(frequency: Double($0.frequency), gain: $0.gain, q: $0.q) }
+        writes += 1
+    }
+    func clearRoomNotchFilters() { filters = []; writes += 1 }
+}
+@propertyWrapper struct State<Value> {
+    final class Storage {
+        var value: Value
+        init(_ value: Value) { self.value = value }
+    }
+    let storage: Storage
+    init(wrappedValue: Value) { storage = Storage(wrappedValue) }
+    var wrappedValue: Value {
+        get { storage.value }
+        nonmutating set { storage.value = newValue }
+    }
+}
+final class Timer {
+    static var created: [Timer] = []
+    let callback: (Timer) -> Void
+    var native: Foundation.Timer?
+    let requestedInterval: TimeInterval
+    let repeats: Bool
+    var isValid: Bool { native?.isValid ?? false }
+    init(interval: TimeInterval, repeats: Bool, callback: @escaping (Timer) -> Void) {
+        requestedInterval = interval
+        self.repeats = repeats
+        self.callback = callback
+    }
+    static func scheduledTimer(withTimeInterval interval: TimeInterval, repeats: Bool,
+                               block: @escaping (Timer) -> Void) -> Timer {
+        let timer = Timer(interval: interval, repeats: repeats, callback: block)
+        timer.native = Foundation.Timer.scheduledTimer(withTimeInterval: 0.01, repeats: repeats) { [weak timer] _ in
+            guard let timer else { return }
+            timer.callback(timer)
+        }
+        created.append(timer)
+        return timer
+    }
+    func invalidate() { native?.invalidate() }
+    func fire() { native?.fire() }
+    func deliverQueued() { callback(self) }
+}
+struct RoomView {
+    let calibration = CalibrationEngine()
+    let sineSweep = Sweep()
+    @State var appliedNotchFilters: [NotchFilterConfig] = []
+    @State var isComparing = false
+    @State var gainMatchOffset: Float = 0
+    @State var abIsFiltered = true
+    @State var abTimer: Timer?
+    @State var abComparisonProfile: CalibrationProfile?
+    func start() { startABComparison() }
+    func stop() { stopABComparison() }
+    func toggle() { toggleComparison() }
+    func disappear() { __DISAPPEAR__ }
+    func profileChanged() { __PROFILE_CHANGE__ }
+    func editFilters(_ filters: [NotchFilterConfig]) { appliedNotchFilters = filters; applyNotchFilters() }
+    __METHODS__
+}
+let core = CoreAudioEngine.shared
+let local: [NotchFilterConfig] = [.init(frequency: 63.5, gain: -6, q: 4), .init(frequency: 250, gain: -10, q: 7)]
+let external: [NotchFilterConfig] = [.init(frequency: 125, gain: -3, q: 5)]
+var errors: [String] = []
+func require(_ value: Bool, _ message: String) { if !value { errors.append(message) } }
+func begin(_ profile: CalibrationProfile? = nil) -> RoomView {
+    let view = RoomView()
+    view.calibration.activeProfile = profile
+    view.appliedNotchFilters = local
+    view.start()
+    require(view.isComparing && view.abTimer?.isValid == true, "start not active")
+    require(core.filters == local, "start did not apply local filters")
+    return view
+}
+func requireIdle(_ view: RoomView) {
+    require(!view.isComparing && view.abTimer == nil && view.abComparisonProfile == nil,
+            "comparison still owns timer/profile")
+    require(view.abIsFiltered && view.gainMatchOffset == 0, "idle flags stale")
+}
+func selectExternal(_ view: RoomView, _ profile: CalibrationProfile?) {
+    core.filters = external
+    view.calibration.activeProfile = profile
+}
+let scenario = CommandLine.arguments[1]
+switch scenario {
+case "phasesClose":
+    for bypassed in [false, true] {
+        let view = begin()
+        let timer = view.abTimer!
+        if bypassed { timer.fire(); require(core.filters.isEmpty, "tick did not bypass") }
+        view.disappear()
+        requireIdle(view)
+        require(core.filters == local && !timer.isValid, "close did not settle filtered state")
+        require(view.sineSweep.stops == 1, "sweep not stopped")
+        let writes = core.writes
+        timer.fire(); timer.deliverQueued(); view.disappear()
+        require(core.writes == writes, "late callback or repeated close wrote DSP")
+    }
+case "idleClose":
+    for filters in [[], local] {
+        let view = RoomView()
+        view.appliedNotchFilters = filters
+        selectExternal(view, CalibrationProfile(id: 10))
+        let writes = core.writes
+        view.disappear()
+        requireIdle(view)
+        require(core.filters == external && core.writes == writes, "idle close overwrote external profile")
+    }
+case "emptyStart":
+    let view = RoomView()
+    selectExternal(view, CalibrationProfile(id: 10))
+    let writes = core.writes
+    view.toggle(); requireIdle(view)
+    view.start(); view.stop(); view.disappear(); requireIdle(view)
+    require(Timer.created.isEmpty && core.writes == writes && core.filters == external, "empty start wrote DSP/timer")
+case "doubleStart":
+    let view = begin()
+    let first = view.abTimer!
+    view.start()
+    let second = view.abTimer!
+    require(first !== second && !first.isValid && second.isValid, "duplicate timer remains active")
+    let writes = core.writes
+    first.deliverQueued()
+    require(core.writes == writes && view.abIsFiltered, "old callback altered new comparison")
+    second.fire()
+    require(!view.abIsFiltered && core.filters.isEmpty, "new timer did not run")
+    view.stop(); requireIdle(view)
+    require(core.filters == local, "stop did not restore filters")
+case "removeFilters":
+    let view = begin()
+    let timer = view.abTimer!
+    timer.fire()
+    view.editFilters([local[0]])
+    require(view.isComparing && timer.isValid && core.filters == [local[0]], "partial removal ended comparison")
+    view.editFilters([])
+    requireIdle(view)
+    require(core.filters.isEmpty && !timer.isValid, "last removal did not clear/stop")
+    let writes = core.writes
+    timer.deliverQueued()
+    require(core.writes == writes, "late removal callback wrote DSP")
+case "restart":
+    let view = RoomView()
+    view.appliedNotchFilters = local
+    view.toggle(); require(view.isComparing, "toggle did not start")
+    view.toggle(); requireIdle(view)
+    view.toggle(); require(view.isComparing, "toggle did not restart")
+    view.disappear(); requireIdle(view)
+    view.start(); require(view.isComparing, "reopen did not restart")
+    view.stop(); requireIdle(view)
+case "profileEvent":
+    for profile in [CalibrationProfile(id: 20), CalibrationProfile(id: 10, revision: 1), nil] {
+        let view = begin(CalibrationProfile(id: 10))
+        let timer = view.abTimer!
+        selectExternal(view, profile)
+        let writes = core.writes
+        view.profileChanged(); requireIdle(view)
+        timer.deliverQueued(); view.disappear()
+        require(!timer.isValid && core.writes == writes && core.filters == external, "profile event overwrote DSP")
+    }
+case "profileRaceClose", "profileRaceTick":
+    let view = begin()
+    let timer = view.abTimer!
+    selectExternal(view, CalibrationProfile(id: 10))
+    let writes = core.writes
+    if scenario == "profileRaceClose" { view.disappear() } else { timer.fire() }
+    requireIdle(view)
+    require(!timer.isValid && core.writes == writes && core.filters == external, "profile handoff race overwrote DSP")
+case "profileNotificationAfterRestart":
+    let view = begin(CalibrationProfile(id: 10))
+    let previous = view.abTimer!
+    selectExternal(view, CalibrationProfile(id: 20))
+    previous.fire()
+    requireIdle(view)
+    view.start()
+    let current = view.abTimer!
+    let writes = core.writes
+    view.profileChanged()
+    require(view.isComparing && current.isValid && view.abTimer === current, "old notification cancelled new comparison")
+    require(core.writes == writes && view.abIsFiltered, "old notification changed new DSP/state")
+    current.fire()
+    require(core.filters.isEmpty && !view.abIsFiltered, "new comparison did not keep running")
+    view.stop(); requireIdle(view)
+case "realRunLoop":
+    let view = begin()
+    let writes = core.writes
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.04))
+    require(core.writes > writes, "Foundation timer did not fire")
+    view.disappear()
+    let stoppedWrites = core.writes
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    require(core.writes == stoppedWrites, "Foundation timer wrote after close")
+    requireIdle(view)
+default:
+    errors.append("unknown scenario")
+}
+require(Timer.created.allSatisfy { $0.requestedInterval == 2 && $0.repeats }, "timer schedule changed")
+let validTimers = Timer.created.filter(\.isValid).count
+require(validTimers == 0, "orphan timers remain")
+print(String(data: try! JSONSerialization.data(withJSONObject: ["scenario": scenario,
+    "validTimers": validTimers, "assertionErrors": errors], options: [.sortedKeys]), encoding: .utf8)!)
+if !errors.isEmpty { exit(1) }
+"""
+
+
 class TextureSamplerFixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
