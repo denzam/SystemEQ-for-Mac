@@ -23,6 +23,321 @@ class ToolingPlatformTests(unittest.TestCase):
                 self.assertEqual("Scripts/test_runtime_tools.py" in scripts, platform == "darwin")
 
 
+class CoreAudioSetupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-coreaudio-setup-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "SystemEQ for Mac/Audio/CoreAudioEngine.swift").read_text()
+        fixture = cls.fixture()
+        for marker, signature in (
+            ("__SETUP_METHOD__", "    public func setup("),
+            ("__CLEANUP_METHOD__", "    private func cleanup() {"),
+        ):
+            start = source.index(signature)
+            cursor = source.index("{", start)
+            depth = 1
+            end = cursor + 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            if fixture.count(marker) != 1:
+                raise ValueError("Unexpected fixture marker: " + marker)
+            fixture = fixture.replace(marker, source[start:end])
+        path = directory / "setup.swift"
+        path.write_text(fixture)
+        cls.binary = directory / "setup-tests"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-module-cache-path", str(directory / "module-cache"),
+             str(path), "-o", str(cls.binary)],
+            capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def run_setup(self, status, stage):
+        result = subprocess.run(
+            [str(self.binary), str(status), stage],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed["status"], status)
+        self.assertEqual(observed["stage"], stage)
+        return observed
+
+    def test_input_callback_failure_aborts_setup_and_releases_input(self):
+        for status in (-50, -10879, -666, 1):
+            with self.subTest(status=status):
+                observed = self.run_setup(status, "inputCallback")
+                self.assertFalse(observed["isSetupComplete"])
+                self.assertEqual(observed["cleanupCount"], 2)
+                self.assertEqual(observed["restoreCount"], 1)
+                self.assertEqual(observed["readyCount"], 0)
+                self.assertIsNone(observed["inputUnit"])
+                self.assertIsNone(observed["outputUnit"])
+
+    def test_output_callback_failure_releases_both_units(self):
+        observed = self.run_setup(-50, "outputRenderCallback")
+        self.assertFalse(observed["isSetupComplete"])
+        self.assertEqual(observed["failures"], ["outputRenderCallback"])
+        self.assertEqual(observed["trace"].count("unit.dispose.2"), 1)
+
+    def test_input_initialization_failure_releases_both_units(self):
+        observed = self.run_setup(-50, "inputInitialize")
+        self.assertFalse(observed["isSetupComplete"])
+        self.assertEqual(observed["failures"], ["inputInitialize"])
+        self.assertEqual(observed["trace"].count("unit.dispose.2"), 1)
+
+    def test_successful_setup_keeps_units_and_reports_ready(self):
+        observed = self.run_setup(0, "none")
+        self.assertTrue(observed["isSetupComplete"])
+        self.assertEqual(observed["readyCount"], 1)
+        self.assertEqual(observed["failedCount"], 0)
+        self.assertEqual(observed["restoreCount"], 0)
+
+    @staticmethod
+    def fixture():
+        return r'''import Foundation
+
+typealias AudioDeviceID = UInt32
+typealias AudioUnit = Int
+let noErr: Int32 = 0
+let kAudioFormatLinearPCM: UInt32 = 1
+let kAudioFormatFlagIsFloat: UInt32 = 1
+let kAudioFormatFlagIsPacked: UInt32 = 2
+let kAudioFormatFlagIsNonInterleaved: UInt32 = 4
+let kAudioUnitType_Output: UInt32 = 1
+let kAudioUnitSubType_HALOutput: UInt32 = 2
+let kAudioUnitManufacturer_Apple: UInt32 = 3
+let kAudioOutputUnitProperty_EnableIO: UInt32 = 4
+let kAudioOutputUnitProperty_CurrentDevice: UInt32 = 5
+let kAudioOutputUnitProperty_SetInputCallback: UInt32 = 6
+let kAudioUnitProperty_StreamFormat: UInt32 = 7
+let kAudioUnitProperty_MaximumFramesPerSlice: UInt32 = 8
+let kAudioUnitProperty_ShouldAllocateBuffer: UInt32 = 9
+let kAudioUnitProperty_SetRenderCallback: UInt32 = 10
+let kAudioUnitScope_Input: UInt32 = 11
+let kAudioUnitScope_Output: UInt32 = 12
+let kAudioUnitScope_Global: UInt32 = 13
+let inputCaptureCallbackFunction = 1
+let renderCallbackFunction = 2
+
+struct AudioStreamBasicDescription {
+    var mSampleRate: Double = 48000
+    var mFormatID: UInt32 = 1
+    var mFormatFlags: UInt32 = 7
+    var mBytesPerPacket: UInt32 = 4
+    var mFramesPerPacket: UInt32 = 1
+    var mBytesPerFrame: UInt32 = 4
+    var mChannelsPerFrame: UInt32 = 2
+    var mBitsPerChannel: UInt32 = 32
+    var mReserved: UInt32 = 0
+}
+struct AudioComponentDescription {
+    var componentType: UInt32
+    var componentSubType: UInt32
+    var componentManufacturer: UInt32
+    var componentFlags: UInt32
+    var componentFlagsMask: UInt32
+}
+struct AURenderCallbackStruct {
+    var inputProc: Int
+    var inputProcRefCon: UnsafeMutableRawPointer?
+}
+enum Category { case engine }
+enum Level { case error, debug }
+func dlog(_ text: String, level: Level = .debug, category: Category) {}
+var trace: [String] = []
+var injectedStatus: Int32 = 0
+var injectedStage = ""
+var nextUnit = 0
+func AudioComponentFindNext(_ prior: Int?, _ desc: inout AudioComponentDescription) -> Int? {
+    trace.append("component.find")
+    return 1
+}
+func AudioComponentInstanceNew(_ comp: Int, _ unit: inout AudioUnit?) -> Int32 {
+    nextUnit += 1
+    unit = nextUnit
+    trace.append("unit.create.\(nextUnit)")
+    return noErr
+}
+func AudioUnitSetProperty<T>(_ unit: AudioUnit, _ property: UInt32, _ scope: UInt32, _ element: UInt32, _ data: inout T, _ size: UInt32) -> Int32 {
+    trace.append("property.\(unit).\(property)")
+    if property == kAudioOutputUnitProperty_SetInputCallback && injectedStage == "inputCallback" { return injectedStatus }
+    if property == kAudioUnitProperty_SetRenderCallback && injectedStage == "outputRenderCallback" { return injectedStatus }
+    return noErr
+}
+func AudioUnitGetProperty(_ unit: AudioUnit, _ property: UInt32, _ scope: UInt32, _ element: UInt32, _ data: inout AudioStreamBasicDescription, _ size: inout UInt32) -> Int32 {
+    data = AudioStreamBasicDescription()
+    size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+    return noErr
+}
+func AudioUnitInitialize(_ unit: AudioUnit) -> Int32 {
+    trace.append("unit.initialize.\(unit)")
+    return unit == 1 && injectedStage == "inputInitialize" ? injectedStatus : noErr
+}
+@discardableResult func AudioOutputUnitStop(_ unit: AudioUnit) -> Int32 {
+    trace.append("unit.stop.\(unit)")
+    return noErr
+}
+@discardableResult func AudioUnitUninitialize(_ unit: AudioUnit) -> Int32 {
+    trace.append("unit.uninitialize.\(unit)")
+    return noErr
+}
+@discardableResult func AudioComponentInstanceDispose(_ unit: AudioUnit) -> Int32 {
+    trace.append("unit.dispose.\(unit)")
+    return noErr
+}
+class DiagnosticEventStore {
+    static let shared = DiagnosticEventStore()
+    var events: [String] = []
+    func record(_ event: String, details: [String: String] = [:]) {
+        events.append(event)
+        trace.append(event)
+    }
+}
+enum AudioClientFormatValidation {
+    static func isValidHardwareFormat(_ format: AudioStreamBasicDescription, size: UInt32) -> Bool { true }
+}
+enum AudioSampleRateNegotiation {
+    enum Result { case success(Double) }
+    static func resolve(preferredRate: Double?, read: () -> (Double, Double), setInput: (Double) -> Bool, setOutput: (Double) -> Bool, pause: () -> Void) -> Result {
+        trace.append("rates.negotiate")
+        return .success(48000)
+    }
+    static func waitForRate(_ rate: Double, read: () -> (Double, Double), pause: () -> Void) -> Result { .success(rate) }
+}
+class Lock {
+    func lock() { trace.append("cleanup") }
+    func unlock() {}
+}
+struct AudioBuffer { var mData: UnsafeMutableRawPointer? }
+class Buffers {
+    var values: [AudioBuffer] = []
+    var count: Int { values.count }
+    subscript(index: Int) -> AudioBuffer {
+        get { values[index] }
+        set { values[index] = newValue }
+    }
+}
+class RingBuffer {
+    var isAllocated = false
+    func deallocate() { isAllocated = false; trace.append("ring.deallocate") }
+}
+class Engine {
+    var inputDeviceID: AudioDeviceID = 0
+    var outputDeviceID: AudioDeviceID = 0
+    var isRunning = false
+    var isSetupComplete = false
+    var currentSampleRate: Double = 0
+    var channelCount: UInt32 = 0
+    var inputUnit: AudioUnit?
+    var outputUnit: AudioUnit?
+    var inputBufferList: UnsafeMutablePointer<Int>?
+    var outputBufferList: UnsafeMutablePointer<Int>?
+    var inputABL: Buffers?
+    var outputABL: Buffers?
+    var outputScratchLeft: UnsafeMutablePointer<Float>?
+    var outputScratchRight: UnsafeMutablePointer<Float>?
+    var allocatedFrameCapacity: UInt32 = 0
+    let cleanupLock = Lock()
+    let ringBuffer = RingBuffer()
+    var failures: [String] = []
+    func stop() { isRunning = false }
+    func restoreDeviceSampleRates() { trace.append("rates.restore") }
+    func captureOriginalSampleRate(_ device: AudioDeviceID) -> Bool { trace.append("rates.capture.\(device)"); return true }
+    func recordSetupFailure(_ stage: String, status: Int32? = nil) { failures.append(stage); trace.append("failure.\(stage)") }
+    func deviceSampleRates() -> (Double, Double) { (48000, 48000) }
+    func setDeviceSampleRate(_ device: AudioDeviceID, rate: Double) -> Bool { true }
+    func rebuildActiveEQFilter(sampleRate: Double) {}
+    func rebuildRoomFilter(sampleRate: Double) {}
+    @discardableResult func setDeviceBufferFrameSize(_ device: AudioDeviceID, frames: UInt32) -> Bool { true }
+    func deviceBufferFrameSize(_ device: AudioDeviceID) -> UInt32? { 256 }
+    func logDeviceBufferInfo(_ device: AudioDeviceID, label: String) {}
+    func setClientFormat(_ unit: AudioUnit, scope: UInt32, element: UInt32, format: AudioStreamBasicDescription) -> Bool { true }
+    func verifyClientFormat(_ unit: AudioUnit, scope: UInt32, element: UInt32, expected: AudioStreamBasicDescription) -> Bool { true }
+    func readMaximumFramesPerSlice(_ unit: AudioUnit?) -> UInt32? { 4096 }
+    func allocateInputBuffer(maxFrames: UInt32, channels: UInt32) {
+        inputBufferList = malloc(MemoryLayout<Int>.size)!.bindMemory(to: Int.self, capacity: 1)
+        inputABL = Buffers()
+        allocatedFrameCapacity = maxFrames
+        trace.append("allocate.input")
+    }
+    func allocateOutputBuffer(maxFrames: UInt32, channels: UInt32) {
+        outputBufferList = malloc(MemoryLayout<Int>.size)!.bindMemory(to: Int.self, capacity: 1)
+        outputABL = Buffers()
+        outputScratchLeft = .allocate(capacity: 1)
+        outputScratchRight = .allocate(capacity: 1)
+        trace.append("allocate.output")
+    }
+    func allocateRingBuffer(capacityFrames: Int, channels: UInt32) { ringBuffer.isAllocated = true; trace.append("allocate.ring") }
+    func releaseFixture() { cleanup() }
+__SETUP_METHOD__
+__CLEANUP_METHOD__
+}
+let status = Int32(CommandLine.arguments[1])!
+injectedStatus = status
+let stage = CommandLine.arguments[2]
+injectedStage = stage
+let engine = Engine()
+engine.setup(inputDevice: 11, outputDevice: 22, preferredSampleRate: 48000)
+let events = DiagnosticEventStore.shared.events
+let observed: [String: Any] = [
+    "status": status,
+    "stage": stage,
+    "isSetupComplete": engine.isSetupComplete,
+    "inputUnit": engine.inputUnit as Any? ?? NSNull(),
+    "outputUnit": engine.outputUnit as Any? ?? NSNull(),
+    "failures": engine.failures,
+    "events": events,
+    "trace": trace,
+    "cleanupCount": trace.filter { $0 == "cleanup" }.count,
+    "restoreCount": trace.filter { $0 == "rates.restore" }.count,
+    "readyCount": events.filter { $0 == "engine.setup.ready" }.count,
+    "failedCount": events.filter { $0 == "engine.setup.failed" }.count
+]
+print(String(data: try! JSONSerialization.data(withJSONObject: observed, options: [.sortedKeys]), encoding: .utf8)!)
+var errors: [String] = []
+func require(_ condition: Bool, _ text: String) { if !condition { errors.append(text) } }
+if status == noErr {
+    require(engine.isSetupComplete, "healthy setup incomplete")
+    require(engine.failures.isEmpty, "healthy failure reported")
+    require(trace.filter { $0 == "cleanup" }.count == 1, "healthy unexpected cleanup")
+    require(!trace.contains("rates.restore"), "healthy rates restored")
+    require(events.filter { $0 == "engine.setup.ready" }.count == 1, "healthy ready count")
+    require(!events.contains("engine.setup.failed"), "healthy failed event")
+    require(trace.contains("unit.create.2"), "healthy output absent")
+    require(trace.contains("unit.initialize.1") && trace.contains("unit.initialize.2"), "healthy initialization absent")
+} else {
+    require(!engine.isSetupComplete, "failed setup marked complete")
+    require(engine.failures == [stage], "failure stage mismatch")
+    require(engine.inputUnit == nil && engine.outputUnit == nil, "failed setup retains units")
+    require(!events.contains("engine.setup.ready"), "failed setup ready event")
+    require(events.filter { $0 == "engine.setup.failed" }.count == 1, "failed event count")
+    require(trace.filter { $0 == "cleanup" }.count == 2, "deferred cleanup count")
+    require(trace.filter { $0 == "rates.restore" }.count == 1, "rate restoration count")
+    if stage == "inputCallback" {
+        require(!trace.contains("unit.create.2"), "output created after callback failure")
+        require(!trace.contains(where: { $0.hasPrefix("unit.initialize.") }), "unit initialized after callback failure")
+    } else {
+        require(trace.filter { $0 == "unit.dispose.2" }.count == 1, "output disposal count")
+        require(trace.contains("unit.create.2"), "output creation missing")
+        require(!trace.contains("unit.initialize.2"), "output initialized after failure")
+        require(trace.contains("unit.initialize.1") == (stage == "inputInitialize"), "input initialize path mismatch")
+    }
+    require(!trace.contains(where: { $0.hasPrefix("allocate.") }), "buffers allocated after callback failure")
+    require(trace.filter { $0 == "unit.dispose.1" }.count == 1, "input disposal count")
+}
+engine.releaseFixture()
+if !errors.isEmpty {
+    FileHandle.standardError.write(Data((errors.joined(separator: "\n") + "\n").utf8))
+    exit(1)
+}'''
+
+
 class TextureSamplerFixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

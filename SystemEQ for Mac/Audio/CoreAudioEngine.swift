@@ -998,6 +998,7 @@ public final class CoreAudioEngine: ObservableObject {
             } else {
                 recordSetupFailure("inputCallback", status: statusCB)
                 dlog("❌ INPUT: SetInputCallback failed — status=\(statusCB)", category: .engine)
+                return
             }
         }
 
