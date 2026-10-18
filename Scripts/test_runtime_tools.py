@@ -631,6 +631,289 @@ if !errors.isEmpty { exit(1) }
 """
 
 
+class RoutingActivityStatusTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "SystemEQ for Mac/Audio/AudioRouter.swift").read_text()
+        methods = []
+        for signature in (
+            "    init(\n        isTestHost: Bool,", "    private func bindRoutingStatus() {",
+            "    private func updateStatus() {", "    public var isRoutingOwned: Bool {",
+        ):
+            start = source.index(signature)
+            end = source.index("{", start) + 1
+            depth = 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            methods.append(source[start:end])
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-routing-status-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        probe = Path(cls.temp.name) / "routing-status.swift"
+        cls.binary = Path(cls.temp.name) / "routing-status"
+        probe.write_text(cls.TEMPLATE.replace("__ROUTING_METHODS__", "\n".join(methods)))
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-module-cache-path", str(Path(cls.temp.name) / "module-cache"),
+             str(probe), "-o", str(cls.binary)],
+            cwd=root, capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def check_routing_status(self, scenario):
+        result = subprocess.run(
+            [str(self.binary), scenario],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual(observed["scenario"], scenario)
+        self.assertEqual(observed["assertionErrors"], [])
+        return observed
+
+    def test_test_host_initializer_avoids_core_and_observers(self):
+        self.check_routing_status("testHost")
+
+    def test_initializer_binds_routing_status_before_observers(self):
+        self.check_routing_status("initWiring")
+
+    def test_readiness_refresh_preserves_runtime_activity(self):
+        for scenario in ("readyOff", "refreshActive", "failedRestart"):
+            with self.subTest(scenario=scenario):
+                self.check_routing_status(scenario)
+
+    def test_engine_and_backend_transitions_publish_current_activity(self):
+        for scenario in ("blackHoleOrder", "nativeOrder", "runningNoBackend", "directEngineChanges", "sleepOwnership", "backendSwitch", "deduplication"):
+            with self.subTest(scenario=scenario):
+                self.check_routing_status(scenario)
+
+    def test_routing_binding_releases_router(self):
+        self.check_routing_status("lifecycle")
+
+    TEMPLATE = r"""
+import Combine
+import Foundation
+
+enum ActiveAudioRoutingBackend: String { case none, native, blackHole }
+enum AudioRoutingBackendPreference { case automatic, native, blackHole }
+struct AudioDevice {}
+var singletonAccesses = 0
+final class CoreAudioEngine: ObservableObject {
+    static var shared: CoreAudioEngine {
+        singletonAccesses += 1
+        return fixtureCore
+    }
+    @Published var isRunning = false
+    @Published var isEnabled = false
+}
+let fixtureCore = CoreAudioEngine()
+public final class AudioRouter: ObservableObject {
+    enum SystemEvent { case devicesChanged, defaultOutputChanged, willSleep, didWake }
+    private let isTestHost: Bool
+    private let eventHandler: ((SystemEvent) -> Void)?
+    @Published var selectedInputDevice: AudioDevice?
+    @Published var selectedOutputDevice: AudioDevice?
+    @Published var blackHoleDetected = false
+    @Published var statusMessage = "Checking devices..."
+    @Published var isRoutingActive = false
+    @Published private(set) var activeBackend: ActiveAudioRoutingBackend = .none
+    var backendPreference: AudioRoutingBackendPreference = .automatic
+    private var activeInputUID: String?
+    func fixtureSetBackend(_ backend: ActiveAudioRoutingBackend) { activeBackend = backend }
+    func fixtureRefresh() { updateStatus() }
+    func fixtureBlackHoleReady() {
+        backendPreference = .blackHole
+        blackHoleDetected = true
+        selectedInputDevice = AudioDevice()
+        selectedOutputDevice = AudioDevice()
+    }
+    func fixtureNativeReady() {
+        backendPreference = .native
+        selectedOutputDevice = AudioDevice()
+        selectedInputDevice = nil
+        blackHoleDetected = false
+    }
+__ROUTING_METHODS__
+}
+let scenario = CommandLine.arguments[1]
+let testHost = scenario == "testHost"
+var observerCalls = 0
+var accessesDuringObserver = -1
+var activeDuringObserver = false
+let router = AudioRouter(isTestHost: testHost, installObservers: { router in
+    observerCalls += 1
+    accessesDuringObserver = singletonAccesses
+    if scenario == "initWiring" {
+        router.fixtureSetBackend(.native)
+        fixtureCore.isEnabled = true
+        fixtureCore.isRunning = true
+        activeDuringObserver = router.isRoutingActive
+    }
+})
+var errors: [String] = []
+var checkpoints: [[String: Any]] = []
+var history: [Bool] = []
+let subscription = router.$isRoutingActive.sink { history.append($0) }
+func require(_ condition: Bool, _ text: String) { if !condition { errors.append(text) } }
+func check(_ name: String, _ expected: Bool) {
+    checkpoints.append(["name": name, "actual": router.isRoutingActive, "expected": expected])
+    require(router.isRoutingActive == expected, name)
+}
+func activate(_ backend: ActiveAudioRoutingBackend) {
+    router.fixtureSetBackend(backend)
+    fixtureCore.isEnabled = true
+    fixtureCore.isRunning = true
+}
+if testHost {
+    require(singletonAccesses == 0, "test host accessed Core singleton")
+    require(observerCalls == 0, "test host installed observers")
+    fixtureCore.isRunning = true
+    fixtureCore.isEnabled = true
+    router.fixtureSetBackend(.native)
+    check("test host has no routing subscription", false)
+    require(!router.isRoutingOwned, "test host claims ownership")
+    require(singletonAccesses == 0, "test host ownership accessed Core singleton")
+} else {
+    require(observerCalls == 1, "observer installation count")
+    require(accessesDuringObserver > 0, "binding missing before observer installation")
+    switch scenario {
+    case "initWiring":
+        require(activeDuringObserver, "observer cannot see initialized binding")
+        check("init observer mutations publish active", true)
+    case "readyOff":
+        router.fixtureBlackHoleReady()
+        router.fixtureRefresh()
+        check("ready BlackHole while engine off", false)
+        require(router.statusMessage == "✅ Ready for routing", "BlackHole readiness message changed")
+        router.fixtureNativeReady()
+        router.fixtureRefresh()
+        check("ready native while engine off", false)
+        if #available(macOS 14.4, *) {
+            require(router.statusMessage == "✅ Ready for native routing", "native readiness message changed")
+        } else {
+            require(router.statusMessage == "⚠️ BlackHole not installed", "unsupported native readiness message changed")
+        }
+    case "blackHoleOrder":
+        fixtureCore.isEnabled = true
+        check("enabled with no engine/backend", false)
+        fixtureCore.isRunning = true
+        check("running with no backend", false)
+        router.fixtureSetBackend(.blackHole)
+        check("BlackHole running enabled backend", true)
+    case "nativeOrder":
+        router.fixtureSetBackend(.native)
+        check("native backend only", false)
+        fixtureCore.isRunning = true
+        check("native running but disabled", false)
+        fixtureCore.isEnabled = true
+        check("native enabled last", true)
+    case "runningNoBackend":
+        fixtureCore.isEnabled = true
+        fixtureCore.isRunning = true
+        check("engine running with backend none", false)
+    case "directEngineChanges":
+        activate(.native)
+        check("native activation", true)
+        fixtureCore.isRunning = false
+        check("runtime engine stop", false)
+        fixtureCore.isRunning = true
+        check("runtime engine restart", true)
+        fixtureCore.isEnabled = false
+        check("EQ disabled directly", false)
+        fixtureCore.isEnabled = true
+        check("EQ reenabled directly", true)
+    case "sleepOwnership":
+        activate(.blackHole)
+        check("pre-sleep routing", true)
+        fixtureCore.isRunning = false
+        check("sleep stops audible routing", false)
+        require(router.isRoutingOwned, "sleep lost retained BlackHole ownership")
+        router.fixtureBlackHoleReady()
+        router.fixtureRefresh()
+        check("sleep readiness refresh", false)
+        require(router.isRoutingOwned, "refresh lost retained ownership")
+    case "failedRestart":
+        activate(.native)
+        check("before failed restart", true)
+        fixtureCore.isRunning = false
+        router.fixtureNativeReady()
+        for index in 0..<3 {
+            router.fixtureRefresh()
+            check("failed restart refresh \(index)", false)
+        }
+        require(router.isRoutingOwned, "failed restart lost retained backend ownership")
+    case "backendSwitch":
+        activate(.native)
+        check("native before switch", true)
+        router.fixtureSetBackend(.none)
+        check("backend removed while engine running", false)
+        router.fixtureSetBackend(.blackHole)
+        check("BlackHole backend adopted", true)
+        fixtureCore.isRunning = false
+        router.fixtureSetBackend(.native)
+        check("native backend during stopped switch", false)
+        fixtureCore.isRunning = true
+        check("native switch restarts engine", true)
+    case "refreshActive":
+        activate(.blackHole)
+        check("active routing before refresh", true)
+        router.backendPreference = .blackHole
+        router.blackHoleDetected = false
+        router.fixtureRefresh()
+        check("missing readiness metadata cannot clobber running routing", true)
+        require(router.statusMessage == "⚠️ BlackHole not installed", "unavailable readiness message changed")
+        router.blackHoleDetected = true
+        router.selectedInputDevice = nil
+        router.fixtureRefresh()
+        check("missing selected input cannot clobber running routing", true)
+        router.fixtureBlackHoleReady()
+        let count = history.count
+        for index in 0..<3 {
+            router.fixtureRefresh()
+            check("active readiness refresh \(index)", true)
+        }
+        require(history.count == count, "readiness refresh republishes routing flag")
+    case "deduplication":
+        activate(.native)
+        check("active for deduplication", true)
+        let count = history.count
+        fixtureCore.isRunning = true
+        fixtureCore.isEnabled = true
+        router.fixtureSetBackend(.native)
+        require(history.count == count, "identical routing state was republished")
+        fixtureCore.isEnabled = false
+        check("disable emits inactive", false)
+        require(history.count == count + 1, "binding has duplicate subscriptions")
+        fixtureCore.isEnabled = false
+        require(history.count == count + 1, "duplicate inactive state was republished")
+    case "lifecycle":
+        weak var weakRouter: AudioRouter?
+        func createTemporaryRouter() {
+            let temporaryRouter = AudioRouter(isTestHost: false, installObservers: { _ in })
+            weakRouter = temporaryRouter
+            temporaryRouter.fixtureSetBackend(.native)
+            fixtureCore.isEnabled = true
+            fixtureCore.isRunning = true
+            require(temporaryRouter.isRoutingActive, "temporary router was not bound")
+        }
+        createTemporaryRouter()
+        require(weakRouter == nil, "routing subscription retained router")
+    default: errors.append("unknown scenario")
+    }
+}
+let observed: [String: Any] = [
+    "scenario": scenario, "checkpoints": checkpoints, "history": history,
+    "singletonAccesses": singletonAccesses, "observerCalls": observerCalls,
+    "accessesDuringObserver": accessesDuringObserver, "activeDuringObserver": activeDuringObserver,
+    "assertionErrors": errors
+]
+print(String(data: try! JSONSerialization.data(withJSONObject: observed, options: [.sortedKeys]), encoding: .utf8)!)
+withExtendedLifetime(subscription) {}
+if !errors.isEmpty { exit(1) }
+"""
+
+
 class TextureSamplerFixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

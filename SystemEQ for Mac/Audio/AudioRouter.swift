@@ -496,7 +496,21 @@ public final class AudioRouter: ObservableObject {
         self.isTestHost = isTestHost
         eventHandler = handleEvent
         guard !isTestHost else { return }
+        bindRoutingStatus()
         installObservers(self)
+    }
+
+    private func bindRoutingStatus() {
+        Publishers.CombineLatest3(
+            CoreAudioEngine.shared.$isRunning,
+            CoreAudioEngine.shared.$isEnabled,
+            $activeBackend
+        )
+        .map { running, enabled, backend in
+            running && enabled && backend != .none
+        }
+        .removeDuplicates()
+        .assign(to: &$isRoutingActive)
     }
 
     func setBackendPreference(_ preference: AudioRoutingBackendPreference) {
@@ -1947,25 +1961,19 @@ public final class AudioRouter: ObservableObject {
            backendPreference != .blackHole,
            nativeAvailable {
             statusMessage = "✅ Ready for native routing"
-            isRoutingActive = true
         } else if backendPreference != .native,
                   blackHoleDetected,
                   selectedInputDevice != nil,
                   selectedOutputDevice != nil {
             statusMessage = "✅ Ready for routing"
-            isRoutingActive = true
         } else if !blackHoleDetected {
             statusMessage = "⚠️ BlackHole not installed"
-            isRoutingActive = false
         } else if selectedInputDevice == nil {
             statusMessage = "⚠️ Select input device"
-            isRoutingActive = false
         } else if selectedOutputDevice == nil {
             statusMessage = "⚠️ Select output device"
-            isRoutingActive = false
         } else {
             statusMessage = "ℹ️ Configure routing"
-            isRoutingActive = false
         }
     }
 
