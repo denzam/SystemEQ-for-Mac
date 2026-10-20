@@ -22,7 +22,7 @@ class ReleaseScriptTests(unittest.TestCase):
         source = Path(__file__).resolve().parent
         self.names = (
             "build_dmg.sh", "build_release.sh", "check_blackhole_updates.sh",
-            "setup_projectm.sh", "setup_reminders.sh",
+            "setup_projectm.sh", "setup_reminders.sh", "prepare_signed_release.sh",
         )
         for name in self.names:
             shutil.copyfile(source / name, self.scripts / name)
@@ -186,6 +186,324 @@ esac''')
                 self.assertEqual(len(sudo), 1)
                 self.assertTrue(sudo[0].startswith("sudo -n cmake --install "), sudo)
                 self.assertIn("privilege denied fixture", result.stderr)
+
+
+class SignedReleaseTests(unittest.TestCase):
+    identity = "A" * 40
+    team = "1234567890"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="systemeq-signed-tests-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.repo = self.root / "repo with spaces"
+        self.scripts = self.repo / "Scripts"
+        self.scripts.mkdir(parents=True)
+        source = Path(__file__).resolve().parent.parent
+        shutil.copyfile(source / "Scripts/prepare_signed_release.sh", self.scripts / "prepare_signed_release.sh")
+        (self.repo / "Config").mkdir()
+        shutil.copyfile(source / "Config/SystemEQ.entitlements", self.repo / "Config/SystemEQ.entitlements")
+        (self.scripts / "verify_release_artifacts.sh").write_text(
+            '#!/bin/bash\n[[ "${FAIL_MODE:-}" != bundle ]]\n'
+        )
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.log = self.root / "calls.jsonl"
+        body = '''#!/usr/bin/python3
+import hashlib, json, os, pathlib, plistlib, shutil, sys
+name = pathlib.Path(sys.argv[0]).name
+args = sys.argv[1:]
+mode = os.environ.get("FAIL_MODE", "")
+with open(os.environ["CALL_LOG"], "a") as stream:
+    stream.write(json.dumps([name, *args]) + "\\n")
+if name == "security":
+    if mode == "identity-command": sys.exit(7)
+    if mode != "identity-empty":
+        print('  1) ' + 'A' * 40 + ' "Developer ID Application: Fixture (1234567890)"')
+elif name == "xcodebuild":
+    if mode == "archive": sys.exit(7)
+    archive = pathlib.Path(args[args.index("-archivePath") + 1])
+    app = archive / "Products/Applications/SystemEQ for Mac.app"
+    components = [(app, "SystemEQ for Mac"), (app / "Contents/Helpers/ProjectMHelper.app", "ProjectMHelper")]
+    for base, executable in components:
+        (base / "Contents/MacOS").mkdir(parents=True)
+        (base / "Contents/Frameworks").mkdir()
+        (base / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.4.4", "CFBundleExecutable": executable}))
+        for target in [base / "Contents/MacOS" / executable, *(base / "Contents/Frameworks" / lib for lib in ("libprojectM-4.4.dylib", "libprojectM-4-playlist.4.dylib"))]:
+            target.write_bytes(bytes.fromhex("cafebabe") + b"fixture")
+    if mode == "extra-code": (app / "Contents/MacOS/Unexpected").write_bytes(bytes.fromhex("cafebabe"))
+    if mode == "escaping-link": (app / "Contents/escape").symlink_to(os.environ["OUTSIDE"])
+elif name == "codesign":
+    if "-R" in args and not args[args.index("-R") + 1].startswith("="): sys.stderr.write("literal requirement must start with ="); sys.exit(7)
+    if "--force" in args and mode == "sign": sys.exit(7)
+    if "--verify" in args and mode == "verify": sys.stderr.write("verification failure fixture"); sys.exit(7)
+    if "--verify" in args and mode == "distribution-signature" and "DistributionCheck" in args[-1]: sys.exit(7)
+    if "--display" in args:
+        if mode == "display": sys.exit(7)
+        team = "OTHERTEAM0" if mode == "wrong-team" else "1234567890"
+        flags = "0x0(none)" if mode == "no-runtime" else "0x10000(runtime)"
+        sys.stderr.write(f"TeamIdentifier={team}\\nAuthority=Developer ID Application: Fixture\\nCodeDirectory v=20500 flags={flags}\\n")
+        if mode != "no-timestamp": sys.stderr.write("Timestamp=fixture timestamp\\n")
+        entitlements = {}
+        if args[-1].endswith("SystemEQ for Mac.app"):
+            entitlements = {"com.apple.security.device.audio-input": True, "com.apple.security.automation.apple-events": True}
+        if mode == "debug-entitlement": entitlements["com.apple.security.get-task-allow"] = True
+        if entitlements: sys.stdout.buffer.write(plistlib.dumps(entitlements) if "--xml" in args else b"[Dict] fixture entitlements")
+elif name == "lipo":
+    print("arm64" if mode == "thin" else "arm64 x86_64")
+elif name == "ditto":
+    if "-x" in args:
+        if mode == "extract": sys.exit(7)
+        source = pathlib.Path(args[-2]).parent / "SystemEQ for Mac.app"
+        target = pathlib.Path(args[-1]) / source.name
+        shutil.copytree(source, target, symlinks=True)
+        if mode == "package-corrupt": (target / "Contents/Info.plist").write_bytes(b"changed")
+    elif "-c" in args:
+        pathlib.Path(args[-1]).write_bytes(b"fixture zip")
+    else:
+        shutil.copytree(args[-2], args[-1], symlinks=True)
+    if mode == "zip": sys.exit(7)
+elif name == "xcrun":
+    if args[:2] == ["notarytool", "submit"]:
+        if mode == "notary-command": sys.exit(7)
+        if mode == "notary-empty": sys.exit(0)
+        if mode == "notary-malformed": print("broken JSON"); sys.exit(0)
+        print(json.dumps({"id": "12345678-1234-1234-1234-123456789abc", "status": "Uploaded"}))
+    elif args[:2] == ["notarytool", "info"]:
+        if mode == "info-command": sys.exit(7)
+        if mode == "info-empty": sys.exit(0)
+        identifier = "87654321-1234-1234-1234-123456789abc" if mode == "info-mismatch" else args[2]
+        status = "In Progress" if mode == "wait-timeout" else "Invalid" if mode == "notary-rejected" else "Accepted"
+        print(json.dumps({"id": identifier, "status": status}))
+    elif args[:2] == ["notarytool", "wait"]:
+        if mode == "wait-timeout": sys.stderr.write("wait timeout fixture"); sys.exit(7)
+        print(json.dumps({"id": args[2], "status": "Accepted"}))
+    elif args[:2] == ["notarytool", "log"]:
+        if mode == "log-command": sys.exit(7)
+        if mode == "log-malformed": print("broken JSON"); sys.exit(0)
+        digest = "0" * 64 if mode == "log-wrong-archive" else hashlib.sha256(b"fixture zip").hexdigest()
+        print(json.dumps({"jobId": args[2], "status": "Invalid" if mode in ("notary-rejected", "log-rejected") else "Accepted", "sha256": digest, "issues": None}))
+    elif args[:2] == ["stapler", "staple"]:
+        if mode == "staple": sys.exit(7)
+        (pathlib.Path(args[-1]) / "Contents/notary-ticket.fixture").write_bytes(b"notary ticket")
+    elif args[:2] == ["stapler", "validate"]:
+        if mode == "staple-validate": sys.exit(7)
+        if mode == "distribution-ticket" and "DistributionCheck" in args[-1]: sys.exit(7)
+        if not (pathlib.Path(args[-1]) / "Contents/notary-ticket.fixture").is_file(): sys.exit(8)
+    else: sys.exit(99)
+elif name == "spctl":
+    if mode == "gatekeeper": sys.exit(7)
+    if mode == "distribution-gatekeeper" and "DistributionCheck" in args[-1]: sys.exit(7)
+else: sys.exit(99)
+'''
+        for name in ("security", "xcodebuild", "codesign", "lipo", "ditto", "xcrun", "spctl", "otool"):
+            target = self.bin / name
+            target.write_text(body)
+            target.chmod(0o755)
+        self.outside = self.root / "user-data"
+        self.outside.write_bytes(b"preserve user data")
+        self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", CALL_LOG=str(self.log), OUTSIDE=str(self.outside))
+
+    def invoke(self, *args, mode=""):
+        return subprocess.run(
+            ["bash", str(self.scripts / "prepare_signed_release.sh"), *map(str, args)],
+            cwd=self.repo, env=dict(self.env, FAIL_MODE=mode),
+            capture_output=True, text=True, timeout=30,
+        )
+
+    def build(self, mode=""):
+        return self.invoke("--build", "--identity", self.identity, "--team", self.team, mode=mode)
+
+    def prepared(self):
+        base = self.repo / "LocalArtifacts/SignedReleases"
+        before = set(base.iterdir()) if base.exists() else set()
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        directory, = set(base.iterdir()) - before
+        return directory
+
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_check_is_read_only_and_uses_no_signing_or_upload(self):
+        before = {str(path): path.read_bytes() for path in self.repo.rglob("*") if path.is_file()}
+        result = self.invoke("--check", "--identity", self.identity, "--team", self.team)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, {str(path): path.read_bytes() for path in self.repo.rglob("*") if path.is_file()})
+        self.assertEqual([call[0] for call in self.calls()], ["security"])
+
+    def test_bad_arguments_and_identity_cannot_create_artifacts(self):
+        for args in (("--build",), ("--check", "--identity"), ("--check", "--identity", "bad", "--team", self.team), ("--notarize", "outside", "--profile", "bad/profile"), ("--resume", "outside"), ("--staple", "outside", "--submission-id", "bad"), ("--resume", "outside", "--profile", "fixture", "--submission-id", "bad")):
+            result = self.invoke(*args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.repo / "LocalArtifacts").exists())
+            self.assertFalse(self.calls())
+        for mode in ("identity-empty", "identity-command"):
+            result = self.build(mode)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.repo / "LocalArtifacts").exists())
+
+    def test_signing_order_and_archive_options(self):
+        directory = self.prepared()
+        calls = self.calls()
+        archive = next(call for call in calls if call[0] == "xcodebuild")
+        self.assertIn("ARCHS=arm64 x86_64", archive)
+        self.assertIn("ONLY_ACTIVE_ARCH=NO", archive)
+        self.assertIn("CODE_SIGNING_ALLOWED=NO", archive)
+        signed = [call for call in calls if call[0] == "codesign" and "--force" in call]
+        self.assertEqual(len(signed), 6)
+        self.assertTrue(all(call[-1].endswith(".dylib") for call in signed[:4]))
+        self.assertTrue(signed[4][-1].endswith("ProjectMHelper.app"))
+        self.assertTrue(signed[5][-1].endswith("SystemEQ for Mac.app"))
+        self.assertTrue(all("--deep" not in call for call in signed))
+        self.assertTrue(all("--entitlements" not in call for call in signed[:5]))
+        self.assertIn("--entitlements", signed[5])
+        self.assertTrue((directory / "manifest.json").is_file())
+        self.assertFalse((directory / "completed.json").exists())
+        self.assertFalse(any(call[0] == "xcrun" for call in calls))
+
+    def test_build_failures_preserve_evidence_and_never_report_signed_success(self):
+        for mode in ("archive", "extra-code", "escaping-link", "sign", "verify", "display", "wrong-team", "no-runtime", "no-timestamp", "debug-entitlement", "thin", "bundle", "zip"):
+            with self.subTest(mode=mode):
+                before = set((self.repo / "LocalArtifacts/SignedReleases").iterdir()) if (self.repo / "LocalArtifacts/SignedReleases").exists() else set()
+                result = self.build(mode)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                directory, = set((self.repo / "LocalArtifacts/SignedReleases").iterdir()) - before
+                self.assertFalse((directory / "manifest.json").exists())
+                self.assertIn("Artifacts preserved", result.stderr)
+                self.assertNotIn("Signed universal app verified", result.stdout)
+                self.assertEqual(self.outside.read_bytes(), b"preserve user data")
+
+    def test_rejects_artifacts_directory_symlink(self):
+        (self.repo / "LocalArtifacts").symlink_to(self.root)
+        result = self.build()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "SignedReleases").exists())
+
+    def test_modified_app_or_zip_cannot_be_submitted(self):
+        directory = self.prepared()
+        (directory / "SystemEQ-signed.zip").write_bytes(b"changed")
+        result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+        (directory / "SystemEQ-signed.zip").write_bytes(b"fixture zip")
+        (directory / "SystemEQ for Mac.app/Contents/Info.plist").write_bytes(b"changed")
+        result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+
+    def test_notary_failures_never_staple_or_complete(self):
+        for mode in ("notary-command", "notary-empty", "notary-malformed", "notary-rejected", "info-command", "info-empty", "info-mismatch", "wait-timeout", "log-command", "log-rejected", "log-malformed", "log-wrong-archive"):
+            with self.subTest(mode=mode):
+                directory = self.prepared()
+                self.log.write_text("")
+                result = self.invoke("--notarize", directory, "--profile", "fixture", mode=mode)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse((directory / "completed.json").exists())
+                self.assertFalse((directory / "SystemEQ-notarized.zip").exists())
+                self.assertFalse(any(call[:3] == ["xcrun", "stapler", "staple"] for call in self.calls()))
+                self.assertTrue((directory / "submission-output.log").exists())
+                self.log.write_text("")
+                result = self.invoke("--notarize", directory, "--profile", "fixture")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+
+    def test_stapler_and_gatekeeper_failures_never_complete(self):
+        for mode in ("staple", "staple-validate", "gatekeeper", "package-corrupt", "extract", "distribution-ticket", "distribution-signature", "distribution-gatekeeper"):
+            with self.subTest(mode=mode):
+                self.log.write_text("")
+                directory = self.prepared()
+                result = self.invoke("--notarize", directory, "--profile", "fixture", mode=mode)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse((directory / "completed.json").exists())
+                if mode != "package-corrupt":
+                    self.assertFalse((directory / "SystemEQ-notarized.zip").exists())
+                source = directory / "SystemEQ for Mac.app"
+                self.assertFalse((source / "Contents/notary-ticket.fixture").exists())
+                attempts = {path: {p.relative_to(path): p.read_bytes() for p in path.rglob("*") if p.is_file()} for path in directory.glob("finalize-*")}
+                result = self.invoke("--staple", directory)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                complete = json.loads((directory / "completed.json").read_text())
+                self.assertTrue((directory / complete["zip"]).is_file())
+                self.assertTrue((directory / complete["app"] / "Contents/notary-ticket.fixture").is_file())
+                self.assertFalse((source / "Contents/notary-ticket.fixture").exists())
+                self.assertEqual(sum(call[:3] == ["xcrun", "notarytool", "submit"] for call in self.calls()), 1)
+                for path, before in attempts.items():
+                    self.assertEqual({p.relative_to(path): p.read_bytes() for p in path.rglob("*") if p.is_file()}, before)
+
+    def test_resume_fetches_status_and_log_without_uploading_again(self):
+        for mode in ("log-command", "log-malformed", "info-command", "wait-timeout"):
+            with self.subTest(mode=mode):
+                directory = self.prepared()
+                result = self.invoke("--notarize", directory, "--profile", "fixture", mode=mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue((directory / "submission.json").is_file())
+                logs = {path: path.read_bytes() for path in directory.rglob("*.log")}
+                self.log.write_text("")
+                result = self.invoke("--resume", directory, "--profile", "fixture")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue((directory / "completed.json").is_file())
+                self.assertFalse(any(call[:3] == ["xcrun", "notarytool", "submit"] for call in self.calls()))
+                for path, before in logs.items():
+                    self.assertTrue(path.read_bytes().startswith(before))
+
+    def test_unknown_upload_requires_explicit_submission_id_and_matching_archive(self):
+        directory = self.prepared()
+        result = self.invoke("--notarize", directory, "--profile", "fixture", mode="notary-empty")
+        self.assertNotEqual(result.returncode, 0)
+        self.log.write_text("")
+        result = self.invoke("--resume", directory, "--profile", "fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+        identifier = "12345678-1234-1234-1234-123456789abc"
+        result = self.invoke("--resume", directory, "--profile", "fixture", "--submission-id", identifier, mode="log-wrong-archive")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((directory / "completed.json").exists())
+        self.assertFalse(any(call[:3] == ["xcrun", "notarytool", "submit"] for call in self.calls()))
+        self.log.write_text("")
+        result = self.invoke("--resume", directory, "--profile", "fixture", "--submission-id", "87654321-1234-1234-1234-123456789abc")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+        result = self.invoke("--resume", directory, "--profile", "fixture")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_staple_requires_matching_accepted_submission_and_log(self):
+        directory = self.prepared()
+        result = self.invoke("--staple", directory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+        result = self.invoke("--notarize", directory, "--profile", "fixture", mode="notary-rejected")
+        self.assertNotEqual(result.returncode, 0)
+        self.log.write_text("")
+        result = self.invoke("--staple", directory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] == "xcrun" for call in self.calls()))
+        self.assertFalse((directory / "completed.json").exists())
+
+    def test_failed_retry_preserves_original_verification_diagnostics(self):
+        directory = self.prepared()
+        result = self.invoke("--staple", directory, mode="verify")
+        self.assertNotEqual(result.returncode, 0)
+        log = directory / "preflight-0-verify.log"
+        original = log.read_bytes()
+        self.assertIn(b"verification failure fixture", original)
+        result = self.invoke("--staple", directory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(log.read_bytes().startswith(original))
+
+    def test_accepted_submission_requires_all_validation_before_completion(self):
+        directory = self.prepared()
+        result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((directory / "completed.json").is_file())
+        self.assertTrue((directory / "notary-log.json").is_file())
+        complete = json.loads((directory / "completed.json").read_text())
+        self.assertTrue((directory / complete["zip"]).is_file())
+        calls = self.calls()
+        self.assertIn(["xcrun", "stapler", "validate", str(directory / complete["app"])], calls)
+        self.assertTrue(any(call[0] == "spctl" for call in calls))
+        result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertNotEqual(result.returncode, 0)
 
 
 class ReleaseGateTests(unittest.TestCase):
