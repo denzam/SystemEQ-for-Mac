@@ -63,11 +63,13 @@ final class AutoEQLegacyRepository: ObservableObject {
         )
     }
 
-    func saveOfflineIndex(_ entries: [OfflineIndexEntry], now: TimeInterval = Date().timeIntervalSince1970) {
-        guard let url = indexURL() else { return }
+    func saveOfflineIndex(_ entries: [OfflineIndexEntry], now: TimeInterval = Date().timeIntervalSince1970) throws {
+        guard let applicationSupportDirectory else { throw CocoaError(.fileNoSuchFile) }
         let cache = OfflineIndexCache(version: indexVersion, entries: entries, lastUpdate: now)
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        try? data.write(to: url, options: .atomic)
+        let data = try JSONEncoder().encode(cache)
+        let directory = applicationSupportDirectory.appendingPathComponent("SystemEQ", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("AutoEQIndex.json"), options: .atomic)
     }
 
     func loadBundledOfflineIndex() -> [OfflineIndexEntry]? {

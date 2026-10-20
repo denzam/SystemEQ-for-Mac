@@ -975,7 +975,7 @@ struct AutoEQView: View {
             else { indexStatusRaw = .error(localization.localized(.httpError)); return }
             try Task.checkCancellation()
             let out = try Self.fallbackIndexEntries(from: data)
-            legacyRepository.saveOfflineIndex(out)
+            try legacyRepository.saveOfflineIndex(out)
             offlineIndex = out
             indexTruncated = false
             indexStatusRaw = .updatedNow(count: out.count)
