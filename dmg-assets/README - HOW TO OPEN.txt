@@ -1,103 +1,44 @@
-════════════════════════════════════════════════════════════════
-  SystemEQ for Mac — How to open on first launch
-════════════════════════════════════════════════════════════════
+SystemEQ for Mac — Installation
 
-This app is open-source and NOT signed with an Apple Developer ID
-(the project does not pay Apple's $99/year fee). macOS will block
-the first launch with a "cannot be opened" or "damaged" message.
-This is normal. Follow the steps below.
+Packages distributed by the signed release workflow require Developer ID
+signatures, Apple notarization and Gatekeeper validation before publication.
+Older releases and local development builds may use ad-hoc signing.
 
-────────────────────────────────────────────────────────────────
-  ENGLISH
-────────────────────────────────────────────────────────────────
+ENGLISH
 
-STEP 1. Drag "SystemEQ for Mac" to the Applications folder.
+1. Drag “SystemEQ for Mac” to Applications.
+2. Open the app normally.
+3. Follow the Welcome screen and allow the requested audio permission.
+   Signing and notarization do not grant this permission automatically.
+   On macOS 14.4+, Automatic tries Native capture, which needs System Audio
+   Recording permission. BlackHole is used on macOS 13–14.3 or as a fallback;
+   its virtual audio input requires Microphone permission.
+4. If a signed release is blocked, download it again from the official release
+   page and report the exact macOS message and app version.
 
-STEP 2. Open Applications, RIGHT-CLICK on "SystemEQ for Mac",
-        choose "Open", then click "Open" again in the dialog.
+ITALIANO
 
-  If you only see "Move to Trash" / "cannot be opened":
-    -> Open System Settings -> Privacy & Security
-    -> Scroll down to the Security section
-    -> You will see: "SystemEQ for Mac was blocked..."
-    -> Click "Open Anyway"
-    -> Confirm with your Mac password / Touch ID
+1. Trascina “SystemEQ for Mac” nella cartella Applicazioni.
+2. Apri normalmente l’app.
+3. Segui la schermata di benvenuto e concedi il permesso audio richiesto.
+   Firma e notarizzazione non concedono questo permesso automaticamente.
+   Su macOS 14.4+, Automatico prova il motore nativo, che richiede il permesso
+   di registrare l’audio di sistema. BlackHole serve su macOS 13–14.3 o come
+   fallback; il suo ingresso virtuale richiede il permesso Microfono.
+4. Se una versione firmata è bloccata, scaricala di nuovo dalla pagina ufficiale
+   e segnala il messaggio esatto di macOS e la versione dell’app.
 
-STEP 3. (Optional, fastest) Open Terminal and paste:
-    xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-    Then double-click the app normally.
+УКРАЇНСЬКА
 
-STEP 4. Follow the Welcome screen and allow the requested audio permission.
-        On macOS 14.4+, Automatic tries Native capture without BlackHole.
-        Native capture needs System Audio Recording permission.
-        BlackHole is needed on macOS 13-14.3 or when Native cannot start
-        in Automatic mode; its virtual audio input needs Microphone permission.
-        Settings -> Audio Engine lets you choose the backend.
+1. Перетягни “SystemEQ for Mac” у папку Програми (Applications).
+2. Відкрий застосунок звичайним способом.
+3. Пройди екран привітання та надай запитаний дозвіл на аудіо.
+   Підпис і нотаризація не надають цього дозволу автоматично.
+   На macOS 14.4+ Автоматично пробує нативне захоплення, якому потрібен дозвіл
+   на запис системного аудіо. BlackHole потрібен на macOS 13–14.3 або як
+   резервний маршрут; його віртуальний вхід потребує доступу до мікрофона.
+4. Якщо підписаний реліз заблоковано, завантаж його повторно з офіційної
+   сторінки та повідом точний текст попередження macOS і версію застосунку.
 
-────────────────────────────────────────────────────────────────
-  ITALIANO
-────────────────────────────────────────────────────────────────
-
-PASSO 1. Trascina "SystemEQ for Mac" nella cartella Applicazioni.
-
-PASSO 2. Apri Applicazioni, CLIC DESTRO su "SystemEQ for Mac",
-         scegli "Apri", poi clicca di nuovo "Apri" nella finestra.
-
-  Se vedi solo "Sposta nel Cestino" / "non puo' essere aperto":
-    -> Apri Impostazioni di Sistema -> Privacy e Sicurezza
-    -> Scorri fino alla sezione Sicurezza
-    -> Vedrai: "SystemEQ for Mac e' stato bloccato..."
-    -> Clicca "Apri comunque"
-    -> Conferma con password / Touch ID
-
-PASSO 3. (Opzionale, piu' veloce) Apri Terminale e incolla:
-    xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-    Poi fai doppio clic sull'app normalmente.
-
-PASSO 4. Segui la schermata di benvenuto e consenti il permesso audio richiesto.
-         Su macOS 14.4+, Automatico prova l'acquisizione nativa senza BlackHole.
-         L'acquisizione nativa richiede il permesso di registrare l'audio di sistema.
-         BlackHole serve su macOS 13-14.3 o se il motore nativo non si avvia
-         in modalita' Automatico; il suo ingresso virtuale richiede il permesso Microfono.
-         Impostazioni -> Motore audio permette di scegliere il backend.
-
-────────────────────────────────────────────────────────────────
-  УКРАЇНСЬКА
-────────────────────────────────────────────────────────────────
-
-КРОК 1. Перетягни "SystemEQ for Mac" у папку Програми (Applications).
-
-КРОК 2. Відкрий Програми, ПРАВИЙ КЛІК на "SystemEQ for Mac",
-        обери "Відкрити", потім ще раз "Відкрити" у вікні.
-
-  Якщо бачиш тільки "Перенести в Кошик" / "не може бути відкрито":
-    -> Відкрий Системні параметри -> Конфіденційність і безпека
-    -> Прокрути до секції Безпека
-    -> Побачиш: "SystemEQ for Mac було заблоковано..."
-    -> Натисни "Відкрити все одно"
-    -> Підтверди паролем / Touch ID
-
-КРОК 3. (Опціонально, найшвидше) Відкрий Termінал і встав:
-    xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-    Потім подвійний клік як зазвичай.
-
-КРОК 4. Пройди екран привітання та надай запитаний дозвіл на аудіо.
-        На macOS 14.4+ Автоматично спершу пробує нативне захоплення без BlackHole.
-        Нативному захопленню потрібен дозвіл на запис системного аудіо.
-        BlackHole потрібен на macOS 13-14.3 або якщо нативний рушій не запускається
-        в автоматичному режимі; його віртуальний вхід потребує доступу до мікрофона.
-        Налаштування -> Аудіорушій дозволяють вибрати backend.
-
-════════════════════════════════════════════════════════════════
-  Why is this needed?
-════════════════════════════════════════════════════════════════
-
-Apple requires a paid Developer ID ($99/year) to skip this dialog.
-SystemEQ for Mac is free and open-source — the source code is on
-GitHub: https://github.com/denzam/SystemEQ-for-Mac
-
-You only need to do this ONCE. After the first successful launch,
-macOS remembers your choice and the app opens normally.
-
-For installation via Homebrew (which handles quarantine automatically):
-    brew install --cask denzam/systemeq/systemeq
+Official releases: https://github.com/denzam/SystemEQ-for-Mac/releases
+Homebrew: brew install --cask denzam/systemeq/systemeq

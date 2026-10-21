@@ -88,22 +88,26 @@ def inventory(app):
     return hashes
 
 
+def diagnostic(name):
+    return RUN / name if RUN is not None else None
+
+
 def verify(app, state, label):
     inventory(app)
     requirement = f'anchor apple generic and certificate leaf[subject.OU] = "{state["team"]}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
     components = [app / path for path in MACHOS[2:]] + [app / HELPER, app]
     for index, component in enumerate(components):
-        run(["codesign", "--verify", "--strict", "--all-architectures", "-R", f"={requirement}", component], RUN / f"{label}-{index}-verify.log")
+        run(["codesign", "--verify", "--strict", "--all-architectures", "-R", f"={requirement}", component], diagnostic(f"{label}-{index}-verify.log"))
         executable = component
         if component.is_dir():
             with (component / "Contents/Info.plist").open("rb") as stream:
                 info = plistlib.load(stream)
             require(info["CFBundleShortVersionString"] == state["version"], "App/helper version mismatch")
             executable = component / "Contents/MacOS" / info["CFBundleExecutable"]
-        arches = run(["lipo", "-archs", executable], RUN / f"{label}-{index}-architectures.log").stdout.decode().split()
+        arches = run(["lipo", "-archs", executable], diagnostic(f"{label}-{index}-architectures.log")).stdout.decode().split()
         require(set(arches) == {"arm64", "x86_64"}, f"Not a universal binary: {component}")
         for arch in ("arm64", "x86_64"):
-            result = run(["codesign", "--display", "--arch", arch, "--verbose=4", "--entitlements", "-", "--xml", component], RUN / f"{label}-{index}-{arch}.log")
+            result = run(["codesign", "--display", "--arch", arch, "--verbose=4", "--entitlements", "-", "--xml", component], diagnostic(f"{label}-{index}-{arch}.log"))
             details = result.stderr.decode()
             require(f"TeamIdentifier={state['team']}\n" in details, f"Wrong team: {component}")
             require("Authority=Developer ID Application:" in details and "Signature=adhoc" not in details, f"Wrong signature: {component}")
@@ -111,7 +115,7 @@ def verify(app, state, label):
             require(re.search(r"^Timestamp=(?!none\s*$).+", details, re.MULTILINE), f"Secure timestamp missing: {component}")
             entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
             require(entitlements == (ENTITLEMENTS if component == app else {}), f"Unexpected entitlements: {component}")
-    run(["bash", ROOT / "Scripts/verify_release_artifacts.sh", "--bundle", app, state["version"]], RUN / f"{label}-bundle.log")
+    run(["bash", ROOT / "Scripts/verify_release_artifacts.sh", "--bundle", app, state["version"]], diagnostic(f"{label}-bundle.log"))
 
 
 def write_json(path, value):
@@ -148,16 +152,20 @@ def accepted(state):
     require_accepted(json.loads(submission.read_text()), json.loads(log.read_text()), state)
 
 
-def notarize(args, state):
-    package = RUN / "SystemEQ-signed.zip"
+def notarize(args, state, package_name="SystemEQ-signed.zip", upload=None):
+    package = RUN / package_name
     require(not package.is_symlink() and hashlib.sha256(package.read_bytes()).hexdigest() == state["zip_sha256"], "Submission ZIP changed since preparation")
     attempt = Path(tempfile.mkdtemp(prefix="notary-", dir=RUN))
     submission_path = RUN / "submission.json"
+    authentication = ["--keychain-profile", args.profile]
+    if args.keychain:
+        authentication += ["--keychain", args.keychain]
     require(not submission_path.is_symlink(), "Symlinked submission record")
-    if args.notarize:
+    should_upload = bool(args.notarize) if upload is None else upload
+    if should_upload:
         require(not (RUN / "submission-attempt.json").exists() and not submission_path.exists(), "Submission already attempted; use --resume instead of uploading again")
         write_json(RUN / "submission-attempt.json", {"zip_sha256": state["zip_sha256"]})
-        result = run(["xcrun", "notarytool", "submit", package, "--keychain-profile", args.profile, "--no-wait", "--output-format", "json"], RUN / "submission-output.log", timeout=1500)
+        result = run(["xcrun", "notarytool", "submit", package, *authentication, "--no-wait", "--output-format", "json"], RUN / "submission-output.log", timeout=1500)
         submission = json.loads(result.stdout)
         require(isinstance(submission, dict), "Malformed submission response")
         submission_id(submission.get("id"))
@@ -174,16 +182,16 @@ def notarize(args, state):
     if (RUN / "accepted.json").exists():
         accepted(state)
         return
-    result = run(["xcrun", "notarytool", "info", identifier, "--keychain-profile", args.profile, "--output-format", "json"], attempt / "info-output.log")
+    result = run(["xcrun", "notarytool", "info", identifier, *authentication, "--output-format", "json"], attempt / "info-output.log")
     info = json.loads(result.stdout)
     require(isinstance(info, dict) and submission_id(info.get("id")) == identifier, "Notary info belongs to another submission")
     write_json(attempt / "info.json", info)
     if info.get("status") == "In Progress":
-        result = run(["xcrun", "notarytool", "wait", identifier, "--keychain-profile", args.profile, "--timeout", "20m", "--output-format", "json"], attempt / "wait-output.log", timeout=1250)
+        result = run(["xcrun", "notarytool", "wait", identifier, *authentication, "--timeout", "20m", "--output-format", "json"], attempt / "wait-output.log", timeout=1250)
         info = json.loads(result.stdout)
         require(isinstance(info, dict) and submission_id(info.get("id")) == identifier, "Notary wait belongs to another submission")
         write_json(attempt / "wait.json", info)
-    result = run(["xcrun", "notarytool", "log", identifier, "--keychain-profile", args.profile], attempt / "log-output.log")
+    result = run(["xcrun", "notarytool", "log", identifier, *authentication], attempt / "log-output.log")
     log = json.loads(result.stdout)
     write_json(attempt / "log.json", log)
     require_accepted(info, log, state)
@@ -192,7 +200,7 @@ def notarize(args, state):
     print(f"Apple accepted notarization; inspect preserved warnings: {RUN / 'notary-log.json'}")
 
 
-def load_run(path):
+def load_run(path, allow_completed=False):
     global RUN
     base = ROOT / "LocalArtifacts/SignedReleases"
     RUN = Path(path).resolve(strict=True)
@@ -203,7 +211,7 @@ def load_run(path):
     require(re.fullmatch(r"[A-Z0-9]{10}", state["team"]), "Invalid recorded team")
     require(re.fullmatch(r"[A-F0-9]{40}", state["identity"]), "Invalid recorded signing identity")
     app = RUN / f"{NAME}.app"
-    require(not (RUN / "completed.json").exists(), "This release is already finalized")
+    require(allow_completed or not (RUN / "completed.json").exists(), "This release is already finalized")
     require(inventory(app) == state["files"], "Signed app changed since preparation")
     verify(app, state, "preflight")
     return app, state
@@ -233,6 +241,81 @@ def finalize(app, state):
     print(f"Notarized app, stapled ticket and Gatekeeper assessment verified: {package}")
 
 
+def owned_file(base, relative):
+    require(isinstance(relative, str) and relative and not Path(relative).is_absolute(), "Invalid artifact path")
+    path = base / relative
+    require(not path.is_symlink() and path.resolve(strict=True).is_relative_to(base), "Artifact escapes its release directory")
+    return path
+
+
+def finalized_artifacts(base, state):
+    record = base / "completed.json"
+    require(record.is_file() and not record.is_symlink(), "Missing app completion record")
+    complete = json.loads(record.read_text())
+    require(complete["team"] == state["team"] and complete["version"] == state["version"], "App completion identity mismatch")
+    app = owned_file(base, complete["app"])
+    package = owned_file(base, complete["zip"])
+    require(package.is_file() and hashlib.sha256(package.read_bytes()).hexdigest() == complete["zip_sha256"], "Completed ZIP changed")
+    verify(app, state, "dmg-source")
+    run(["xcrun", "stapler", "validate", app], diagnostic("dmg-source-ticket.log"))
+    run(["spctl", "--assess", "--type", "execute", "--verbose=4", app], diagnostic("dmg-source-gatekeeper.log"))
+    return app, package
+
+
+def dmg_release(args):
+    global RUN
+    _, app_state = load_run(args.notarize_dmg or args.resume_dmg or args.staple_dmg, allow_completed=True)
+    base = RUN
+    _, package = finalized_artifacts(base, app_state)
+    directory = base / "dmg"
+    if args.notarize_dmg:
+        source = Path(args.dmg).absolute()
+        require(source.is_file() and not source.is_symlink(), "DMG must be a regular file")
+        require(not directory.exists() and not directory.is_symlink(), "DMG preparation already attempted; use --resume-dmg")
+        directory.mkdir()
+        RUN = directory
+        signed = RUN / "SystemEQ-signed.dmg"
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
+        shutil.copyfile(source, signed)
+        require(hashlib.sha256(signed.read_bytes()).hexdigest() == before == hashlib.sha256(source.read_bytes()).hexdigest(), "DMG copy changed")
+        run(["bash", ROOT / "Scripts/verify_release_artifacts.sh", package, signed, app_state["version"]], RUN / "packages-preflight.log")
+        run(["codesign", "--force", "--sign", app_state["identity"], "--timestamp", signed], RUN / "sign.log")
+        requirement = f'anchor apple generic and certificate leaf[subject.OU] = "{app_state["team"]}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+        run(["codesign", "--verify", "--strict", "-R", f"={requirement}", signed], RUN / "signature.log")
+        state = dict(app_state, zip_sha256=hashlib.sha256(signed.read_bytes()).hexdigest(), app_record_sha256=hashlib.sha256((base / "completed.json").read_bytes()).hexdigest())
+        write_json(RUN / "manifest.json", state)
+    else:
+        require(directory.is_dir() and not directory.is_symlink(), "Missing owned DMG directory")
+        RUN = directory
+        require(not (RUN / "manifest.json").is_symlink(), "Symlinked DMG manifest")
+        state = json.loads((RUN / "manifest.json").read_text())
+    require(state["team"] == app_state["team"] and state["identity"] == app_state["identity"] and state["version"] == app_state["version"], "DMG identity mismatch")
+    require(state["app_record_sha256"] == hashlib.sha256((base / "completed.json").read_bytes()).hexdigest(), "App completion changed")
+    require(not (RUN / "completed.json").exists(), "DMG is already finalized")
+    signed = RUN / "SystemEQ-signed.dmg"
+    require(signed.is_file() and not signed.is_symlink() and hashlib.sha256(signed.read_bytes()).hexdigest() == state["zip_sha256"], "Signed DMG changed")
+    if not args.staple_dmg:
+        notarize(args, state, "SystemEQ-signed.dmg", upload=bool(args.notarize_dmg))
+    accepted(state)
+    attempt = Path(tempfile.mkdtemp(prefix="finalize-", dir=RUN))
+    final = attempt / "SystemEQ-notarized.dmg"
+    shutil.copyfile(signed, final)
+    run(["xcrun", "stapler", "staple", final], attempt / "staple.log")
+    run(["bash", ROOT / "Scripts/verify_release_artifacts.sh", "--distribution", state["team"], package, final, state["version"]], attempt / "distribution.log")
+    write_json(RUN / "completed.json", {"team": state["team"], "version": state["version"], "dmg": str(final.relative_to(base)), "dmg_sha256": hashlib.sha256(final.read_bytes()).hexdigest()})
+    RUN = base
+
+
+def machine_record(path, phase):
+    if path is None:
+        return
+    value = {"run": str(RUN), "phase": phase, "manifest": str(RUN / "manifest.json")}
+    if phase != "signed":
+        record = RUN / ("dmg/completed.json" if phase == "dmg" else "completed.json")
+        value["completed"] = str(record)
+    write_json(path, value)
+
+
 def main():
     global RUN
     parser = argparse.ArgumentParser(description="Prepare an isolated Developer ID release; never installs or publishes.")
@@ -242,15 +325,48 @@ def main():
     action.add_argument("--notarize", metavar="RUN_DIR")
     action.add_argument("--resume", metavar="RUN_DIR")
     action.add_argument("--staple", metavar="RUN_DIR")
+    action.add_argument("--notarize-dmg", metavar="RUN_DIR")
+    action.add_argument("--resume-dmg", metavar="RUN_DIR")
+    action.add_argument("--staple-dmg", metavar="RUN_DIR")
+    action.add_argument("--verify-bundle", metavar="APP")
     parser.add_argument("--identity", help="40-character signing certificate fingerprint")
     parser.add_argument("--team", help="10-character Developer Team ID")
     parser.add_argument("--profile", help="Existing notarytool Keychain profile; no passwords accepted")
+    parser.add_argument("--keychain", help="Keychain containing the notarytool profile")
     parser.add_argument("--submission-id", help="Recover an interrupted upload with a known submission UUID; --resume only")
+    parser.add_argument("--dmg", help="Existing DMG to copy, sign and notarize")
+    parser.add_argument("--record", type=Path, help="New machine-readable success record")
+    parser.add_argument("--version", help="Expected version for --verify-bundle")
     if any(value in ("--help", "-h") for value in sys.argv[1:]) and len(sys.argv) != 2:
         parser.error("Use --help alone")
     args = parser.parse_args()
+    if args.record:
+        if args.check or args.verify_bundle:
+            parser.error("Read-only modes do not write records")
+        require(not args.record.exists() and not args.record.is_symlink() and args.record.parent.is_dir(), "Record target must be a new file in an existing directory")
+    if args.verify_bundle:
+        if not args.team or not re.fullmatch(r"[A-Z0-9]{10}", args.team) or not args.version or args.identity or args.profile or args.keychain or args.dmg or args.submission_id:
+            parser.error("--verify-bundle requires only --team and --version")
+        verify(Path(args.verify_bundle), {"team": args.team, "version": args.version}, "distribution")
+        return
+    if args.version:
+        parser.error("--version is only for --verify-bundle")
+    is_dmg = bool(args.notarize_dmg or args.resume_dmg or args.staple_dmg)
+    if is_dmg:
+        if args.identity or args.team or (bool(args.dmg) != bool(args.notarize_dmg)) or (args.submission_id and not args.resume_dmg):
+            parser.error("DMG modes use the recorded identity; --dmg is required only for --notarize-dmg")
+        if args.staple_dmg:
+            if args.profile or args.keychain: parser.error("--staple-dmg uses saved acceptance records")
+        elif not args.profile or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", args.profile):
+            parser.error("DMG notarization requires --profile")
+        if args.submission_id: submission_id(args.submission_id)
+        dmg_release(args)
+        machine_record(args.record, "dmg")
+        return
+    if args.dmg:
+        parser.error("--dmg requires --notarize-dmg")
     if args.check or args.build:
-        if not args.identity or not re.fullmatch(r"[A-Fa-f0-9]{40}", args.identity) or not args.team or not re.fullmatch(r"[A-Z0-9]{10}", args.team) or args.profile or args.submission_id:
+        if not args.identity or not re.fullmatch(r"[A-Fa-f0-9]{40}", args.identity) or not args.team or not re.fullmatch(r"[A-Z0-9]{10}", args.team) or args.profile or args.keychain or args.submission_id:
             parser.error("--check/--build require --identity SHA1 and --team TEAM; --profile is for --notarize only")
         args.identity = args.identity.upper()
         prerequisites(args.identity, args.team)
@@ -284,9 +400,10 @@ def main():
         state["files"] = inventory(app)
         state["zip_sha256"] = hashlib.sha256(package.read_bytes()).hexdigest()
         write_json(RUN / "manifest.json", state)
+        machine_record(args.record, "signed")
         print(f"Signed universal app verified; NOT notarized: {app}")
         return
-    if args.identity or args.team or (args.staple and args.profile):
+    if args.identity or args.team or (args.staple and (args.profile or args.keychain)):
         parser.error("Recorded identity/team are used for notarization and stapling")
     if args.submission_id and not args.resume:
         parser.error("--submission-id is for --resume only")
@@ -298,6 +415,7 @@ def main():
     if args.notarize or args.resume:
         notarize(args, state)
     finalize(app, state)
+    machine_record(args.record, "notarized")
 
 
 try:

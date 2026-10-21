@@ -75,9 +75,8 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Il Cask rimuove l'attributo macOS di quarantena durante l'installazione, quindi
-l'app si avvia senza la conferma manuale di Gatekeeper richiesta dal DMG.
-L'app resta firmata ad-hoc e non è notarizzata.
+Il workflow di rilascio richiede firme Developer ID e notarizzazione per DMG e ZIP.
+Le versioni precedenti usavano firme ad-hoc: controlla le note della versione.
 
 > **Perché `brew trust`?** Da Homebrew 6.0 i tap di terze parti devono essere
 > considerati attendibili in modo esplicito, altrimenti Homebrew si rifiuta di
@@ -85,24 +84,15 @@ L'app resta firmata ad-hoc e non è notarizzata.
 > del tap non può farlo al posto tuo. Il comando va eseguito una sola volta per
 > Mac. Su Homebrew 5 e precedenti saltalo: quel comando non esiste.
 
-#### Opzione 2: Scarica DMG o ZIP — serve la conferma manuale di Gatekeeper
+#### Opzione 2: Scarica DMG o ZIP
 
-1. Scarica l'ultimo `.dmg` o `.zip` dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-2. Apri il DMG e trascina `SystemEQ for Mac.app` nella cartella Applicazioni (`/Applications`)
-3. **Al primo avvio (una di queste opzioni):**
-   - **Clic destro sull'app → Apri → Apri** nella finestra di conferma, oppure
-   - Prova ad avviarla, poi apri **Impostazioni di Sistema → Privacy e Sicurezza → Apri comunque**, oppure
-   - Da Terminale:
-     ```bash
-     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-     ```
-4. Su macOS 14.4+, lascia **Audio Backend** su **Automatico**. Installa BlackHole solo se SystemEQ propone il fallback o se selezioni manualmente la modalità BlackHole.
+1. Scarica un pacchetto firmato Developer ID e notarizzato dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+2. Apri il DMG e trascina `SystemEQ for Mac.app` in `/Applications`, oppure estrai lo ZIP e sposta l’app nella stessa cartella
+3. Apri normalmente l’app e concedi il permesso audio richiesto
+4. Su macOS 14.4+, lascia Audio Backend su **Automatico**; installa BlackHole se SystemEQ propone il fallback o se selezioni la modalità BlackHole
 
-> L'app è **firmata ad-hoc** (gratis, autofirmata) — non notarizzata con un
-> Apple Developer ID. Per questo Gatekeeper mostra un avviso al primo avvio.
-> È una scelta intenzionale: SystemEQ resta gratuito e non richiede il
-> programma Apple Developer a pagamento. I passaggi sopra vanno fatti una
-> sola volta.
+Firma e notarizzazione non concedono accesso al microfono o alla registrazione audio di sistema.
+Le build locali di sviluppo possono ancora usare una firma ad-hoc.
 
 #### Opzione 3: Compilare dal sorgente
 
@@ -261,20 +251,17 @@ Su Homebrew 5 e precedenti il comando `trust` non esiste: saltalo.
 
 ### Dopo un aggiornamento l'app chiede di nuovo l'accesso al microfono
 
-È normale. SystemEQ è firmata ad-hoc, quindi la firma cambia a ogni build e macOS
-considera ogni aggiornamento come una nuova app. Concedi di nuovo il permesso in
-**Impostazioni di Sistema → Privacy e sicurezza → Microfono**.
+Il primo permesso audio è necessario anche per un’app firmata e notarizzata.
+Una build ad-hoc o una diversa identità di firma possono causare una nuova richiesta;
+firme Developer ID compatibili permettono a macOS di riconoscere gli aggiornamenti.
+Vedi la [spiegazione Apple](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
 
 ### macOS dice che l'app "non può essere aperta"
 
-L'app non è notarizzata — vedi la sezione «Nota sulla sicurezza» più sotto.
-Fai clic destro sull'app → **Apri** → conferma, oppure esegui:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-```
-
-Installando tramite Homebrew questo passaggio non serve: il Cask rimuove il flag.
+Verifica che il pacchetto sia una versione firmata Developer ID e notarizzata;
+le vecchie versioni e le build locali ad-hoc usano una diversa politica di firma.
+Scarica di nuovo il pacchetto dalla pagina ufficiale e segnala il messaggio esatto
+di macOS e la versione dell’app se una versione firmata è ancora bloccata.
 
 ### Nessun suono dopo la configurazione
 
@@ -294,7 +281,7 @@ Dopo il passaggio a BlackHole, alza il volume di sistema con i tasti della tasti
 - L'app **non è in sandbox** (incompatibile con i dispositivi audio virtuali CoreAudio/AUHAL)
 - **Nessuna telemetria, analisi o raccolta dati** — tutti i dati rimangono sul tuo Mac
 - Installa solo dalle [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases) ufficiali
-- Firmata ad-hoc — clic destro → Apri al primo avvio per bypassare il Gatekeeper
+- Il workflow di distribuzione richiede Developer ID, notarizzazione e verifica Gatekeeper
 
 ## 🤝 Contribuire
 

@@ -59,7 +59,7 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - name: Build & Archive
+      - name: Test release candidate
         run: |
           xcodebuild test \
             -project "SystemEQ for Mac.xcodeproj" \
@@ -69,40 +69,119 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             -quiet
 
-          xcodebuild archive \
-            -project "SystemEQ for Mac.xcodeproj" \
-            -scheme "SystemEQ for Mac" \
-            -configuration Release \
-            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-            -archivePath build/SystemEQ.xcarchive \
-            CODE_SIGNING_ALLOWED=NO \
-            -quiet
-
-      - name: Export .app
+      - name: Configure temporary signing credentials
+        id: credentials
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION_SHA1 }}
+          SIGNING_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
         run: |
-          mkdir -p build/export
-          cp -R "build/SystemEQ.xcarchive/Products/Applications/SystemEQ for Mac.app" build/export/
+          python3 - <<'PY'
+          import base64, json, os, re, secrets, shlex, subprocess, tempfile
+          from pathlib import Path
+          os.umask(0o077)
+          required = ('CERTIFICATE_P12', 'CERTIFICATE_PASSWORD', 'SIGNING_IDENTITY', 'SIGNING_TEAM', 'NOTARY_APPLE_ID', 'NOTARY_PASSWORD')
+          if not all(os.environ.get(key) for key in required):
+              raise SystemExit('Missing signing or notarization secrets')
+          if not re.fullmatch(r'[A-Fa-f0-9]{40}', os.environ['SIGNING_IDENTITY']) or not re.fullmatch(r'[A-Z0-9]{10}', os.environ['SIGNING_TEAM']):
+              raise SystemExit('Invalid signing identity metadata')
+          secret_values = [os.environ[key] for key in required]
+          def call(args):
+              result = subprocess.run(args, capture_output=True)
+              if result.returncode:
+                  diagnostic = (result.stdout + result.stderr).decode(errors='replace')
+                  for value in secret_values:
+                      diagnostic = diagnostic.replace(value, '<redacted>')
+                  raise SystemExit(f'Credential command failed: {args[0]} {args[1]} ({result.returncode})\n{diagnostic[-2000:]}')
+              return result.stdout.decode()
+          base = Path(os.environ['RUNNER_TEMP']).resolve()
+          record = base / 'systemeq-keychain-state.json'
+          if record.exists() or record.is_symlink():
+              raise SystemExit('Credential state already exists')
+          search = shlex.split(call(['security', 'list-keychains', '-d', 'user']))
+          if not search or not all(Path(path).is_absolute() and '\n' not in path and '\r' not in path for path in search):
+              raise SystemExit('Invalid original keychain search list')
+          owned = Path(tempfile.mkdtemp(prefix='systemeq-signing-', dir=base))
+          keychain = owned / 'signing.keychain-db'
+          with record.open('x') as stream:
+              json.dump({'owned': str(owned), 'keychain': str(keychain), 'search': search}, stream)
+          certificate = owned / 'identity.p12'
+          certificate.write_bytes(base64.b64decode(os.environ['CERTIFICATE_P12'], validate=True))
+          password = secrets.token_urlsafe(32)
+          secret_values.append(password)
+          call(['security', 'create-keychain', '-p', password, str(keychain)])
+          call(['security', 'unlock-keychain', '-p', password, str(keychain)])
+          call(['security', 'set-keychain-settings', '-lut', '21600', str(keychain)])
+          call(['security', 'import', str(certificate), '-k', str(keychain), '-P', os.environ['CERTIFICATE_PASSWORD'], '-T', '/usr/bin/codesign', '-T', '/usr/bin/security'])
+          call(['security', 'set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', password, str(keychain)])
+          call(['security', 'list-keychains', '-d', 'user', '-s', str(keychain), *search])
+          call(['xcrun', 'notarytool', 'store-credentials', 'SystemEQ-CI', '--apple-id', os.environ['NOTARY_APPLE_ID'], '--team-id', os.environ['SIGNING_TEAM'], '--password', os.environ['NOTARY_PASSWORD'], '--keychain', str(keychain)])
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+              stream.write(f'keychain={keychain}\n')
+          PY
 
-          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
-            "build/export/SystemEQ for Mac.app/Contents/Info.plist")
-          if [ "$APP_VERSION" != "${{ steps.version.outputs.version }}" ]; then
-            echo "::error::Tag/workflow version ${{ steps.version.outputs.version }} does not match app version $APP_VERSION"
-            exit 1
-          fi
-
-      - name: Ad-hoc sign (no Apple Developer ID required)
+      - name: Build signed universal app
+        id: signed
+        env:
+          SIGNING_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION_SHA1 }}
+          SIGNING_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          codesign --force --deep --sign - "build/export/SystemEQ for Mac.app"
-          codesign --verify --verbose=2 "build/export/SystemEQ for Mac.app"
+          bash Scripts/prepare_signed_release.sh --build --identity "$SIGNING_IDENTITY" --team "$SIGNING_TEAM" --record "$RUNNER_TEMP/systemeq-signed.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'systemeq-signed.json').read_text())
+          run = Path(record['run']).resolve(strict=True)
+          base = (Path.cwd() / 'LocalArtifacts/SignedReleases').resolve(strict=True)
+          if run.parent != base or not run.name.startswith('release-') or record['phase'] != 'signed' or Path(record['manifest']) != run / 'manifest.json':
+              raise SystemExit('Invalid signed run record')
+          manifest = json.loads((run / 'manifest.json').read_text())
+          if manifest['version'] != os.environ['VERSION'] or manifest['team'] != os.environ['SIGNING_TEAM']:
+              raise SystemExit('Signed app version/team mismatch')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+              stream.write(f'run={run}\n')
+          PY
+
+      - name: Notarize and staple app
+        id: notarized
+        env:
+          SIGNED_RUN: ${{ steps.signed.outputs.run }}
+          NOTARY_KEYCHAIN: ${{ steps.credentials.outputs.keychain }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SIGNING_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          bash Scripts/prepare_signed_release.sh --notarize "$SIGNED_RUN" --profile SystemEQ-CI --keychain "$NOTARY_KEYCHAIN" --record "$RUNNER_TEMP/systemeq-notarized.json"
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'systemeq-notarized.json').read_text())
+          run = Path(os.environ['SIGNED_RUN']).resolve(strict=True)
+          if record['phase'] != 'notarized' or Path(record['run']).resolve(strict=True) != run or Path(record['completed']) != run / 'completed.json':
+              raise SystemExit('Invalid notarization record')
+          complete = json.loads((run / 'completed.json').read_text())
+          if complete['version'] != os.environ['VERSION'] or complete['team'] != os.environ['SIGNING_TEAM']:
+              raise SystemExit('Notarized app version/team mismatch')
+          app, package = ((run / complete[key]).resolve(strict=True) for key in ('app', 'zip'))
+          if not app.is_relative_to(run) or not package.is_relative_to(run) or hashlib.sha256(package.read_bytes()).hexdigest() != complete['zip_sha256']:
+              raise SystemExit('Notarized package mismatch')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+              stream.write(f'app={app}\nzip={package}\n')
+          PY
 
       - name: Generate DMG background
         run: |
           swift dmg-assets/generate-background.swift build/dmg-background.png
 
       - name: Create DMG
+        env:
+          NOTARIZED_APP: ${{ steps.notarized.outputs.app }}
         run: |
           mkdir -p build/dmg_content
-          cp -R "build/export/SystemEQ for Mac.app" build/dmg_content/
+          ditto "$NOTARIZED_APP" "build/dmg_content/SystemEQ for Mac.app"
           cp "dmg-assets/README - HOW TO OPEN.txt" build/dmg_content/
 
           create-dmg \
@@ -126,25 +205,88 @@ jobs:
                 "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg"
             }
 
-      - name: Create ZIP
+      - name: Finalize signed distribution packages
+        env:
+          SIGNED_RUN: ${{ steps.signed.outputs.run }}
+          NOTARIZED_ZIP: ${{ steps.notarized.outputs.zip }}
+          NOTARY_KEYCHAIN: ${{ steps.credentials.outputs.keychain }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SIGNING_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          cd build/export
-          zip -r "../SystemEQ-v${{ steps.version.outputs.version }}.zip" "SystemEQ for Mac.app"
+          bash Scripts/prepare_signed_release.sh --notarize-dmg "$SIGNED_RUN" --dmg "build/SystemEQ-v${VERSION}.dmg" --profile SystemEQ-CI --keychain "$NOTARY_KEYCHAIN" --record "$RUNNER_TEMP/systemeq-dmg.json"
+          python3 - <<'PY'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'systemeq-dmg.json').read_text())
+          run = Path(os.environ['SIGNED_RUN']).resolve(strict=True)
+          if record['phase'] != 'dmg' or Path(record['run']).resolve(strict=True) != run or Path(record['completed']) != run / 'dmg/completed.json':
+              raise SystemExit('Invalid DMG completion record')
+          complete = json.loads((run / 'dmg/completed.json').read_text())
+          dmg = (run / complete['dmg']).resolve(strict=True)
+          if not dmg.is_relative_to(run) or complete['version'] != os.environ['VERSION'] or complete['team'] != os.environ['SIGNING_TEAM'] or hashlib.sha256(dmg.read_bytes()).hexdigest() != complete['dmg_sha256']:
+              raise SystemExit('DMG completion mismatch')
+          shutil.copyfile(dmg, f"build/SystemEQ-v{os.environ['VERSION']}.dmg")
+          shutil.copyfile(os.environ['NOTARIZED_ZIP'], f"build/SystemEQ-v{os.environ['VERSION']}.zip")
+          PY
 
       - name: Get file sizes
         id: sizes
         run: |
-          DMG_SIZE=$(ls -lh "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" | awk '{print $5}')
-          ZIP_SIZE=$(ls -lh "build/SystemEQ-v${{ steps.version.outputs.version }}.zip" | awk '{print $5}')
-          echo "dmg_size=$DMG_SIZE" >> $GITHUB_OUTPUT
-          echo "zip_size=$ZIP_SIZE" >> $GITHUB_OUTPUT
+          DMG_SIZE=$(stat -f '%z' "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg")
+          ZIP_SIZE=$(stat -f '%z' "build/SystemEQ-v${{ steps.version.outputs.version }}.zip")
+          if ! [[ "$DMG_SIZE" =~ ^[1-9][0-9]*$ && "$ZIP_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid distribution package size" >&2
+            exit 1
+          fi
+          echo "dmg_size=$DMG_SIZE bytes" >> "$GITHUB_OUTPUT"
+          echo "zip_size=$ZIP_SIZE bytes" >> "$GITHUB_OUTPUT"
 
       - name: Verify finished distribution packages
+        env:
+          SIGNING_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          bash Scripts/verify_release_artifacts.sh \
+          bash Scripts/verify_release_artifacts.sh --distribution "$SIGNING_TEAM" \
             "build/SystemEQ-v${{ steps.version.outputs.version }}.zip" \
             "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
             "${{ steps.version.outputs.version }}"
+
+      - name: Preserve signing diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signing-diagnostics
+          path: |
+            LocalArtifacts/SignedReleases/**/*.json
+            LocalArtifacts/SignedReleases/**/*.log
+          if-no-files-found: ignore
+
+      - name: Remove temporary signing credentials
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, shutil, subprocess
+          from pathlib import Path
+          base = Path(os.environ['RUNNER_TEMP']).resolve()
+          record = base / 'systemeq-keychain-state.json'
+          if record.is_symlink():
+              raise SystemExit('Symlinked credential state')
+          if not record.exists():
+              raise SystemExit(0)
+          state = json.loads(record.read_text())
+          owned = Path(state['owned'])
+          keychain = Path(state['keychain'])
+          if not owned.is_absolute() or owned.is_symlink() or owned.resolve(strict=True) != owned or owned.parent != base or not owned.is_dir() or not owned.name.startswith('systemeq-signing-') or keychain != owned / 'signing.keychain-db':
+              raise SystemExit('Unowned credential directory')
+          if keychain.is_symlink() or (keychain.exists() and not keychain.is_file()):
+              raise SystemExit('Invalid credential keychain')
+          if not isinstance(state['search'], list) or not state['search'] or not all(isinstance(path, str) and Path(path).is_absolute() and '\n' not in path and '\r' not in path for path in state['search']):
+              raise SystemExit('Invalid original keychain search list')
+          subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *state['search']], check=True)
+          if keychain.exists():
+              subprocess.run(['security', 'delete-keychain', str(keychain)], check=True)
+          shutil.rmtree(owned)
+          record.unlink()
+          PY
 
       - name: Recheck release eligibility before publication
         env:
@@ -177,11 +319,9 @@ jobs:
             ### Installation
             1. Download `.dmg` file below
             2. Open the DMG and drag **SystemEQ for Mac** to **Applications**
-            3. **First launch:** right-click the app → **Open** → confirm the Gatekeeper dialog
-               (the app is ad-hoc signed but not notarized — Apple Developer ID is not used by this project)
-            4. Alternative: open Terminal and run
-               `xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"`
-            5. Or via Homebrew (quarantine flag handled automatically):
+            3. Open the app normally; these packages are Developer ID signed and notarized
+            4. Allow the requested audio permission; signing does not grant microphone or system audio access
+            5. Or via Homebrew:
                ```
                brew trust denzam/systemeq
                brew install --cask denzam/systemeq/systemeq

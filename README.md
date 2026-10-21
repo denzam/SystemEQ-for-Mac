@@ -76,9 +76,8 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-The Cask removes the macOS quarantine attribute during installation, so the
-app opens without the manual Gatekeeper confirmation required by the DMG.
-The app remains ad-hoc signed and is not notarized.
+The signed release workflow requires Developer ID signatures and notarization for
+DMG and ZIP packages. Earlier releases used ad-hoc signing; check the release notes.
 
 > **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
 > explicitly before Homebrew will load them, and there is no way for a tap
@@ -86,23 +85,15 @@ The app remains ad-hoc signed and is not notarized.
 > `Refusing to load cask ... from untrusted tap`. It is a one-time command per
 > machine. On Homebrew 5 and older, skip it — the command does not exist there.
 
-#### Option 2: Download DMG or ZIP — manual Gatekeeper confirmation required
+#### Option 2: Download DMG or ZIP
 
-1. Download the latest `.dmg` or `.zip` from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`
-3. **First launch (one of):**
-   - **Right-click the app → Open → Open** in the confirmation dialog, or
-   - Try to launch, then open **System Settings → Privacy & Security → Open Anyway**, or
-   - From Terminal:
-     ```bash
-     xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-     ```
-4. On macOS 14.4+, leave Audio Backend set to **Automatic**. Install BlackHole only if SystemEQ offers the fallback or you select BlackHole mode yourself.
+1. Download a Developer ID signed, notarized package from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`, or unzip the ZIP and move the app there
+3. Open the app normally and allow the requested audio permission
+4. On macOS 14.4+, leave Audio Backend set to **Automatic**; install BlackHole if SystemEQ offers the fallback or you select BlackHole mode
 
-> The app is **ad-hoc signed** (free, self-signed) — not notarized with an
-> Apple Developer ID. Gatekeeper therefore shows a warning on first launch.
-> This is intentional: SystemEQ stays free and does not require the paid
-> Apple Developer Program. The Gatekeeper steps above are one-time only.
+Signing and notarization do not grant Microphone or System Audio Recording permission.
+Local development builds may still use ad-hoc signing.
 
 #### Option 3: Build from Source
 
@@ -264,20 +255,17 @@ On Homebrew 5 and older the `trust` command does not exist — skip it.
 
 ### The app asks for microphone access again after an update
 
-Expected. SystemEQ is ad-hoc signed, so its signature changes with every build
-and macOS treats each update as a new app. Grant the permission again in
-**System Settings → Privacy & Security → Microphone**.
+A first audio permission request is required even for a signed, notarized app.
+Ad-hoc builds or a change of signing identity can cause another request; compatible
+Developer ID signatures allow macOS to recognize updates as the same app.
+See [Apple’s code identity explanation](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
 
 ### macOS says the app "cannot be opened"
 
-The app is not notarized — see the Security Notice section below.
-Right-click the app → **Open** → confirm, or run:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/SystemEQ for Mac.app"
-```
-
-Installing through Homebrew avoids this — the Cask clears the flag for you.
+Check that the package is a Developer ID signed, notarized release; older releases
+and local ad-hoc builds use a different signing policy. Download the package again
+from the official release page and report the exact macOS message and app version
+if a signed release is still blocked.
 
 ### No sound after setup
 
@@ -298,7 +286,7 @@ macOS Sound settings.
 - This app is **not sandboxed** (incompatible with CoreAudio/AUHAL virtual audio devices)
 - **No telemetry, analytics, or data collection** — all data stays on your Mac
 - Only install from official [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-- Ad-hoc signed — right-click → Open on first launch to bypass Gatekeeper
+- Distribution workflow requires Developer ID signing, notarization and Gatekeeper validation
 
 ### Security audits
 

@@ -228,6 +228,9 @@ elif name == "xcodebuild":
     for base, executable in components:
         (base / "Contents/MacOS").mkdir(parents=True)
         (base / "Contents/Frameworks").mkdir()
+        (base / "Contents/Resources").mkdir()
+        (base / "Contents/Resources/Assets.car").write_bytes(b"assets")
+        (base / "Contents/Resources/EQDatabase.db").write_bytes(b"database")
         (base / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.4.4", "CFBundleExecutable": executable}))
         for target in [base / "Contents/MacOS" / executable, *(base / "Contents/Frameworks" / lib for lib in ("libprojectM-4.4.dylib", "libprojectM-4-playlist.4.dylib"))]:
             target.write_bytes(bytes.fromhex("cafebabe") + b"fixture")
@@ -236,6 +239,10 @@ elif name == "xcodebuild":
 elif name == "codesign":
     if "-R" in args and not args[args.index("-R") + 1].startswith("="): sys.stderr.write("literal requirement must start with ="); sys.exit(7)
     if "--force" in args and mode == "sign": sys.exit(7)
+    if "--force" in args and args[-1].endswith(".dmg"):
+        if mode == "dmg-sign": sys.exit(7)
+        path = pathlib.Path(args[-1])
+        path.write_bytes(path.read_bytes() + b"|signed")
     if "--verify" in args and mode == "verify": sys.stderr.write("verification failure fixture"); sys.exit(7)
     if "--verify" in args and mode == "distribution-signature" and "DistributionCheck" in args[-1]: sys.exit(7)
     if "--display" in args:
@@ -243,6 +250,7 @@ elif name == "codesign":
         team = "OTHERTEAM0" if mode == "wrong-team" else "1234567890"
         flags = "0x0(none)" if mode == "no-runtime" else "0x10000(runtime)"
         sys.stderr.write(f"TeamIdentifier={team}\\nAuthority=Developer ID Application: Fixture\\nCodeDirectory v=20500 flags={flags}\\n")
+        if mode == "adhoc": sys.stderr.write("Signature=adhoc\\n")
         if mode != "no-timestamp": sys.stderr.write("Timestamp=fixture timestamp\\n")
         entitlements = {}
         if args[-1].endswith("SystemEQ for Mac.app"):
@@ -251,6 +259,18 @@ elif name == "codesign":
         if entitlements: sys.stdout.buffer.write(plistlib.dumps(entitlements) if "--xml" in args else b"[Dict] fixture entitlements")
 elif name == "lipo":
     print("arm64" if mode == "thin" else "arm64 x86_64")
+elif name == "otool":
+    print(args[-1] + ":\\n\\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)")
+elif name == "hdiutil":
+    if args[0] == "attach":
+        if mode == "mount": sys.exit(7)
+        mount = pathlib.Path(args[args.index("-mountpoint") + 1])
+        source = pathlib.Path(os.environ["DISTRIBUTION_APP"])
+        shutil.copytree(source, mount / source.name)
+        if mode == "dmg-mismatch": (mount / source.name / "Contents/mismatch").write_bytes(b"different")
+    elif args[0] == "detach":
+        if mode == "detach": sys.exit(7)
+    else: sys.exit(99)
 elif name == "ditto":
     if "-x" in args:
         if mode == "extract": sys.exit(7)
@@ -266,6 +286,7 @@ elif name == "ditto":
 elif name == "xcrun":
     if args[:2] == ["notarytool", "submit"]:
         if mode == "notary-command": sys.exit(7)
+        pathlib.Path(os.environ["SUBMITTED_PATH"]).write_text(args[2])
         if mode == "notary-empty": sys.exit(0)
         if mode == "notary-malformed": print("broken JSON"); sys.exit(0)
         print(json.dumps({"id": "12345678-1234-1234-1234-123456789abc", "status": "Uploaded"}))
@@ -281,28 +302,37 @@ elif name == "xcrun":
     elif args[:2] == ["notarytool", "log"]:
         if mode == "log-command": sys.exit(7)
         if mode == "log-malformed": print("broken JSON"); sys.exit(0)
-        digest = "0" * 64 if mode == "log-wrong-archive" else hashlib.sha256(b"fixture zip").hexdigest()
+        digest = "0" * 64 if mode == "log-wrong-archive" else hashlib.sha256(pathlib.Path(pathlib.Path(os.environ["SUBMITTED_PATH"]).read_text()).read_bytes()).hexdigest()
         print(json.dumps({"jobId": args[2], "status": "Invalid" if mode in ("notary-rejected", "log-rejected") else "Accepted", "sha256": digest, "issues": None}))
     elif args[:2] == ["stapler", "staple"]:
         if mode == "staple": sys.exit(7)
-        (pathlib.Path(args[-1]) / "Contents/notary-ticket.fixture").write_bytes(b"notary ticket")
+        path = pathlib.Path(args[-1])
+        if path.suffix == ".dmg":
+            if mode == "dmg-staple": sys.exit(7)
+            path.write_bytes(path.read_bytes() + b"|ticket")
+        else:
+            (path / "Contents/notary-ticket.fixture").write_bytes(b"notary ticket")
     elif args[:2] == ["stapler", "validate"]:
         if mode == "staple-validate": sys.exit(7)
         if mode == "distribution-ticket" and "DistributionCheck" in args[-1]: sys.exit(7)
-        if not (pathlib.Path(args[-1]) / "Contents/notary-ticket.fixture").is_file(): sys.exit(8)
+        path = pathlib.Path(args[-1])
+        if path.suffix == ".dmg":
+            if mode == "dmg-ticket" or not path.read_bytes().endswith(b"|ticket"): sys.exit(8)
+        elif not (path / "Contents/notary-ticket.fixture").is_file(): sys.exit(8)
     else: sys.exit(99)
 elif name == "spctl":
+    if mode == "dmg-gatekeeper" and "open" in args: sys.exit(7)
     if mode == "gatekeeper": sys.exit(7)
     if mode == "distribution-gatekeeper" and "DistributionCheck" in args[-1]: sys.exit(7)
 else: sys.exit(99)
 '''
-        for name in ("security", "xcodebuild", "codesign", "lipo", "ditto", "xcrun", "spctl", "otool"):
+        for name in ("security", "xcodebuild", "codesign", "lipo", "ditto", "xcrun", "spctl", "otool", "hdiutil"):
             target = self.bin / name
             target.write_text(body)
             target.chmod(0o755)
         self.outside = self.root / "user-data"
         self.outside.write_bytes(b"preserve user data")
-        self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", CALL_LOG=str(self.log), OUTSIDE=str(self.outside))
+        self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", CALL_LOG=str(self.log), OUTSIDE=str(self.outside), SUBMITTED_PATH=str(self.root / "submitted-path"))
 
     def invoke(self, *args, mode=""):
         return subprocess.run(
@@ -503,6 +533,106 @@ else: sys.exit(99)
         self.assertIn(["xcrun", "stapler", "validate", str(directory / complete["app"])], calls)
         self.assertTrue(any(call[0] == "spctl" for call in calls))
         result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertNotEqual(result.returncode, 0)
+
+    def distribution_fixture(self):
+        directory = self.prepared()
+        result = self.invoke("--notarize", directory, "--profile", "fixture")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        complete = json.loads((directory / "completed.json").read_text())
+        self.env["DISTRIBUTION_APP"] = str(directory / complete["app"])
+        source = Path(__file__).resolve().parent / "verify_release_artifacts.sh"
+        shutil.copyfile(source, self.scripts / source.name)
+        dmg = self.root / "input.dmg"
+        dmg.write_bytes(b"fixture dmg")
+        return directory, directory / complete["zip"], dmg
+
+    def test_machine_record_is_written_only_after_success(self):
+        record = self.root / "signed.json"
+        result = self.invoke("--build", "--identity", self.identity, "--team", self.team, "--record", record)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        state = json.loads(record.read_text())
+        self.assertEqual(state["phase"], "signed")
+        directory = Path(state["run"])
+        complete_record = self.root / "notarized.json"
+        result = self.invoke("--notarize", directory, "--profile", "fixture", "--record", complete_record, mode="info-command")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(complete_record.exists())
+        result = self.invoke("--resume", directory, "--profile", "fixture", "--keychain", "fixture.keychain", "--record", complete_record)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(complete_record.read_text())["phase"], "notarized")
+        self.assertTrue(any("--keychain" in call for call in self.calls() if call[:2] == ["xcrun", "notarytool"]))
+        before = record.read_bytes()
+        self.log.write_text("")
+        result = self.invoke("--build", "--identity", self.identity, "--team", self.team, "--record", record)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(record.read_bytes(), before)
+        self.assertEqual(self.calls(), [])
+
+    def test_dmg_finalization_preserves_source_and_never_rebuilds_app(self):
+        directory, package, dmg = self.distribution_fixture()
+        before = dmg.read_bytes(), package.read_bytes()
+        record = self.root / "dmg.json"
+        self.log.write_text("")
+        result = self.invoke("--notarize-dmg", directory, "--dmg", dmg, "--profile", "fixture", "--record", record)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        complete = json.loads((directory / "dmg/completed.json").read_text())
+        final = directory / complete["dmg"]
+        self.assertEqual(json.loads(record.read_text())["phase"], "dmg")
+        self.assertTrue(final.read_bytes().endswith(b"|signed|ticket"))
+        self.assertEqual((dmg.read_bytes(), package.read_bytes()), before)
+        self.assertEqual((directory / "dmg/SystemEQ-signed.dmg").read_bytes(), b"fixture dmg|signed")
+        calls = self.calls()
+        self.assertFalse(any(call[0] == "xcodebuild" for call in calls))
+        signed = [call for call in calls if call[0] == "codesign" and "--force" in call]
+        self.assertEqual(len(signed), 1)
+        self.assertTrue(signed[0][-1].endswith(".dmg"))
+        self.assertEqual(sum(call[:3] == ["xcrun", "notarytool", "submit"] for call in calls), 1)
+
+    def test_dmg_notary_failure_and_resume_use_one_immutable_upload(self):
+        directory, _, dmg = self.distribution_fixture()
+        self.log.write_text("")
+        result = self.invoke("--notarize-dmg", directory, "--dmg", dmg, "--profile", "fixture", mode="log-command")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((directory / "dmg/completed.json").exists())
+        signed = (directory / "dmg/SystemEQ-signed.dmg").read_bytes()
+        result = self.invoke("--resume-dmg", directory, "--profile", "fixture")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((directory / "dmg/SystemEQ-signed.dmg").read_bytes(), signed)
+        self.assertEqual(sum(call[:3] == ["xcrun", "notarytool", "submit"] for call in self.calls()), 1)
+
+    def test_dmg_failures_never_complete_and_keep_signed_source(self):
+        for mode in ("notary-empty", "notary-malformed", "notary-rejected", "info-mismatch", "log-wrong-archive", "dmg-staple", "dmg-ticket", "dmg-gatekeeper", "mount", "detach", "dmg-mismatch"):
+            with self.subTest(mode=mode):
+                directory, package, dmg = self.distribution_fixture()
+                before = dmg.read_bytes(), package.read_bytes()
+                result = self.invoke("--notarize-dmg", directory, "--dmg", dmg, "--profile", "fixture", mode=mode)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((directory / "dmg/completed.json").exists())
+                self.assertEqual((dmg.read_bytes(), package.read_bytes()), before)
+                signed = directory / "dmg/SystemEQ-signed.dmg"
+                if (directory / "dmg/manifest.json").exists():
+                    self.assertEqual(signed.read_bytes(), b"fixture dmg|signed")
+
+    def test_distribution_verifier_rejects_identity_runtime_timestamp_ticket_and_mismatch(self):
+        directory, package, dmg = self.distribution_fixture()
+        dmg.write_bytes(b"fixture dmg|ticket")
+        command = ["bash", str(self.scripts / "verify_release_artifacts.sh"), "--distribution", self.team, str(package), str(dmg), "1.4.4"]
+        for mode in ("", "wrong-team", "no-runtime", "no-timestamp", "debug-entitlement", "adhoc", "thin", "dmg-ticket", "dmg-mismatch", "mount", "detach"):
+            with self.subTest(mode=mode):
+                result = subprocess.run(command, env=dict(self.env, FAIL_MODE=mode), capture_output=True, text=True, timeout=30)
+                if mode:
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        app = Path(self.env["DISTRIBUTION_APP"])
+        extra = app / "Contents/MacOS/extra"
+        extra.write_bytes(bytes.fromhex("cafebabe"))
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        extra.unlink()
+        (app / "Contents/notary-ticket.fixture").unlink()
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
 
 
@@ -754,6 +884,196 @@ print(response.get("raw", json.dumps(response["json"])) if "raw" not in response
             self.assertNotEqual(result.returncode, 0, result.stdout)
             self.assertEqual(before, self.snapshot())
             self.assertFalse(self.calls.exists())
+
+
+class ReleaseWorkflowCredentialTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="systemeq-workflow-tests-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.repo = self.root / "repo with spaces"
+        (self.repo / "Scripts").mkdir(parents=True)
+        (self.repo / "Scripts/prepare_signed_release.sh").write_text("#!/bin/bash\nexit 0\n")
+        self.runner = self.root / "runner"
+        self.runner.mkdir()
+        self.output = self.root / "output"
+        self.output.write_text("preserve\n")
+        self.calls = self.root / "calls.jsonl"
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.workflow = (Path(__file__).resolve().parent.parent / ".github/workflows/release.yml").read_text()
+        self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", RUNNER_TEMP=str(self.runner), GITHUB_OUTPUT=str(self.output), CALLS=str(self.calls), CERTIFICATE_P12="Zml4dHVyZSBjZXJ0aWZpY2F0ZQ==", CERTIFICATE_PASSWORD="fixture-p12-password", SIGNING_IDENTITY="A" * 40, SIGNING_TEAM="ABCDE12345", NOTARY_APPLE_ID="fixture@example.invalid", NOTARY_PASSWORD="fixture-notary-password", VERSION="1.4.4")
+        stub = r"""#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+name = Path(sys.argv[0]).name
+with Path(os.environ['CALLS']).open('a') as stream:
+    stream.write(json.dumps([name, *args]) + '\n')
+mode = os.environ.get('MODE', '')
+if name == 'security' and args == ['list-keychains', '-d', 'user']:
+    if mode == 'search-fail':
+        sys.exit(9)
+    if mode == 'relative-search':
+        print('"relative.keychain-db"')
+        sys.exit(0)
+    if mode == 'newline-search':
+        print('"/fixture/broken\nkeychain-db"')
+        sys.exit(0)
+    print('' if mode == 'empty-search' else '\"/fixture/login.keychain-db\"')
+    sys.exit(0)
+failure = (mode == 'import' and args[0] == 'import') or (mode == 'store' and name == 'xcrun') or (mode == 'restore' and args[0] == 'list-keychains') or (mode == 'delete' and args[0] == 'delete-keychain')
+if failure:
+    print(' '.join(os.environ[key] for key in ('CERTIFICATE_PASSWORD', 'NOTARY_PASSWORD', 'SIGNING_IDENTITY')), file=sys.stderr)
+    sys.exit(9)
+if name == 'security' and args[0] == 'create-keychain':
+    Path(args[-1]).write_bytes(b'fixture keychain')
+if name == 'security' and args[0] == 'delete-keychain':
+    Path(args[-1]).unlink()
+"""
+        for name in ("security", "xcrun"):
+            path = self.bin / name
+            path.write_text(stub)
+            path.chmod(0o755)
+        self.state = self.runner / "systemeq-keychain-state.json"
+        self.unrelated = self.runner / "unrelated"
+        self.unrelated.write_bytes(b"preserve user data")
+
+    def command(self, step):
+        section = self.workflow.split(f"      - name: {step}\n", 1)[1].split("\n      - name:", 1)[0]
+        return textwrap.dedent(section.split("        run: |\n", 1)[1])
+
+    def invoke(self, step, **values):
+        return subprocess.run(["/bin/bash", "-e", "-o", "pipefail", "-c", self.command(step)], cwd=self.repo, env=dict(self.env, **values), capture_output=True, text=True, timeout=20)
+
+    def setup_credentials(self, **values):
+        return self.invoke("Configure temporary signing credentials", **values)
+
+    def cleanup_credentials(self, **values):
+        return self.invoke("Remove temporary signing credentials", **values)
+
+    def test_setup_and_cleanup_restore_search_list_and_preserve_unrelated_data(self):
+        result = self.setup_credentials()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(self.state.read_text())
+        keychain = Path(state['keychain'])
+        self.assertTrue(keychain.is_file())
+        self.assertEqual(keychain.stat().st_mode & 0o777, 0o600)
+        self.assertIn(f"keychain={keychain}\n", self.output.read_text())
+        self.assertEqual(self.cleanup_credentials().returncode, 0)
+        self.assertFalse(self.state.exists())
+        self.assertFalse(Path(state['owned']).exists())
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertIn(['security', 'list-keychains', '-d', 'user', '-s', '/fixture/login.keychain-db'], calls)
+        self.assertTrue(all('submit' not in call for call in calls))
+        self.assertEqual(self.unrelated.read_bytes(), b"preserve user data")
+
+    def test_invalid_secrets_and_search_fail_before_outputs_or_owned_state(self):
+        for values in ({'CERTIFICATE_PASSWORD': ''}, {'SIGNING_IDENTITY': 'invalid'}, {'SIGNING_TEAM': 'bad'}, {'MODE': 'empty-search'}, {'MODE': 'search-fail'}, {'MODE': 'relative-search'}, {'MODE': 'newline-search'}):
+            with self.subTest(values=values):
+                result = self.setup_credentials(**values)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.state.exists())
+                self.assertEqual(self.output.read_text(), 'preserve\n')
+                self.assertEqual(list(self.runner.glob('systemeq-signing-*')), [])
+
+    def test_partial_setup_failure_redacts_secrets_and_can_be_cleaned(self):
+        for mode in ('import', 'store'):
+            with self.subTest(mode=mode):
+                result = self.setup_credentials(MODE=mode)
+                self.assertNotEqual(result.returncode, 0)
+                for key in ('CERTIFICATE_PASSWORD', 'NOTARY_PASSWORD', 'SIGNING_IDENTITY'):
+                    self.assertNotIn(self.env[key], result.stderr + result.stdout)
+                self.assertEqual(self.output.read_text(), 'preserve\n')
+                self.assertTrue(self.state.exists())
+                self.assertEqual(self.cleanup_credentials().returncode, 0)
+                self.assertEqual(self.unrelated.read_bytes(), b"preserve user data")
+
+    def test_cleanup_command_failures_keep_evidence_and_report_failure(self):
+        for mode in ('restore', 'delete'):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.setup_credentials().returncode, 0)
+                state = json.loads(self.state.read_text())
+                result = self.cleanup_credentials(MODE=mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(self.state.exists())
+                self.assertTrue(Path(state['owned']).is_dir())
+                self.assertEqual(self.cleanup_credentials().returncode, 0)
+
+    def test_cleanup_rejects_malformed_symlinked_or_unowned_state_without_calls(self):
+        self.assertEqual(self.cleanup_credentials().returncode, 0)
+        self.state.symlink_to(self.runner / 'missing')
+        self.assertNotEqual(self.cleanup_credentials().returncode, 0)
+        self.assertFalse(self.calls.exists())
+        self.state.unlink()
+        self.state.write_text('{}')
+        self.assertNotEqual(self.cleanup_credentials().returncode, 0)
+        self.assertFalse(self.calls.exists())
+        self.state.unlink()
+        self.assertEqual(self.setup_credentials().returncode, 0)
+        state = json.loads(self.state.read_text())
+        original = self.state.read_bytes()
+        calls = self.calls.read_bytes()
+        for field, value in [('owned', str(self.root)), ('keychain', str(self.unrelated)), ('search', []), ('search', 'invalid')]:
+            changed = dict(state, **{field: value})
+            self.state.write_text(json.dumps(changed))
+            self.assertNotEqual(self.cleanup_credentials().returncode, 0)
+            self.assertEqual(self.calls.read_bytes(), calls)
+        self.state.write_bytes(original)
+        keychain = Path(state['keychain'])
+        keychain.unlink()
+        keychain.symlink_to(self.unrelated)
+        self.assertNotEqual(self.cleanup_credentials().returncode, 0)
+        self.assertEqual(self.calls.read_bytes(), calls)
+        self.assertEqual(self.unrelated.read_bytes(), b"preserve user data")
+        keychain.unlink()
+        self.assertEqual(self.cleanup_credentials().returncode, 0)
+
+    def record_fixture(self, phase):
+        run = self.repo / 'LocalArtifacts/SignedReleases/release-fixture'
+        run.mkdir(parents=True, exist_ok=True)
+        app = run / 'final/SystemEQ for Mac.app'
+        app.mkdir(parents=True, exist_ok=True)
+        package = run / 'final/SystemEQ.zip'
+        package.write_bytes(b'fixture zip')
+        import hashlib
+        complete = {'version': '1.4.4', 'team': self.env['SIGNING_TEAM'], 'app': str(app.relative_to(run)), 'zip': str(package.relative_to(run)), 'zip_sha256': hashlib.sha256(package.read_bytes()).hexdigest()}
+        (run / 'completed.json').write_text(json.dumps(complete))
+        (run / 'manifest.json').write_text(json.dumps(complete))
+        (self.repo / 'build').mkdir(exist_ok=True)
+        (run / 'dmg').mkdir(exist_ok=True)
+        dmg = run / 'dmg/SystemEQ.dmg'
+        dmg.write_bytes(b'fixture dmg')
+        dmg_complete = dict(complete, dmg=str(dmg.relative_to(run)), dmg_sha256=hashlib.sha256(dmg.read_bytes()).hexdigest())
+        (run / 'dmg/completed.json').write_text(json.dumps(dmg_complete))
+        record = {'phase': phase, 'run': str(run), 'manifest': str(run / 'manifest.json'), 'completed': str(run / ('dmg/completed.json' if phase == 'dmg' else 'completed.json'))}
+        name = {'signed': 'signed', 'notarized': 'notarized', 'dmg': 'dmg'}[phase]
+        path = self.runner / f'systemeq-{name}.json'
+        path.write_text(json.dumps(record))
+        self.env.update(SIGNED_RUN=str(run), NOTARY_KEYCHAIN='/fixture/keychain', NOTARIZED_ZIP=str(package))
+        return run, path, record
+
+    def test_record_consumers_accept_healthy_and_reject_bad_metadata_before_outputs(self):
+        steps = {'signed': 'Build signed universal app', 'notarized': 'Notarize and staple app', 'dmg': 'Finalize signed distribution packages'}
+        for phase, step in steps.items():
+            with self.subTest(phase=phase):
+                run, path, record = self.record_fixture(phase)
+                result = self.invoke(step)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for malformed in ('', '{}', json.dumps(dict(record, phase='wrong'))):
+                    path.write_text(malformed)
+                    before = self.output.read_bytes()
+                    self.assertNotEqual(self.invoke(step).returncode, 0)
+                    self.assertEqual(self.output.read_bytes(), before)
+                path.write_text(json.dumps(record))
+                manifest = run / {'signed': 'manifest.json', 'notarized': 'completed.json', 'dmg': 'dmg/completed.json'}[phase]
+                original = json.loads(manifest.read_text())
+                for key, value in [('version', '9.9.9'), ('team', 'BADTEAM000'), *([] if phase == 'signed' else [('zip_sha256' if phase == 'notarized' else 'dmg_sha256', '0' * 64)])]:
+                    manifest.write_text(json.dumps(dict(original, **{key: value})))
+                    before = self.output.read_bytes()
+                    self.assertNotEqual(self.invoke(step).returncode, 0)
+                    self.assertEqual(self.output.read_bytes(), before)
+                manifest.write_text(json.dumps(original))
 
 
 if __name__ == "__main__":
