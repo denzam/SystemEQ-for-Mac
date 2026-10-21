@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
     # Allow manual trigger
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   update-database:
     runs-on: macos-latest
@@ -26,15 +30,20 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/jaakkopasanen/AutoEq.git AutoEq
           echo "AutoEQ cloned successfully"
+
+      - name: Verify database generators
+        run: python3 Scripts/test_eq_database_builder.py -v
       
       - name: Generate AutoEQ Index
         run: |
-          swift Scripts/generate_autoeq_index.swift
+          set -euo pipefail
+          swift Scripts/generate_autoeq_index.swift --input AutoEq/results/INDEX.md --output Scripts/AutoEqIndex.json
           echo "Index generated"
 
       - name: Build EQ Database
         run: |
-          swift Scripts/build_eq_database.swift
+          set -euo pipefail
+          swift Scripts/build_eq_database.swift --index Scripts/AutoEqIndex.json --autoeq-root AutoEq --output "SystemEQ for Mac/Resources/EQDatabase.db"
           test -f "SystemEQ for Mac/Resources/EQDatabase.db"
           test ! -e "SystemEQ for Mac/EQDatabase.db"
           echo "Database built"
@@ -42,15 +51,25 @@ jobs:
       - name: Get database stats
         id: stats
         run: |
-          SIZE=$(ls -lh "SystemEQ for Mac/Resources/EQDatabase.db" | awk '{print $5}')
+          set -euo pipefail
+          SIZE=$(stat -f '%z' "SystemEQ for Mac/Resources/EQDatabase.db")
           DATE=$(date +%Y-%m-%d)
-          echo "size=$SIZE" >> $GITHUB_OUTPUT
-          echo "date=$DATE" >> $GITHUB_OUTPUT
+          REVISION=$(git -C AutoEq rev-parse HEAD)
+          if ! [[ "$SIZE" =~ ^[1-9][0-9]*$ && "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && "$REVISION" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo "Invalid database size, date or AutoEQ revision" >&2
+            exit 1
+          fi
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
       
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: |
+            Scripts/AutoEqIndex.json
+            SystemEQ for Mac/Resources/EQDatabase.db
           commit-message: "chore: Update EQ Database (${{ steps.stats.outputs.date }})"
           title: "🔄 Update EQ Database - ${{ steps.stats.outputs.date }}"
           body: |
@@ -60,8 +79,9 @@ jobs:
             
             ### Changes
             - Updated `EQDatabase.db` with latest AutoEQ data
-            - Database size: ${{ steps.stats.outputs.size }}
+            - Database size: ${{ steps.stats.outputs.size }} bytes
             - Build date: ${{ steps.stats.outputs.date }}
+            - AutoEQ revision: ${{ steps.stats.outputs.revision }}
             
             ### Source
             - [AutoEQ Repository](https://github.com/jaakkopasanen/AutoEq)

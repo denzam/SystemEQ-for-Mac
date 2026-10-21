@@ -2,6 +2,7 @@
 
 import Foundation
 import SQLite3
+import Darwin
 
 // MARK: - Data Models
 
@@ -50,54 +51,73 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 
 class EQDatabaseBuilder {
     private var db: OpaquePointer?
-    private let dbPath: String
+    private var dbPath: String
+    private let outputPath: String
+    private let indexPath: String?
+    private let autoEQRoot: URL
     private var headphones: [String: Int] = [:]
     private var nextHeadphoneId = 1
     private var nextPresetId = 1
     
-    init(dbPath: String) {
+    init(dbPath: String, indexPath: String? = nil, autoEQRoot: String = "AutoEq") {
         self.dbPath = dbPath
+        self.outputPath = dbPath
+        self.indexPath = indexPath
+        self.autoEQRoot = URL(fileURLWithPath: autoEQRoot).standardizedFileURL.resolvingSymlinksInPath()
     }
     
     func build() throws {
-        print("🏗️  Building EQ Database...")
-        
-        // 1. Create database
-        try createDatabase()
-        
-        // 2. Parse AutoEQ index
-        print("📂 Parsing AutoEQ index...")
-        let autoEQData = try parseAutoEQIndex()
-        print("   Found \(autoEQData.count) entries")
-        
-        // 3. Insert data
-        print("💾 Inserting data into database...")
-        try insertData(autoEQData)
-        
-        // 4. Create indexes
-        print("🔍 Creating search indexes...")
-        try createIndexes()
-        
-        // 5. Insert metadata (version)
-        print("📝 Adding metadata...")
-        try insertMetadata()
-        
-        // 6. Optimize
-        print("⚡ Optimizing database...")
-        try optimize()
-        
-        sqlite3_close(db)
-        
-        let fileSize = try getFileSize(dbPath)
-        print("✅ Database built successfully!")
-        print("   Path: \(dbPath)")
-        print("   Size: \(fileSize) MB")
+        let entries = try parseAutoEQIndex()
+        guard !entries.isEmpty else { throw failure("Empty AutoEQ index") }
+        let output = URL(fileURLWithPath: outputPath).standardizedFileURL
+        var outputInfo = stat()
+        if Darwin.lstat(output.path, &outputInfo) == 0 {
+            guard outputInfo.st_mode & S_IFMT == S_IFREG else { throw failure("Output must be a regular file") }
+        } else if errno != ENOENT {
+            throw failure("Cannot inspect output: \(String(cString: strerror(errno)))")
+        }
+        dbPath = output.deletingLastPathComponent().appendingPathComponent(".EQDatabase-\(UUID().uuidString).tmp").path
+        let descriptor = Darwin.open(dbPath, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw failure("Cannot create staging database: \(String(cString: strerror(errno)))") }
+        var published = false
+        do {
+            guard Darwin.close(descriptor) == 0 else { throw failure("Cannot close staging file") }
+            try createDatabase()
+            try executeSQL("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE")
+            try insertData(entries)
+            try createIndexes()
+            try insertMetadata()
+            try validateDatabase()
+            try executeSQL("COMMIT")
+            try optimize()
+            guard sqlite3_close(db) == SQLITE_OK else { throw failure("Cannot close staging database") }
+            db = nil
+            let fileSize = try getFileSize(dbPath)
+            guard Darwin.rename(dbPath, output.path) == 0 else {
+                throw failure("Cannot publish database: \(String(cString: strerror(errno)))")
+            }
+            published = true
+            print("Database built: \(output.path) (\(fileSize) MB)")
+        } catch {
+            var errors = [error.localizedDescription]
+            if let db {
+                let status = sqlite3_close_v2(db)
+                self.db = nil
+                if status != SQLITE_OK { errors.append("Database cleanup failed: \(status)") }
+            }
+            if !published {
+                for path in [dbPath, dbPath + "-journal", dbPath + "-wal", dbPath + "-shm"] {
+                    if FileManager.default.fileExists(atPath: path) {
+                        do { try FileManager.default.removeItem(atPath: path) }
+                        catch { errors.append("Staging cleanup failed: \(error.localizedDescription)") }
+                    }
+                }
+            }
+            throw failure(errors.joined(separator: "; "))
+        }
     }
     
     private func createDatabase() throws {
-        // Remove old database
-        try? FileManager.default.removeItem(atPath: dbPath)
-        
         // Open new database
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
             throw NSError(domain: "Cannot create database", code: -1)
@@ -174,7 +194,7 @@ class EQDatabaseBuilder {
     
     private func parseAutoEQIndex() throws -> [OfflineIndexEntry] {
         // Try multiple paths for flexibility
-        let possiblePaths = [
+        let possiblePaths = indexPath.map { [$0] } ?? [
             "Scripts/AutoEqIndex.json",           // When run from project root
             "AutoEqIndex.json",                   // When run from Scripts folder
             "SystemEQ for Mac/AutoEqIndex.json"   // Legacy path
@@ -198,13 +218,9 @@ class EQDatabaseBuilder {
         var processedCount = 0
         
         for entry in entries {
-            // Insert headphone
-            let headphoneId = try insertHeadphone(
-                brand: entry.brand,
-                model: entry.model,
-                type: entry.type,
-                source: entry.source
-            )
+            guard [entry.brand, entry.model, entry.type, entry.source].allSatisfy({
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.contains("\0")
+            }) else { throw failure("Invalid index metadata") }
             
             // Parse and insert preset
             var bands10: [Float] = []
@@ -214,8 +230,8 @@ class EQDatabaseBuilder {
             
             // Try to parse FixedBandEQ.txt (10-band)
             if let fixedPath = entry.pathFixedBandEQ {
-                let fullPath = "AutoEq/\(fixedPath)"
-                if let result = parseFixedBandEQFile(path: fullPath) {
+                let fullPath = try inputPath(fixedPath)
+                if let result = try parseFixedBandEQFile(path: fullPath) {
                     bands10 = result.bands.map { Float($0.gain) }
                     preampGain = Float(result.preamp ?? 0.0)
                 }
@@ -223,8 +239,8 @@ class EQDatabaseBuilder {
             
             // Try to parse GraphicEQ.txt (31-band)
             if let graphicPath = entry.pathGraphicEQ {
-                let fullPath = "AutoEq/\(graphicPath)"
-                if let result = parseGraphicEQFile(path: fullPath) {
+                let fullPath = try inputPath(graphicPath)
+                if let result = try parseGraphicEQFile(path: fullPath) {
                     // Map to 31-band centers
                     bands31 = thirtyOneCenters.map { center in
                         if let closest = result.bands.min(by: { abs($0.freq - center) < abs($1.freq - center) }) {
@@ -240,8 +256,8 @@ class EQDatabaseBuilder {
             
             // Try to parse ParametricEQ.txt
             if let parametricPath = entry.pathParametric {
-                let fullPath = "AutoEq/\(parametricPath)"
-                if let result = parseParametricEQFile(path: fullPath) {
+                let fullPath = try inputPath(parametricPath)
+                if let result = try parseParametricEQFile(path: fullPath) {
                     parametricBands = result.bands.map { band in
                         ParametricBandEntry(
                             filterType: band.type,
@@ -256,7 +272,14 @@ class EQDatabaseBuilder {
                 }
             }
             
-            // If we have at least 10-band or 31-band data, insert preset
+            guard preampGain.isFinite, bands10.allSatisfy(\.isFinite), bands31.allSatisfy(\.isFinite),
+                  parametricBands.allSatisfy({ $0.gain.isFinite && $0.qFactor.isFinite && $0.qFactor > 0 }) else {
+                throw failure("Nonfinite preset values: \(entry.brand) \(entry.model)")
+            }
+            guard !bands10.isEmpty || !bands31.isEmpty else {
+                throw failure("No usable EQ files: \(entry.brand) \(entry.model)")
+            }
+            let headphoneId = try insertHeadphone(brand: entry.brand, model: entry.model, type: entry.type, source: entry.source)
             if !bands10.isEmpty || !bands31.isEmpty {
                 // Determine if hand-crafted (oratory1990)
                 let isHandCrafted = entry.source.lowercased().contains("oratory")
@@ -315,7 +338,7 @@ class EQDatabaseBuilder {
     }
     
     private func insertHeadphone(brand: String, model: String, type: String, source: String) throws -> Int {
-        let key = "\(brand)_\(model)_\(source)"
+        let key = [brand, model, source].joined(separator: "\0")
         
         if let existingId = headphones[key] {
             return existingId
@@ -339,7 +362,7 @@ class EQDatabaseBuilder {
         _ = (source as NSString).utf8String.map { sqlite3_bind_text(insertStmt, 4, $0, -1, SQLITE_TRANSIENT) }
         sqlite3_bind_text(insertStmt, 5, "Unknown", -1, SQLITE_TRANSIENT)
         
-        sqlite3_step(insertStmt)
+        guard sqlite3_step(insertStmt) == SQLITE_DONE else { throw failure("Cannot insert headphone") }
         
         // Get the ID (either newly inserted or existing)
         let selectSQL = "SELECT id FROM headphones WHERE brand = ? AND model = ? AND source = ?"
@@ -392,7 +415,7 @@ class EQDatabaseBuilder {
     private func insertFixedBand10(presetId: Int, bandIndex: Int, frequency: Double, gain: Float) throws {
         let sql = "INSERT INTO fixed_band_10 (preset_id, band_index, frequency, gain) VALUES (?, ?, ?, ?)"
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw failure("Cannot prepare band insert") }
         defer { sqlite3_finalize(statement) }
         
         sqlite3_bind_int(statement, 1, Int32(presetId))
@@ -400,13 +423,13 @@ class EQDatabaseBuilder {
         sqlite3_bind_double(statement, 3, frequency)
         sqlite3_bind_double(statement, 4, Double(gain))
         
-        sqlite3_step(statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure("Cannot insert fixed band") }
     }
     
     private func insertGraphicEQ31(presetId: Int, bandIndex: Int, frequency: Double, gain: Float) throws {
         let sql = "INSERT INTO graphic_eq_31 (preset_id, band_index, frequency, gain) VALUES (?, ?, ?, ?)"
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw failure("Cannot prepare graphic band insert") }
         defer { sqlite3_finalize(statement) }
         
         sqlite3_bind_int(statement, 1, Int32(presetId))
@@ -414,13 +437,13 @@ class EQDatabaseBuilder {
         sqlite3_bind_double(statement, 3, frequency)
         sqlite3_bind_double(statement, 4, Double(gain))
         
-        sqlite3_step(statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure("Cannot insert graphic band") }
     }
     
     private func insertParametricBand(presetId: Int, bandIndex: Int, band: ParametricBandEntry) throws {
         let sql = "INSERT INTO parametric_bands (preset_id, band_index, filter_type, frequency, gain, q_factor) VALUES (?, ?, ?, ?, ?, ?)"
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw failure("Cannot prepare parametric band insert") }
         defer { sqlite3_finalize(statement) }
         
         sqlite3_bind_int(statement, 1, Int32(presetId))
@@ -430,7 +453,7 @@ class EQDatabaseBuilder {
         sqlite3_bind_double(statement, 5, Double(band.gain))
         sqlite3_bind_double(statement, 6, Double(band.qFactor))
         
-        sqlite3_step(statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure("Cannot insert parametric band") }
     }
     
     private func createIndexes() throws {
@@ -484,11 +507,60 @@ class EQDatabaseBuilder {
             throw NSError(domain: "SQL execution failed", code: -1)
         }
     }
+
+    private func failure(_ message: String) -> NSError {
+        NSError(domain: "EQDatabaseBuilder", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    private func scalar(_ sql: String) throws -> String {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw failure("Cannot prepare validation query") }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else {
+            throw failure("Missing validation result")
+        }
+        let result = String(cString: text)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure("Unexpected validation rows") }
+        return result
+    }
+
+    private func validateDatabase() throws {
+        guard try scalar("PRAGMA integrity_check") == "ok",
+              try scalar("SELECT count(*) FROM pragma_foreign_key_check") == "0",
+              let presets = Int(try scalar("SELECT count(*) FROM presets")), presets > 0,
+              try scalar("SELECT count(*) FROM metadata") == "4",
+              try scalar("SELECT value FROM metadata WHERE key='schema_version'") == "1",
+              try scalar("SELECT count(*) FROM presets p WHERE (SELECT count(*) FROM fixed_band_10 WHERE preset_id=p.id) NOT IN (0,10) OR (SELECT count(*) FROM graphic_eq_31 WHERE preset_id=p.id) NOT IN (0,31) OR ((SELECT count(*) FROM fixed_band_10 WHERE preset_id=p.id)=0 AND (SELECT count(*) FROM graphic_eq_31 WHERE preset_id=p.id)=0)") == "0",
+              try scalar("SELECT count(*) FROM fixed_band_10 WHERE band_index<0 OR band_index>=10 OR frequency<=0") == "0",
+              try scalar("SELECT count(*) FROM graphic_eq_31 WHERE band_index<0 OR band_index>=31 OR frequency<=0") == "0",
+              try scalar("SELECT count(*) FROM parametric_bands WHERE band_index<0 OR frequency<=0 OR q_factor<=0") == "0" else {
+            throw failure("Database validation failed")
+        }
+        try executeSQL("INSERT INTO headphones_fts(headphones_fts, rank) VALUES('integrity-check', 1)")
+    }
+
+    private func inputPath(_ relativePath: String) throws -> String {
+        guard relativePath.hasPrefix("results/"), !relativePath.contains("\0"),
+              !relativePath.split(separator: "/").contains("..") else { throw failure("Invalid EQ path") }
+        let url = autoEQRoot.appendingPathComponent(relativePath).standardizedFileURL.resolvingSymlinksInPath()
+        guard url.path.hasPrefix(autoEQRoot.path + "/") else { throw failure("EQ path escapes input root") }
+        return url.path
+    }
+
+    private func readEQFile(_ path: String) throws -> String? {
+        var info = stat()
+        if Darwin.lstat(path, &info) != 0 {
+            if errno == ENOENT { return nil }
+            throw failure("Cannot inspect EQ input: \(path)")
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw failure("EQ input is not a regular file: \(path)") }
+        return try String(contentsOfFile: path, encoding: .utf8)
+    }
     
     // MARK: - File Parsers
     
-    private func parseFixedBandEQFile(path: String) -> (bands: [(freq: Double, gain: Double)], preamp: Double?)? {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+    private func parseFixedBandEQFile(path: String) throws -> (bands: [(freq: Double, gain: Double)], preamp: Double?)? {
+        guard let content = try readEQFile(path) else { return nil }
         
         var bands: [(freq: Double, gain: Double)] = []
         var preamp: Double?
@@ -499,9 +571,8 @@ class EQDatabaseBuilder {
             // Parse preamp: "Preamp: -6.4 dB"
             if trimmed.hasPrefix("Preamp:") {
                 let parts = trimmed.split(separator: " ")
-                if parts.count >= 2, let value = Double(parts[1]) {
-                    preamp = value
-                }
+                guard parts.count >= 2, let value = Double(parts[1]), value.isFinite else { throw failure("Invalid preamp: \(path)") }
+                preamp = value
             }
             
             // Parse filter: "Filter 1: ON PK Fc 31 Hz Gain 6.4 dB Q 1.41"
@@ -519,17 +590,20 @@ class EQDatabaseBuilder {
                     }
                 }
                 
-                if let f = freq, let g = gain {
-                    bands.append((freq: f, gain: g))
-                }
+                guard parts.contains("ON"), let f = freq, let g = gain,
+                      f.isFinite, f > 0, g.isFinite else { throw failure("Invalid fixed band: \(path)") }
+                bands.append((freq: f, gain: g))
             }
         }
         
-        return bands.isEmpty ? nil : (bands: bands, preamp: preamp)
+        guard bands.count == 10, zip(bands, bands.dropFirst()).allSatisfy({ $0.0.freq < $0.1.freq }) else {
+            throw failure("Expected 10 ordered fixed bands: \(path)")
+        }
+        return (bands: bands, preamp: preamp)
     }
     
-    private func parseGraphicEQFile(path: String) -> (bands: [(freq: Double, gain: Double)], preamp: Double?)? {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+    private func parseGraphicEQFile(path: String) throws -> (bands: [(freq: Double, gain: Double)], preamp: Double?)? {
+        guard let content = try readEQFile(path) else { return nil }
         
         var bands: [(freq: Double, gain: Double)] = []
         var preamp: Double?
@@ -540,9 +614,8 @@ class EQDatabaseBuilder {
             // Parse preamp
             if trimmed.hasPrefix("Preamp:") {
                 let parts = trimmed.split(separator: " ")
-                if parts.count >= 2, let value = Double(parts[1]) {
-                    preamp = value
-                }
+                guard parts.count >= 2, let value = Double(parts[1]), value.isFinite else { throw failure("Invalid preamp: \(path)") }
+                preamp = value
             }
             
             // Parse GraphicEQ: "GraphicEQ: 20 -0.2; 21 -0.2; ..."
@@ -552,20 +625,22 @@ class EQDatabaseBuilder {
                 
                 for pair in pairs {
                     let values = pair.trimmingCharacters(in: .whitespaces).split(separator: " ")
-                    if values.count == 2,
-                       let freq = Double(values[0]),
-                       let gain = Double(values[1]) {
-                        bands.append((freq: freq, gain: gain))
-                    }
+                    guard values.count == 2, let freq = Double(values[0]), let gain = Double(values[1]),
+                          freq.isFinite, freq > 0, gain.isFinite else { throw failure("Invalid graphic band: \(path)") }
+                    bands.append((freq: freq, gain: gain))
                 }
             }
         }
         
-        return bands.isEmpty ? nil : (bands: bands, preamp: preamp)
+        guard bands.count >= 31, bands.first!.freq <= 20, bands.last!.freq >= 20000,
+              zip(bands, bands.dropFirst()).allSatisfy({ $0.0.freq < $0.1.freq }) else {
+            throw failure("Incomplete graphic EQ: \(path)")
+        }
+        return (bands: bands, preamp: preamp)
     }
     
-    private func parseParametricEQFile(path: String) -> (bands: [(type: String, freq: Double, gain: Double, q: Double)], preamp: Double?)? {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+    private func parseParametricEQFile(path: String) throws -> (bands: [(type: String, freq: Double, gain: Double, q: Double)], preamp: Double?)? {
+        guard let content = try readEQFile(path) else { return nil }
         
         var bands: [(type: String, freq: Double, gain: Double, q: Double)] = []
         var preamp: Double?
@@ -576,9 +651,8 @@ class EQDatabaseBuilder {
             // Parse preamp
             if trimmed.hasPrefix("Preamp:") {
                 let parts = trimmed.split(separator: " ")
-                if parts.count >= 2, let value = Double(parts[1]) {
-                    preamp = value
-                }
+                guard parts.count >= 2, let value = Double(parts[1]), value.isFinite else { throw failure("Invalid preamp: \(path)") }
+                preamp = value
             }
             
             // Parse filter: "Filter 1: ON PK Fc 105 Hz Gain 6.5 dB Q 0.69"
@@ -604,13 +678,17 @@ class EQDatabaseBuilder {
                     }
                 }
                 
-                if let f = freq, let g = gain, let qVal = q {
-                    bands.append((type: filterType, freq: f, gain: g, q: qVal))
+                guard parts.contains("ON"), ["PK", "LS", "HS", "LSC", "HSC"].contains(filterType),
+                      let f = freq, let g = gain, let qVal = q,
+                      f.isFinite, f > 0, g.isFinite, qVal.isFinite, qVal > 0 else {
+                    throw failure("Invalid parametric band: \(path)")
                 }
+                bands.append((type: filterType, freq: f, gain: g, q: qVal))
             }
         }
         
-        return bands.isEmpty ? nil : (bands: bands, preamp: preamp)
+        guard !bands.isEmpty else { throw failure("Empty parametric EQ: \(path)") }
+        return (bands: bands, preamp: preamp)
     }
     
     private func getFileSize(_ path: String) throws -> String {
@@ -623,10 +701,25 @@ class EQDatabaseBuilder {
 
 // MARK: - Main
 
-let outputPath = "SystemEQ for Mac/Resources/EQDatabase.db"
-let builder = EQDatabaseBuilder(dbPath: outputPath)
-
 do {
+    let arguments = Array(CommandLine.arguments.dropFirst())
+    let allowed: Set<String> = ["--output", "--index", "--autoeq-root"]
+    var options: [String: String] = [:]
+    var offset = 0
+    while offset < arguments.count {
+        let flag = arguments[offset]
+        guard allowed.contains(flag), options[flag] == nil, offset + 1 < arguments.count,
+              !arguments[offset + 1].isEmpty, !arguments[offset + 1].hasPrefix("--") else {
+            throw NSError(domain: "Invalid or missing argument: \(flag)", code: 1)
+        }
+        options[flag] = arguments[offset + 1]
+        offset += 2
+    }
+    let builder = EQDatabaseBuilder(
+        dbPath: options["--output"] ?? "SystemEQ for Mac/Resources/EQDatabase.db",
+        indexPath: options["--index"],
+        autoEQRoot: options["--autoeq-root"] ?? "AutoEq"
+    )
     try builder.build()
 } catch {
     print("❌ Error: \(error)")
