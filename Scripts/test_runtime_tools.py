@@ -1618,6 +1618,545 @@ class ProjectMConfigureTests(unittest.TestCase):
         self.assertEqual(actual, expected)
 
 
+class ProjectMAutomationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-projectm-automation-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        root = Path(__file__).resolve().parent.parent
+        renderer = (root / "ProjectMHelper/ProjectMHelperApp.swift").read_text()
+        signatures = [
+            "    func setShuffle(_ enabled: Bool) {",
+            "    func setPresetLocked(_ locked: Bool) {",
+            "    private func adaptRenderScale() {",
+            "    private func resetAdaptiveScale() {",
+            "    private func updateCurrentPresetName() {",
+            "    func nextPreset() {",
+            "    func previousPreset() {",
+            "    func randomPreset() {",
+        ]
+        permission = "    private var allowsAutomaticPresetTransitions: Bool {"
+        if permission in renderer:
+            signatures.append(permission)
+        operation = "    private func performPresetOperation(_ operation: () -> Void) {"
+        if operation in renderer:
+            signatures.append(operation)
+        methods = []
+        for signature in signatures:
+            start = renderer.index(signature)
+            cursor = renderer.index("{", start)
+            depth = 1
+            end = cursor + 1
+            while depth:
+                depth += (renderer[end] == "{") - (renderer[end] == "}")
+                end += 1
+            methods.append(renderer[start:end])
+        source = directory / "automation.swift"
+        source.write_text(cls.fixture("\n".join(methods)))
+        cls.binary = directory / "automation-tests"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-parse-as-library", "-module-cache-path", str(directory / "module-cache"),
+             str(root / "SystemEQ for Mac/Audio/Visualizer/ProjectM/ProjectMAdaptiveFPS.swift"),
+             str(source), "-o", str(cls.binary)],
+            capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    @staticmethod
+    def fixture(methods):
+        return r'''import Foundation
+
+final class PendingQueue {
+    var callbacks: [() -> Void] = []
+    func async(execute: @escaping () -> Void) { callbacks.append(execute) }
+    func drain() {
+        let pending = callbacks
+        callbacks.removeAll()
+        for callback in pending { callback() }
+    }
+}
+enum DispatchQueue { static let main = PendingQueue() }
+final class Engine { var locked = false }
+final class PresetOperationState { var operationFailed = false }
+struct PresetInfo { let path: String }
+final class Playlist {
+    let paths = ["/presets/first.milk", "/presets/second.milk"]
+    var position = 0
+    var calls: [String] = []
+    var shuffle = true
+}
+func projectm_set_preset_locked(_ engine: Engine, _ locked: Bool) { engine.locked = locked }
+func projectm_playlist_set_shuffle(_ playlist: Playlist, _ enabled: Bool) { playlist.shuffle = enabled }
+func projectm_playlist_play_next(_ playlist: Playlist, _ hardCut: Bool) {
+    playlist.calls.append("next:\(hardCut)")
+    playlist.position = (playlist.position + 1) % playlist.paths.count
+}
+func projectm_playlist_play_previous(_ playlist: Playlist, _ hardCut: Bool) {
+    playlist.calls.append("previous:\(hardCut)")
+    playlist.position = (playlist.position + playlist.paths.count - 1) % playlist.paths.count
+}
+func projectm_playlist_set_position(_ playlist: Playlist, _ rawPosition: UInt32, _ hardCut: Bool) {
+    let position = Int(rawPosition)
+    playlist.calls.append("position:\(hardCut)")
+    playlist.position = position
+}
+func projectm_playlist_get_position(_ playlist: Playlist) -> Int { playlist.position }
+func projectm_playlist_item(_ playlist: Playlist, _ position: Int) -> UnsafeMutablePointer<CChar>? {
+    strdup(playlist.paths[position])
+}
+func projectm_free_string(_ pointer: UnsafeMutablePointer<CChar>) { free(pointer) }
+func CACurrentMediaTime() -> Double { 100 }
+final class Controller {
+    var projectMHandle: Engine? = Engine()
+    var playlistHandle: Playlist? = Playlist()
+    var playlistCallbackContext: PresetOperationState?
+    var isShuffleEnabled = true
+    var isPresetLocked = false
+    var adaptiveFPS = ProjectMAdaptiveFPS()
+    var measuredFPS = 10
+    var currentPresetPath = "/presets/first.milk"
+    var currentPresetName = "first"
+    var needsBackingResize = false
+    var fpsFrameCount = 7
+    var fpsWindowStart = 0.0
+    var presetCount = 2
+    var filteredPresets = [PresetInfo(path: "/presets/first.milk"), PresetInfo(path: "/presets/second.milk")]
+    func observe(_ count: Int = 1) { for _ in 0..<count { adaptRenderScale() } }
+''' + methods + r'''
+}
+@main enum AutomationTests {
+    static func expect(_ condition: Bool, _ message: String) {
+        if !condition {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+            exit(1)
+        }
+    }
+    static func main() {
+        let scenario = CommandLine.arguments[1]
+        let controller = Controller()
+        let playlist = controller.playlistHandle!
+        switch scenario {
+        case "flags":
+            for auto in [false, true] {
+                for locked in [false, true] {
+                    for lockFirst in [false, true] {
+                        if lockFirst {
+                            controller.setPresetLocked(locked)
+                            controller.setShuffle(auto)
+                        } else {
+                            controller.setShuffle(auto)
+                            controller.setPresetLocked(locked)
+                        }
+                        expect(controller.projectMHandle!.locked == (!auto || locked), "Incorrect library lock")
+                        expect(playlist.shuffle == auto, "Incorrect playlist shuffle")
+                    }
+                }
+            }
+            controller.setShuffle(false)
+            controller.setPresetLocked(true)
+            controller.setPresetLocked(false)
+            expect(controller.projectMHandle!.locked, "Unlock bypassed Auto=false")
+            controller.projectMHandle = nil
+            controller.playlistHandle = nil
+            controller.setShuffle(true)
+            controller.setPresetLocked(true)
+            expect(controller.isShuffleEnabled && controller.isPresetLocked, "Flags lost without handles")
+        case "disabled", "locked":
+            if scenario == "disabled" { controller.setShuffle(false) }
+            else { controller.setPresetLocked(true) }
+            controller.observe(20)
+            expect(controller.adaptiveFPS.adaptiveScale == ProjectMAdaptiveFPS.minScale, "Scale did not adapt")
+            expect(controller.needsBackingResize, "Missing backing resize")
+            expect(DispatchQueue.main.callbacks.isEmpty, "Forbidden skip was queued")
+            DispatchQueue.main.drain()
+            expect(playlist.calls.isEmpty && controller.currentPresetName == "first", "Forbidden transition")
+        case "queued-auto", "queued-lock", "queued-path", "queued-playlist", "queued-fps", "healthy", "teardown":
+            var owner: Controller? = scenario == "teardown" ? Controller() : controller
+            weak var weakOwner = owner
+            let pendingPlaylist = owner!.playlistHandle!
+            owner!.observe(6)
+            expect(DispatchQueue.main.callbacks.count == 1, "Expected one queued skip")
+            expect(pendingPlaylist.calls.isEmpty, "Skip ran before queue delivery")
+            switch scenario {
+            case "queued-auto": owner!.setShuffle(false)
+            case "queued-lock": owner!.setPresetLocked(true)
+            case "queued-path": owner!.currentPresetPath = "/presets/replaced.milk"
+            case "queued-playlist": owner!.playlistHandle = nil
+            case "queued-fps": owner!.measuredFPS = ProjectMAdaptiveFPS.targetMinFPS
+            case "teardown": owner = nil
+            default: break
+            }
+            if scenario == "teardown" { expect(weakOwner == nil, "Queued skip retained controller") }
+            DispatchQueue.main.drain()
+            if scenario == "healthy" {
+                expect(pendingPlaylist.calls == ["next:false"], "Expected exactly one adaptive transition")
+                expect(controller.currentPresetPath == pendingPlaylist.paths[1], "Preset path not updated")
+                expect(controller.currentPresetName == "second", "Preset name not updated")
+                expect(controller.adaptiveFPS.adaptiveScale == 1 && controller.measuredFPS == 0, "Adaptive state not reset")
+            } else {
+                expect(pendingPlaylist.calls.isEmpty, "Stale queued skip was executed")
+            }
+        case "manual":
+            for auto in [false, true] {
+                for locked in [false, true] {
+                    controller.setShuffle(auto)
+                    controller.setPresetLocked(locked)
+                    playlist.calls.removeAll()
+                    controller.nextPreset()
+                    controller.previousPreset()
+                    controller.randomPreset()
+                    expect(playlist.calls == ["next:false", "previous:false", "position:true"], "Manual controls changed")
+                    expect(controller.currentPresetPath == playlist.paths[playlist.position], "Manual identity stale")
+                }
+            }
+            playlist.calls.removeAll()
+            controller.presetCount = 0
+            controller.filteredPresets = []
+            controller.nextPreset()
+            controller.previousPreset()
+            controller.randomPreset()
+            expect(playlist.calls.isEmpty, "Empty playlist accepted manual transition")
+            controller.playlistHandle = nil
+            controller.nextPreset()
+            controller.previousPreset()
+            controller.randomPreset()
+        default: fatalError("Unknown scenario")
+        }
+        print("ProjectM automation: \(scenario) passed")
+    }
+}
+'''
+
+    def test_auto_and_lock_control_library_transitions(self):
+        self.run_scenario("flags")
+
+    def test_disabled_automation_keeps_scale_adaptation(self):
+        for scenario in ("disabled", "locked"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_queued_skip_rechecks_permission_and_preset(self):
+        for scenario in ("queued-auto", "queued-lock", "queued-path", "queued-playlist", "queued-fps", "teardown"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_enabled_automation_updates_identity_and_adaptive_state(self):
+        self.run_scenario("healthy")
+
+    def test_manual_transitions_remain_available(self):
+        self.run_scenario("manual")
+
+    def run_scenario(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"ProjectM automation: {scenario} passed", result.stdout)
+
+
+class ProjectMCallbackTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-projectm-callbacks-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        root = Path(__file__).resolve().parent.parent
+        renderer = (root / "ProjectMHelper/ProjectMHelperApp.swift").read_text()
+        methods = []
+        for signature in (
+            "    private final class PlaylistCallbackContext {", "    deinit {",
+            "    private func setupPlaylist(_ handle: OpaquePointer) {",
+            "    private func enqueuePlaylistEvent(", "    private func unregisterPlaylistCallbacks() {",
+            "    private func performPresetOperation(_ operation: () -> Void) {", "    func shutdown() {",
+            "    private func updateCurrentPresetName() {", "    private func resetAdaptiveScale() {",
+            "    func markPresetBroken(_ path: String, reason: String) {", "    func nextPreset() {",
+            "    func getStatus() -> [String: Any] {",
+        ):
+            start = renderer.index(signature)
+            cursor = renderer.index("{", start)
+            depth = 1
+            end = cursor + 1
+            while depth:
+                depth += (renderer[end] == "{") - (renderer[end] == "}")
+                end += 1
+            methods.append(renderer[start:end])
+        source = directory / "callbacks.swift"
+        source.write_text(cls.fixture("\n".join(methods)))
+        cls.binary = directory / "callback-tests"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-parse-as-library", "-module-cache-path", str(directory / "module-cache"),
+             str(root / "SystemEQ for Mac/Audio/Visualizer/ProjectM/ProjectMAdaptiveFPS.swift"),
+             str(source), "-o", str(cls.binary)], capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    @staticmethod
+    def fixture(methods):
+        return r'''import Foundation
+
+func expect(_ condition: Bool, _ message: String) {
+    if !condition {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
+        exit(1)
+    }
+}
+final class PendingQueue {
+    var callbacks: [() -> Void] = []
+    func async(execute: @escaping () -> Void) { callbacks.append(execute) }
+    func drain() {
+        var deliveries = 0
+        while !callbacks.isEmpty {
+            deliveries += 1
+            expect(deliveries <= 20, "Unbounded callback delivery")
+            callbacks.removeFirst()()
+        }
+    }
+}
+enum DispatchQueue { static let main = PendingQueue() }
+typealias Switched = @convention(c) (Bool, UInt32, UnsafeMutableRawPointer?) -> Void
+typealias Failed = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void
+final class Playlist {
+    let paths = ["/presets/first.milk", "/presets/second.milk", "/presets/third.milk", "/presets/fourth.milk"]
+    var position: UInt32 = 0
+    var switched: Switched?
+    var failed: Failed?
+    var switchedData: UnsafeMutableRawPointer?
+    var failedData: UnsafeMutableRawPointer?
+    var connected = true
+    var bad: Set<UInt32> = []
+    var attempts = 0
+    var topLevelCalls = 0
+    let retries = 5
+    func attempt(_ index: UInt32, retry: Int = 0) {
+        position = index
+        attempts += 1
+        if bad.contains(index) {
+            if retry < retries { attempt((index + 1) % UInt32(paths.count), retry: retry + 1) }
+            else { fail(paths[Int(index)], "exhausted") }
+        }
+        switched?(false, index, switchedData)
+    }
+    func fail(_ path: String, _ message: String) {
+        let filename = strdup(path)!
+        let reason = strdup(message)!
+        failed?(UnsafePointer(filename), UnsafePointer(reason), failedData)
+        memset(filename, 88, path.utf8.count)
+        memset(reason, 89, message.utf8.count)
+        free(filename)
+        free(reason)
+    }
+}
+var playlists: [OpaquePointer: Playlist] = [:]
+var nextHandle = 100
+var createFails = false
+var destructionCount = 0
+var deallocations = 0
+func projectm_playlist_create(_ engine: OpaquePointer) -> OpaquePointer? {
+    if createFails { return nil }
+    nextHandle += 1
+    let handle = OpaquePointer(bitPattern: nextHandle)!
+    playlists[handle] = Playlist()
+    return handle
+}
+func projectm_playlist_set_preset_switched_event_callback(_ handle: OpaquePointer, _ callback: Switched?, _ data: UnsafeMutableRawPointer?) {
+    playlists[handle]!.switched = callback
+    playlists[handle]!.switchedData = data
+}
+func projectm_playlist_set_preset_switch_failed_event_callback(_ handle: OpaquePointer, _ callback: Failed?, _ data: UnsafeMutableRawPointer?) {
+    playlists[handle]!.failed = callback
+    playlists[handle]!.failedData = data
+}
+func projectm_playlist_connect(_ handle: OpaquePointer, _ engine: OpaquePointer?) {
+    playlists[handle]!.connected = engine != nil
+}
+func projectm_playlist_destroy(_ handle: OpaquePointer) {
+    let playlist = playlists[handle]!
+    expect(playlist.switched == nil && playlist.failed == nil && !playlist.connected, "Callbacks not disconnected before destroy")
+    playlists.removeValue(forKey: handle)
+    destructionCount += 1
+}
+func projectm_destroy(_ handle: OpaquePointer) {}
+func projectm_playlist_get_position(_ handle: OpaquePointer) -> UInt32 { playlists[handle]!.position }
+func projectm_playlist_item(_ handle: OpaquePointer, _ position: UInt32) -> UnsafeMutablePointer<CChar>? {
+    let paths = playlists[handle]!.paths
+    return Int(position) < paths.count ? strdup(paths[Int(position)]) : nil
+}
+func projectm_free_string(_ pointer: UnsafeMutablePointer<CChar>) { free(pointer) }
+func projectm_playlist_play_next(_ handle: OpaquePointer, _ hardCut: Bool) {
+    let playlist = playlists[handle]!
+    playlist.topLevelCalls += 1
+    playlist.attempt((playlist.position + 1) % UInt32(playlist.paths.count))
+}
+func CACurrentMediaTime() -> Double { 100 }
+struct AudioBuffer { func deallocate() { deallocations += 1 } }
+enum PresetWeight: String { case all }
+final class VisualizerController {
+    var projectMHandle: OpaquePointer? = OpaquePointer(bitPattern: 1)!
+    var playlistHandle: OpaquePointer?
+    private var playlistCallbackContext: PlaylistCallbackContext?
+    var currentPresetName = "first"
+    var currentPresetPath = "/presets/first.milk"
+    var presetCount = 4
+    var isShuffleEnabled = true
+    var isPresetLocked = false
+    var currentCategory = "All"
+    var currentWeight = PresetWeight.all
+    var availableCategories = ["All"]
+    var adaptiveFPS = ProjectMAdaptiveFPS()
+    var measuredFPS = 10
+    var fpsFrameCount = 3
+    var fpsWindowStart = 0.0
+    var needsBackingResize = false
+    var brokenPresets: Set<String> = []
+    var saves = 0
+    var activityToken: NSObjectProtocol?
+    var audioBuffer = AudioBuffer()
+    var audioScratch = AudioBuffer()
+    func stopDisplayLink() {}
+    func saveBrokenPresets() { saves += 1 }
+    func start() { setupPlaylist(projectMHandle!) }
+    func automaticSwitch(_ index: UInt32) { performPresetOperation { playlists[playlistHandle!]!.attempt(index) } }
+    func warmAdaptiveState() {
+        for _ in 0..<4 { _ = adaptiveFPS.observe(measuredFPS: 10, presetLocked: false, hasPresetPath: true) }
+    }
+''' + methods + r'''
+}
+@main enum CallbackTests {
+    static func main() {
+        let scenario = CommandLine.arguments[1]
+        var owner: VisualizerController? = VisualizerController()
+        owner!.start()
+        let originalHandle = owner!.playlistHandle!
+        let playlist = playlists[originalHandle]!
+        owner!.warmAdaptiveState()
+        switch scenario {
+        case "success", "retry-success", "stale-success":
+            if scenario == "retry-success" { playlist.bad = [1] }
+            owner!.automaticSwitch(1)
+            if scenario == "stale-success" { owner!.automaticSwitch(3) }
+            expect(owner!.currentPresetName == "first", "Callback changed state inline")
+            DispatchQueue.main.drain()
+            let expected = scenario == "retry-success" ? "third" : scenario == "stale-success" ? "fourth" : "second"
+            expect(owner!.getStatus()["presetName"] as? String == expected, "Status/favorite identity stale")
+            expect(owner!.adaptiveFPS.adaptiveScale == 1 && owner!.measuredFPS == 0, "Adaptive state stale")
+            expect(owner!.brokenPresets.isEmpty, "Retry success blacklisted a preset")
+        case "exhaustion", "manual-exhaustion", "recovery-before-delivery":
+            playlist.bad = [0, 1, 2, 3]
+            if scenario == "manual-exhaustion" { owner!.nextPreset() }
+            else { owner!.automaticSwitch(1) }
+            expect(playlist.attempts == 6, "Library retry count changed")
+            expect(owner!.currentPresetName == "first", "Failure overwrote confirmed identity inline")
+            if scenario == "recovery-before-delivery" {
+                playlist.bad = []
+                owner!.nextPreset()
+            }
+            DispatchQueue.main.drain()
+            expect(owner!.brokenPresets == ["/presets/third.milk"] && owner!.saves == 1, "Failure strings not copied/persisted")
+            if scenario == "recovery-before-delivery" {
+                expect(owner!.currentPresetName == "fourth", "New healthy operation lost after exhaustion")
+                expect(playlist.topLevelCalls == 1 && playlist.attempts == 7, "Failure restarted retries")
+            } else {
+                expect(owner!.currentPresetName == "first" && owner!.adaptiveFPS.adaptiveScale == 0.25, "Failure reset identity/adaptive state")
+                expect(playlist.attempts == 6, "Exhaustion started another retry batch")
+            }
+        case "shutdown", "recreate", "deinit":
+            owner!.automaticSwitch(1)
+            weak var weakOwner = owner
+            if scenario == "deinit" {
+                owner = nil
+                expect(weakOwner == nil && deallocations == 2, "Queued callback retained owner")
+                expect(playlist.switched == nil && playlist.failed == nil && !playlist.connected, "Deinit left callbacks installed")
+            } else {
+                owner!.shutdown()
+                owner!.shutdown()
+                expect(destructionCount == 1, "Repeated shutdown destroyed twice")
+                if scenario == "recreate" {
+                    owner!.projectMHandle = OpaquePointer(bitPattern: 1)!
+                    owner!.start()
+                    owner!.automaticSwitch(3)
+                }
+            }
+            DispatchQueue.main.drain()
+            if let owner { expect(owner.currentPresetName == (scenario == "recreate" ? "fourth" : "first"), "Stale lifecycle callback applied") }
+        case "null-failure":
+            playlist.failed?(nil, nil, playlist.failedData)
+            let path = "/presets/null-message.milk"
+            path.withCString { playlist.failed?($0, nil, playlist.failedData) }
+            DispatchQueue.main.drain()
+            expect(owner!.brokenPresets == [path] && owner!.saves == 1, "Nullable failure arguments mishandled")
+        case "create-failure":
+            owner!.shutdown()
+            owner!.projectMHandle = OpaquePointer(bitPattern: 1)!
+            createFails = true
+            owner!.start()
+            expect(owner!.playlistHandle == nil, "Failed creation installed a playlist")
+            owner!.nextPreset()
+            owner!.shutdown()
+            DispatchQueue.main.drain()
+            expect(owner!.currentPresetName == "first", "Failed creation changed identity")
+        default: fatalError("Unknown scenario")
+        }
+        print("ProjectM callbacks: \(scenario) passed")
+    }
+}
+'''
+
+    def test_playlist_bridging_matches_pinned_c_api(self):
+        root = Path(__file__).resolve().parent.parent
+        includes = root / "Vendor/projectM/include"
+        self.assertEqual(includes.resolve(), includes, "Pinned include root contains a symlink")
+        pending = [includes / "projectM-4" / f"{name}.h" for name in (
+            "playlist_playback", "playlist_items", "playlist_callbacks", "playlist_core",
+        )]
+        checked = set()
+        while pending:
+            header = pending.pop()
+            if header in checked:
+                continue
+            self.assertTrue(header.resolve().is_relative_to(includes), f"Unpinned header: {header}")
+            text = header.read_text()
+            checked.add(header)
+            pending.extend(includes / name for name in re.findall(r'#include\s+"(projectM-4/[^\"]+)"', text))
+        source = '\n'.join(f'#include "projectM-4/{name}.h"' for name in (
+            "playlist_playback", "playlist_items", "playlist_callbacks",
+        ))
+        source += '\n_Static_assert(__builtin_types_compatible_p(__typeof__(&projectm_playlist_size), uint32_t (*)(projectm_playlist_handle)), "size ABI");'
+        source += '\n_Static_assert(__builtin_types_compatible_p(__typeof__(&projectm_playlist_connect), void (*)(projectm_playlist_handle, projectm_handle)), "connect ABI");'
+        result = subprocess.run(
+            ["xcrun", "clang", "-fsyntax-only", "-x", "c", "-Werror=incompatible-pointer-types",
+             "-I", str(root / "Vendor/projectM/include"),
+             "-include", str(root / "ProjectMHelper/ProjectMHelper-Bridging-Header.h"), "-"],
+            input=source, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_success_updates_status_and_adaptive_state(self):
+        self.run_scenario("success")
+
+    def test_retry_unwind_and_stale_success_preserve_latest_identity(self):
+        for scenario in ("retry-success", "stale-success"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_exhaustion_preserves_confirmed_state_and_retry_boundary(self):
+        for scenario in ("exhaustion", "manual-exhaustion", "recovery-before-delivery", "null-failure"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_shutdown_and_deinit_discard_pending_callbacks(self):
+        for scenario in ("shutdown", "recreate", "deinit", "create-failure"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def run_scenario(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"ProjectM callbacks: {scenario} passed", result.stdout)
+        if scenario in ("exhaustion", "manual-exhaustion", "recovery-before-delivery"):
+            self.assertIn(" — exhausted", result.stdout)
+
+
 class RuntimeToolsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1674,7 +2213,8 @@ final class Playlist {
     var positions: [(Int, Bool)] = []
     init(_ paths: [String]) { self.paths = paths }
 }
-func projectm_playlist_set_position(_ playlist: Playlist, _ position: Int, _ hardCut: Bool) {
+func projectm_playlist_set_position(_ playlist: Playlist, _ rawPosition: UInt32, _ hardCut: Bool) {
+    let position = Int(rawPosition)
     precondition(playlist.paths.indices.contains(position), "Position outside current playlist")
     playlist.positions.append((position, hardCut))
 }
@@ -1707,6 +2247,7 @@ final class Controller {
             currentPresetName = playlist.paths[position]
         }
     }
+    func performPresetOperation(_ operation: () -> Void) { operation() }
 ''' + methods + r'''
 }
 @main enum ShuffleTests {

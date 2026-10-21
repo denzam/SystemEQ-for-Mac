@@ -345,6 +345,17 @@ class VisualizerController: NSObject {
     private var openGLView: ProjectMOpenGLView?
     private var projectMHandle: OpaquePointer?
     private var playlistHandle: OpaquePointer?
+    private final class PlaylistCallbackContext {
+        weak var controller: VisualizerController?
+        var eventGeneration: UInt64 = 0
+        var operationFailed = false
+
+        init(_ controller: VisualizerController) {
+            self.controller = controller
+        }
+    }
+
+    private var playlistCallbackContext: PlaylistCallbackContext?
     // CADisplayLink is macOS 14+; stored as Any? so the property itself doesn't force the availability.
     // Real type is CADisplayLink — cast at use sites inside @available(macOS 14.0, *) blocks.
     private var displayLink: Any?
@@ -354,6 +365,9 @@ class VisualizerController: NSObject {
     private var presetCount: Int = 0
     private var isShuffleEnabled: Bool = true
     private var isPresetLocked: Bool = false
+    private var allowsAutomaticPresetTransitions: Bool {
+        isShuffleEnabled && !isPresetLocked
+    }
 
     // Category and weight filtering
     private var allPresets: [PresetInfo] = []
@@ -462,6 +476,7 @@ class VisualizerController: NSObject {
 
     deinit {
         stopDisplayLink()
+        unregisterPlaylistCallbacks()
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token)
         }
@@ -505,18 +520,7 @@ class VisualizerController: NSObject {
             )
         }
 
-        // Load blacklist + register preset-fail callback for runtime blacklisting
         loadBrokenPresets()
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        projectm_set_preset_switch_failed_event_callback(handle, { filenamePtr, messagePtr, userData in
-            guard let userData, let filenamePtr else { return }
-            let filename = String(cString: filenamePtr)
-            let message = messagePtr.map { String(cString: $0) } ?? ""
-            let controller = Unmanaged<VisualizerController>.fromOpaque(userData).takeUnretainedValue()
-            DispatchQueue.main.async {
-                controller.markPresetBroken(filename, reason: message)
-            }
-        }, selfPtr)
 
         // Set texture search paths (fixes GLD_TEXTURE_INDEX_2D unloadable warnings)
         let presetsPath = NSHomeDirectory() + "/Library/Application Support/SystemEQ/presets"
@@ -528,9 +532,7 @@ class VisualizerController: NSObject {
         }
 
         // Create playlist (always needed; will be populated by scanPresets → reloadPlaylist)
-        if let playlist = projectm_playlist_create(handle) {
-            playlistHandle = playlist
-        }
+        setupPlaylist(handle)
 
         // Ensure presets exist on disk; download in background on first run if empty.
         ensurePresetsAvailable(at: presetsPath) { [weak self] in
@@ -759,11 +761,6 @@ class VisualizerController: NSObject {
         brokenPresets.insert(path)
         saveBrokenPresets()
         print("[ProjectMHelper] Blacklisted preset: \((path as NSString).lastPathComponent) — \(reason)")
-        // Skip forward so we're not stuck on the broken one
-        if let playlist = playlistHandle {
-            projectm_playlist_play_next(playlist, false)
-            updateCurrentPresetName()
-        }
     }
 
     private func reloadPlaylist() {
@@ -796,7 +793,8 @@ class VisualizerController: NSObject {
                 if self.presetCount > 0 {
                     projectm_playlist_set_shuffle(playlist, self.isShuffleEnabled)
                     let randomIndex = Int.random(in: 0..<self.presetCount)
-                    projectm_playlist_set_position(playlist, randomIndex, false)
+                    guard let position = UInt32(exactly: randomIndex) else { return }
+                    self.performPresetOperation { _ = projectm_playlist_set_position(playlist, position, false) }
                     self.updateCurrentPresetName()
                 }
                 print(
@@ -830,8 +828,70 @@ class VisualizerController: NSObject {
         allPresets
     }
 
+    private func setupPlaylist(_ handle: OpaquePointer) {
+        guard let playlist = projectm_playlist_create(handle) else { return }
+        playlistHandle = playlist
+        let context = PlaylistCallbackContext(self)
+        playlistCallbackContext = context
+        let userData = Unmanaged.passUnretained(context).toOpaque()
+        projectm_playlist_set_preset_switched_event_callback(playlist, { _, index, userData in
+            guard let userData else { return }
+            let context = Unmanaged<PlaylistCallbackContext>.fromOpaque(userData).takeUnretainedValue()
+            context.controller?.enqueuePlaylistEvent(context, index: index, failure: nil)
+        }, userData)
+        projectm_playlist_set_preset_switch_failed_event_callback(playlist, { filenamePtr, messagePtr, userData in
+            guard let userData, let filenamePtr else { return }
+            let filename = String(cString: filenamePtr)
+            let message = messagePtr.map { String(cString: $0) } ?? ""
+            let context = Unmanaged<PlaylistCallbackContext>.fromOpaque(userData).takeUnretainedValue()
+            context.controller?.enqueuePlaylistEvent(context, index: nil, failure: (filename, message))
+        }, userData)
+    }
+
+    private func enqueuePlaylistEvent(
+        _ context: PlaylistCallbackContext,
+        index: UInt32?,
+        failure: (String, String)?
+    ) {
+        guard playlistCallbackContext === context, let playlist = playlistHandle else { return }
+        if failure != nil {
+            context.operationFailed = true
+        } else {
+            guard !context.operationFailed,
+                  let index,
+                  index == projectm_playlist_get_position(playlist) else { return }
+        }
+        context.eventGeneration &+= 1
+        let generation = context.eventGeneration
+        DispatchQueue.main.async { [weak self, weak context] in
+            guard let self, let context,
+                  self.playlistCallbackContext === context,
+                  self.playlistHandle != nil else { return }
+            if let (path, reason) = failure {
+                self.markPresetBroken(path, reason: reason)
+            } else if context.eventGeneration == generation {
+                self.updateCurrentPresetName()
+            }
+        }
+    }
+
+    private func unregisterPlaylistCallbacks() {
+        if let playlist = playlistHandle {
+            projectm_playlist_set_preset_switched_event_callback(playlist, nil, nil)
+            projectm_playlist_set_preset_switch_failed_event_callback(playlist, nil, nil)
+            projectm_playlist_connect(playlist, nil)
+        }
+        playlistCallbackContext = nil
+    }
+
+    private func performPresetOperation(_ operation: () -> Void) {
+        playlistCallbackContext?.operationFailed = false
+        operation()
+    }
+
     func shutdown() {
         stopDisplayLink()
+        unregisterPlaylistCallbacks()
 
         if let playlist = playlistHandle {
             projectm_playlist_destroy(playlist)
@@ -907,7 +967,7 @@ class VisualizerController: NSObject {
         feedAudioToProjectM()
 
         // Render frame
-        projectm_opengl_render_frame(handle)
+        performPresetOperation { projectm_opengl_render_frame(handle) }
 
         CGLFlushDrawable(cglContext)
         CGLUnlockContext(cglContext)
@@ -930,7 +990,7 @@ class VisualizerController: NSObject {
     private func adaptRenderScale() {
         switch adaptiveFPS.observe(
             measuredFPS: measuredFPS,
-            presetLocked: isPresetLocked,
+            presetLocked: !allowsAutomaticPresetTransitions,
             hasPresetPath: !currentPresetPath.isEmpty
         ) {
         case .unchanged:
@@ -945,10 +1005,10 @@ class VisualizerController: NSObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.currentPresetPath == path,
-                      !self.isPresetLocked,
+                      self.allowsAutomaticPresetTransitions,
                       self.measuredFPS < ProjectMAdaptiveFPS.targetMinFPS,
                       let playlist = self.playlistHandle else { return }
-                projectm_playlist_play_next(playlist, false)
+                self.performPresetOperation { _ = projectm_playlist_play_next(playlist, false) }
                 self.updateCurrentPresetName()
             }
         }
@@ -1029,20 +1089,21 @@ class VisualizerController: NSObject {
 
     func nextPreset() {
         guard let playlist = playlistHandle, presetCount > 0 else { return }
-        projectm_playlist_play_next(playlist, false)
+        performPresetOperation { _ = projectm_playlist_play_next(playlist, false) }
         updateCurrentPresetName()
     }
 
     func previousPreset() {
         guard let playlist = playlistHandle, presetCount > 0 else { return }
-        projectm_playlist_play_previous(playlist, false)
+        performPresetOperation { _ = projectm_playlist_play_previous(playlist, false) }
         updateCurrentPresetName()
     }
 
     func randomPreset() {
         guard let playlist = playlistHandle, !filteredPresets.isEmpty else { return }
         let randomIndex = Int.random(in: filteredPresets.indices)
-        projectm_playlist_set_position(playlist, randomIndex, true)
+        guard let position = UInt32(exactly: randomIndex) else { return }
+        performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
         updateCurrentPresetName()
     }
 
@@ -1054,7 +1115,8 @@ class VisualizerController: NSObject {
         let target = allPresets[index]
 
         if let pos = filteredPresets.firstIndex(where: { $0.path == target.path }) {
-            projectm_playlist_set_position(playlist, pos, true)
+            guard let position = UInt32(exactly: pos) else { return }
+            performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
             updateCurrentPresetName()
             return
         }
@@ -1080,7 +1142,8 @@ class VisualizerController: NSObject {
                 self.presetCount = filtered.count
                 projectm_playlist_set_shuffle(playlist, self.isShuffleEnabled)
                 if let pos = filtered.firstIndex(where: { $0.path == target.path }) {
-                    projectm_playlist_set_position(playlist, pos, true)
+                    guard let position = UInt32(exactly: pos) else { return }
+                    self.performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
                 }
                 self.updateCurrentPresetName()
             }
@@ -1094,15 +1157,15 @@ class VisualizerController: NSObject {
         }
         // «Авто» вимкнено → пресет не змінюється сам (блокуємо авто-зміну за таймером),
         // доки користувач не переключить вручну. Увімкнено → авто-зміна дозволена.
-        if let handle = projectMHandle, !isPresetLocked {
-            projectm_set_preset_locked(handle, !enabled)
+        if let handle = projectMHandle {
+            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions)
         }
     }
 
     func setPresetLocked(_ locked: Bool) {
         isPresetLocked = locked
         if let handle = projectMHandle {
-            projectm_set_preset_locked(handle, locked)
+            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions)
         }
     }
 
@@ -1149,7 +1212,8 @@ class VisualizerController: NSObject {
     }
 
     private func updateCurrentPresetName() {
-        guard let playlist = playlistHandle else { return }
+        guard playlistCallbackContext?.operationFailed != true,
+              let playlist = playlistHandle else { return }
 
         let position = projectm_playlist_get_position(playlist)
         if let pathPtr = projectm_playlist_item(playlist, position) {

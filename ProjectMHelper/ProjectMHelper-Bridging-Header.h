@@ -82,16 +82,25 @@ extern void projectm_set_preset_switch_failed_event_callback(projectm_handle ins
 
 extern projectm_playlist_handle projectm_playlist_create(projectm_handle projectm_instance);
 extern void projectm_playlist_destroy(projectm_playlist_handle instance);
-extern size_t projectm_playlist_add_path(projectm_playlist_handle instance, const char* path,
+extern void projectm_playlist_connect(projectm_playlist_handle instance, projectm_handle projectm_instance);
+typedef void (*projectm_playlist_preset_switched_event)(bool is_hard_cut, unsigned int index, void* user_data);
+typedef void (*projectm_playlist_preset_switch_failed_event)(const char* preset_filename, const char* message, void* user_data);
+extern void projectm_playlist_set_preset_switched_event_callback(projectm_playlist_handle instance,
+                                                                projectm_playlist_preset_switched_event callback,
+                                                                void* user_data);
+extern void projectm_playlist_set_preset_switch_failed_event_callback(projectm_playlist_handle instance,
+                                                                     projectm_playlist_preset_switch_failed_event callback,
+                                                                     void* user_data);
+extern uint32_t projectm_playlist_add_path(projectm_playlist_handle instance, const char* path,
                                          bool recurse_subdirs, bool allow_duplicates);
 extern bool projectm_playlist_add_preset(projectm_playlist_handle instance, const char* filename, bool allow_duplicates);
 extern void projectm_playlist_clear(projectm_playlist_handle instance);
-extern void projectm_playlist_play_next(projectm_playlist_handle instance, bool hard_cut);
-extern void projectm_playlist_play_previous(projectm_playlist_handle instance, bool hard_cut);
-extern size_t projectm_playlist_get_position(projectm_playlist_handle instance);
-extern void projectm_playlist_set_position(projectm_playlist_handle instance, size_t index, bool hard_cut);
+extern uint32_t projectm_playlist_play_next(projectm_playlist_handle instance, bool hard_cut);
+extern uint32_t projectm_playlist_play_previous(projectm_playlist_handle instance, bool hard_cut);
+extern uint32_t projectm_playlist_get_position(projectm_playlist_handle instance);
+extern uint32_t projectm_playlist_set_position(projectm_playlist_handle instance, uint32_t index, bool hard_cut);
 extern void projectm_playlist_set_shuffle(projectm_playlist_handle instance, bool shuffle);
-extern char* projectm_playlist_item(projectm_playlist_handle instance, size_t index);
-extern size_t projectm_playlist_size(projectm_playlist_handle instance);
+extern char* projectm_playlist_item(projectm_playlist_handle instance, uint32_t index);
+extern uint32_t projectm_playlist_size(projectm_playlist_handle instance);
 
 #endif /* ProjectMHelper_Bridging_Header_h */
