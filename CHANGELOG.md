@@ -4,6 +4,26 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] — 2026-10-21
+
+Reliable AutoEQ imports, restored calibration state, and consistent ProjectM preset controls.
+
+### Fixed
+- AutoEQ imports preserve the source response in 10-band and 31-band modes, account for headroom, and avoid applying preamp attenuation twice
+- Newly imported AutoEQ presets apply immediately; reopening the window preserves manual EQ, and switching output devices refreshes the applied preset
+- Invalid offline-index updates preserve the existing cache, and failed cache writes are reported as update failures
+- EQ rejects non-finite or unstable filter parameters at low sample rates; Native capture rejects invalid sample-rate metadata and failed input setup cannot report a successful silent start
+- Audio-route recovery preserves the intent to enable EQ, and idle EQ no longer displays active routing
+- Saving or leaving calibration restores the base EQ; saved room profiles restore notch filters, and closing the room window stops A/B comparison
+- Routing shows the actual Native or BlackHole capture status instead of a non-functional input selector
+- ProjectM automatic transitions respect Auto and Lock controls; library-driven preset changes update the displayed identity, favorites, and adaptive state
+- Exhausted ProjectM preset retries preserve the identity of the last displayed preset, avoid additional retry bursts, and disconnect callbacks safely during shutdown
+- EQ database and index generation validate staged data before replacing existing outputs, preserving previous files when parsing, SQLite operations, or publication fails
+
+### Changed
+- Prepared the release workflow to sign and notarize the app and DMG, verify matching ZIP/DMG contents and distribution signatures and tickets, and clean up temporary signing credentials before publication
+- Updated installation instructions for the signed distribution workflow; microphone and system-audio permissions still require the user's approval
+
 ## [1.4.4] — 2026-10-10
 
 Calibration profile persistence, reliable audio-route changes, and ProjectM crash fixes.
