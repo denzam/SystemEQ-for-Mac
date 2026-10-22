@@ -18,8 +18,8 @@ verify_bundle() {
         test -f "$bundle/Contents/Resources/Resources/EQDatabase.db"
     fi
     for component in "$bundle" "$bundle/Contents/Helpers/ProjectMHelper.app"; do
-        test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$component/Contents/Info.plist")" = "$version"
-        executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$component/Contents/Info.plist")
+        test "$(python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[1], "rb"))["CFBundleShortVersionString"])' "$component/Contents/Info.plist")" = "$version"
+        executable=$(python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[1], "rb"))["CFBundleExecutable"])' "$component/Contents/Info.plist")
         codesign --verify --deep --strict "$component"
         verify_architectures "$component/Contents/MacOS/$executable"
         for library in libprojectM-4.4.dylib libprojectM-4-playlist.4.dylib; do
