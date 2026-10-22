@@ -11,9 +11,8 @@ cask "systemeq" do
 
   app "SystemEQ for Mac.app"
 
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/SystemEQ for Mac.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/SystemEQ for Mac.app"]
   end
 
   zap trash: [
