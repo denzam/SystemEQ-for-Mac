@@ -280,6 +280,7 @@ struct PresetInfo: Sendable {
     let category: String
     let weight: PresetWeight
     let fileSize: Int
+    var fingerprint: String = ""
 }
 
 // MARK: - Performance Profile
@@ -376,6 +377,27 @@ class VisualizerController: NSObject {
     private var currentCategory: String = "All"
     private var currentWeight: PresetWeight = .all
     private var filterGeneration: UInt64 = 0
+    private var performanceGeneration: UInt64 = 0
+    private var performanceObservationTime: TimeInterval?
+    private var performanceSampleActive = false
+    private var canRecordPresetPerformance: Bool {
+        guard let window = openGLView?.window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+    }
+    private var performanceContext: ProjectMPresetPerformance.Context?
+    private var performanceRenderer = ""
+    private var performanceExcludedPaths: Set<String> = []
+    private var performanceExpiration: Date?
+    private var performanceObservers: [NSObjectProtocol] = []
+    private var presetPerformance = ProjectMPresetPerformance(storageURL: URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/SystemEQ/performance_presets.json"))
+    private let performanceHardware: String = {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 0 else { return "" }
+        var model = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &model, &size, nil, 0) == 0 else { return "" }
+        return "\(String(cString: model)):\(ProcessInfo.processInfo.processorCount)"
+    }()
 
     // Lock-free audio ring buffer
     private let audioBufferSize = 8192
@@ -472,11 +494,24 @@ class VisualizerController: NSObject {
         super.init()
 
         openGLView?.controller = self
+        do {
+            try presetPerformance.load()
+        } catch {
+            dlog("Unable to read preset performance cache: \(error)", category: "presets")
+        }
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification] {
+            performanceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.resetPerformanceObservation()
+            })
+        }
     }
 
     deinit {
         stopDisplayLink()
         unregisterPlaylistCallbacks()
+        removePerformanceObservers()
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token)
         }
@@ -495,6 +530,10 @@ class VisualizerController: NSObject {
             print("[ProjectMHelper] Failed to create projectM")
             return
         }
+        if let renderer = glGetString(GLenum(GL_RENDERER)) {
+            performanceRenderer = String(cString: UnsafeRawPointer(renderer).assumingMemoryBound(to: CChar.self))
+        }
+        updatePerformanceContext(width: width, height: height)
 
         // Performance profile — mesh is the dominant CPU cost (per-pixel equation eval scales O(w*h)).
         // Apple Silicon has GL-on-Metal translation overhead; Intel integrated is fill-rate bound.
@@ -695,11 +734,10 @@ class VisualizerController: NSObject {
 
                 let fullPath = (basePath as NSString).appendingPathComponent(relativePath)
 
-                var fileSize = 0
-                if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
-                   let size = attrs[.size] as? Int {
-                    fileSize = size
-                }
+                let attrs = try? fileManager.attributesOfItem(atPath: fullPath)
+                let fileSize = attrs?[.size] as? Int ?? 0
+                let modified = (attrs?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
+                let fingerprint = modified.map { "\(fileSize):\($0)" } ?? ""
 
                 let pathComponents = relativePath.components(separatedBy: "/")
                 let category = pathComponents.count > 1 ? pathComponents[0] : "Uncategorized"
@@ -713,7 +751,8 @@ class VisualizerController: NSObject {
                     name: name,
                     category: category,
                     weight: PresetWeight.classify(fileSize: fileSize),
-                    fileSize: fileSize
+                    fileSize: fileSize,
+                    fingerprint: fingerprint
                 ))
             }
 
@@ -763,40 +802,30 @@ class VisualizerController: NSObject {
         print("[ProjectMHelper] Blacklisted preset: \((path as NSString).lastPathComponent) — \(reason)")
     }
 
-    private func reloadPlaylist() {
+    private func reloadPlaylist(preserveCurrent: Bool = false) {
         guard playlistHandle != nil else { return }
 
+        refreshPerformanceExclusions()
         filterGeneration &+= 1
         let generation = filterGeneration
         let snapshot = allPresets
         let category = currentCategory
         let weight = currentWeight
         let broken = brokenPresets
+        let excluded = performanceExcludedPaths
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let filtered = snapshot.filter { preset in
                 let categoryMatch = category == "All" || preset.category == category
                 let weightMatch = weight == .all || preset.weight == weight
-                return !broken.contains(preset.path) && categoryMatch && weightMatch
+                return !broken.contains(preset.path) && !excluded.contains(preset.path) && categoryMatch && weightMatch
             }
 
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.filterGeneration == generation,
-                      let playlist = self.playlistHandle else { return }
-                projectm_playlist_clear(playlist)
-                for preset in filtered {
-                    projectm_playlist_add_preset(playlist, preset.path, false)
-                }
-                self.filteredPresets = filtered
-                self.presetCount = filtered.count
-                if self.presetCount > 0 {
-                    projectm_playlist_set_shuffle(playlist, self.isShuffleEnabled)
-                    let randomIndex = Int.random(in: 0..<self.presetCount)
-                    guard let position = UInt32(exactly: randomIndex) else { return }
-                    self.performPresetOperation { _ = projectm_playlist_set_position(playlist, position, false) }
-                    self.updateCurrentPresetName()
-                }
+                      self.playlistHandle != nil else { return }
+                self.replacePlaylist(with: filtered, preserveCurrent: preserveCurrent)
                 print(
                     "[ProjectMHelper] Playlist reloaded: \(self.presetCount) presets (category: \(category), weight: \(weight.rawValue))"
                 )
@@ -892,6 +921,7 @@ class VisualizerController: NSObject {
     func shutdown() {
         stopDisplayLink()
         unregisterPlaylistCallbacks()
+        removePerformanceObservers()
 
         if let playlist = playlistHandle {
             projectm_playlist_destroy(playlist)
@@ -950,6 +980,13 @@ class VisualizerController: NSObject {
     }
 
     fileprivate func renderFrame() {
+        if let expiration = performanceExpiration, expiration <= Date() {
+            performanceExpiration = nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.refreshPerformanceExclusions() { self.reloadPlaylist(preserveCurrent: true) }
+            }
+        }
         guard let handle = projectMHandle,
               let glView = openGLView,
               let context = glView.openGLContext,
@@ -980,6 +1017,15 @@ class VisualizerController: NSObject {
             measuredFPS = Int((Double(fpsFrameCount) / elapsed).rounded())
             fpsFrameCount = 0
             fpsWindowStart = now
+            if let renderer = glGetString(GLenum(GL_RENDERER)) {
+                let name = String(cString: UnsafeRawPointer(renderer).assumingMemoryBound(to: CChar.self))
+                if name != performanceRenderer {
+                    performanceRenderer = name
+                    let backing = glView.convertToBacking(glView.bounds)
+                    updatePerformanceContext(width: Int(backing.width), height: Int(backing.height))
+                    return
+                }
+            }
             adaptRenderScale()
         }
     }
@@ -988,6 +1034,16 @@ class VisualizerController: NSObject {
     /// Лише вниз і лише поки реально потрібно — без осциляції (інакше backing-resize мерехтить).
     /// Повна роздільність повертається при зміні пресета (resetAdaptiveScale), а не за FPS.
     private func adaptRenderScale() {
+        let active = canRecordPresetPerformance
+        if active != performanceSampleActive {
+            resetAdaptiveScale()
+            performanceSampleActive = active
+        }
+        let now = Date().timeIntervalSinceReferenceDate
+        if let previous = performanceObservationTime, now < previous || now - previous > 5 {
+            resetAdaptiveScale()
+        }
+        performanceObservationTime = now
         switch adaptiveFPS.observe(
             measuredFPS: measuredFPS,
             presetLocked: !allowsAutomaticPresetTransitions,
@@ -1001,13 +1057,33 @@ class VisualizerController: NSObject {
             needsBackingResize = true
         case .skipPreset:
             let path = currentPresetPath
+            let generation = performanceGeneration
+            let context = performanceContext
             guard !path.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.currentPresetPath == path,
+                      self.performanceGeneration == generation,
+                      self.performanceContext == context,
                       self.allowsAutomaticPresetTransitions,
                       self.measuredFPS < ProjectMAdaptiveFPS.targetMinFPS,
                       let playlist = self.playlistHandle else { return }
+                if active, self.canRecordPresetPerformance, let context,
+                   let preset = self.allPresets.first(where: { $0.path == path }), !preset.fingerprint.isEmpty {
+                    do {
+                        try self.presetPerformance.record(
+                            path: path, fingerprint: preset.fingerprint, context: context, now: Date()
+                        )
+                        self.refreshPerformanceExclusions()
+                        self.replacePlaylist(
+                            with: self.filteredPresets.filter { !self.performanceExcludedPaths.contains($0.path) },
+                            preserveCurrent: false
+                        )
+                        return
+                    } catch {
+                        dlog("Unable to save preset performance cache: \(error)", category: "presets")
+                    }
+                }
                 self.performPresetOperation { _ = projectm_playlist_play_next(playlist, false) }
                 self.updateCurrentPresetName()
             }
@@ -1015,11 +1091,118 @@ class VisualizerController: NSObject {
     }
 
     private func resetAdaptiveScale() {
+        performanceGeneration &+= 1
+        performanceObservationTime = nil
         if adaptiveFPS.adaptiveScale != 1.0 {
             adaptiveFPS.reset()
             needsBackingResize = true
         } else {
             adaptiveFPS.reset()
+        }
+    }
+
+    private func resetPerformanceObservation() {
+        resetAdaptiveScale()
+        fpsFrameCount = 0
+        fpsWindowStart = CACurrentMediaTime()
+        measuredFPS = 0
+    }
+
+    private func removePerformanceObservers() {
+        for observer in performanceObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        performanceObservers.removeAll()
+    }
+
+    private func updatePerformanceContext(width: Int, height: Int) {
+        let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        let version = marketing.isEmpty || build.isEmpty ? "" : "\(marketing):\(build)"
+        let context = ProjectMPresetPerformance.Context(
+            hardware: performanceHardware, renderer: performanceRenderer, quality: currentQuality.rawValue,
+            width: width, height: height, version: version
+        )
+        guard performanceContext != context else { return }
+        performanceContext = context.isValid ? context : nil
+        resetPerformanceObservation()
+        if refreshPerformanceExclusions() { reloadPlaylist(preserveCurrent: true) }
+    }
+
+    @discardableResult
+    private func refreshPerformanceExclusions() -> Bool {
+        let now = Date()
+        let excluded: Set<String>
+        if let context = performanceContext {
+            excluded = Set(allPresets.filter {
+                presetPerformance.isExcluded(path: $0.path, fingerprint: $0.fingerprint, context: context, now: now)
+            }.map(\.path))
+            performanceExpiration = presetPerformance.nextExpiration(context: context, now: now)
+        } else {
+            excluded = []
+            performanceExpiration = nil
+        }
+        let changed = excluded != performanceExcludedPaths
+        performanceExcludedPaths = excluded
+        return changed
+    }
+
+    private func replacePlaylist(with presets: [PresetInfo], preserveCurrent: Bool, selected: PresetInfo? = nil) {
+        let presets = presets.filter { !performanceExcludedPaths.contains($0.path) }
+        guard let playlist = playlistHandle else { return }
+        let current = selected ?? (preserveCurrent ? allPresets.first { $0.path == currentPresetPath } : nil)
+        playlistCallbackContext?.eventGeneration &+= 1
+        guard populatePlaylist(with: presets) else { return }
+        filteredPresets = presets
+        presetCount = filteredPresets.count
+        projectm_playlist_set_shuffle(playlist, isShuffleEnabled)
+        if let handle = projectMHandle {
+            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions || filteredPresets.isEmpty)
+        }
+        if let current {
+            playSelectedPreset(current)
+        } else if !filteredPresets.isEmpty,
+                  let position = UInt32(exactly: Int.random(in: filteredPresets.indices)) {
+            performPresetOperation { _ = projectm_playlist_set_position(playlist, position, false) }
+            updateCurrentPresetName()
+        }
+    }
+
+    private func populatePlaylist(with presets: [PresetInfo]) -> Bool {
+        guard let playlist = playlistHandle else { return false }
+        projectm_playlist_clear(playlist)
+        for preset in presets {
+            guard projectm_playlist_add_preset(playlist, preset.path, false) else {
+                dlog("Unable to rebuild preset playlist", category: "presets")
+                projectm_playlist_clear(playlist)
+                filteredPresets = []
+                presetCount = 0
+                if let handle = projectMHandle { projectm_set_preset_locked(handle, true) }
+                return false
+            }
+        }
+        return true
+    }
+
+    private func playSelectedPreset(_ target: PresetInfo) {
+        guard let playlist = playlistHandle, !brokenPresets.contains(target.path) else { return }
+        if let index = filteredPresets.firstIndex(where: { $0.path == target.path }),
+           let position = UInt32(exactly: index) {
+            performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
+            updateCurrentPresetName()
+            return
+        }
+        let eligible = filteredPresets
+        guard populatePlaylist(with: [target] + eligible) else { return }
+        performPresetOperation { _ = projectm_playlist_set_position(playlist, 0, true) }
+        updateCurrentPresetName()
+        let loadedPosition = projectm_playlist_get_position(playlist)
+        let loadSucceeded = playlistCallbackContext?.operationFailed != true
+        playlistCallbackContext?.eventGeneration &+= 1
+        guard populatePlaylist(with: eligible) else { return }
+        if loadSucceeded, loadedPosition > 0, Int(loadedPosition) <= filteredPresets.count {
+            performPresetOperation { _ = projectm_playlist_set_position(playlist, loadedPosition - 1, false) }
+            updateCurrentPresetName()
         }
     }
 
@@ -1113,11 +1296,13 @@ class VisualizerController: NSObject {
     func selectPreset(at index: Int) {
         guard let playlist = playlistHandle, index >= 0, index < allPresets.count else { return }
         let target = allPresets[index]
+        filterGeneration &+= 1
 
-        if let pos = filteredPresets.firstIndex(where: { $0.path == target.path }) {
-            guard let position = UInt32(exactly: pos) else { return }
-            performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
-            updateCurrentPresetName()
+        let matchesFilters = (currentCategory == "All" || target.category == currentCategory)
+            && (currentWeight == .all || target.weight == currentWeight)
+        if filteredPresets.contains(where: { $0.path == target.path })
+            || (performanceExcludedPaths.contains(target.path) && matchesFilters) {
+            playSelectedPreset(target)
             return
         }
 
@@ -1128,29 +1313,20 @@ class VisualizerController: NSObject {
         let generation = filterGeneration
         let snapshot = allPresets
         let broken = brokenPresets
+        let excluded = performanceExcludedPaths
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let filtered = snapshot.filter { !broken.contains($0.path) }
+            let filtered = snapshot.filter { !broken.contains($0.path) && !excluded.contains($0.path) }
             DispatchQueue.main.async {
                 guard let self,
                       self.filterGeneration == generation,
-                      let playlist = self.playlistHandle else { return }
-                projectm_playlist_clear(playlist)
-                for preset in filtered {
-                    projectm_playlist_add_preset(playlist, preset.path, false)
-                }
-                self.filteredPresets = filtered
-                self.presetCount = filtered.count
-                projectm_playlist_set_shuffle(playlist, self.isShuffleEnabled)
-                if let pos = filtered.firstIndex(where: { $0.path == target.path }) {
-                    guard let position = UInt32(exactly: pos) else { return }
-                    self.performPresetOperation { _ = projectm_playlist_set_position(playlist, position, true) }
-                }
-                self.updateCurrentPresetName()
+                      self.playlistHandle == playlist else { return }
+                self.replacePlaylist(with: filtered, preserveCurrent: false, selected: target)
             }
         }
     }
 
     func setShuffle(_ enabled: Bool) {
+        if isShuffleEnabled != enabled { resetPerformanceObservation() }
         isShuffleEnabled = enabled
         if let playlist = playlistHandle {
             projectm_playlist_set_shuffle(playlist, enabled)
@@ -1158,14 +1334,15 @@ class VisualizerController: NSObject {
         // «Авто» вимкнено → пресет не змінюється сам (блокуємо авто-зміну за таймером),
         // доки користувач не переключить вручну. Увімкнено → авто-зміна дозволена.
         if let handle = projectMHandle {
-            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions)
+            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions || filteredPresets.isEmpty)
         }
     }
 
     func setPresetLocked(_ locked: Bool) {
+        if isPresetLocked != locked { resetPerformanceObservation() }
         isPresetLocked = locked
         if let handle = projectMHandle {
-            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions)
+            projectm_set_preset_locked(handle, !allowsAutomaticPresetTransitions || filteredPresets.isEmpty)
         }
     }
 
@@ -1180,6 +1357,10 @@ class VisualizerController: NSObject {
     func setQuality(_ quality: VisualQuality) {
         currentQuality = quality
         needsBackingResize = true
+        if let glView = openGLView {
+            let backing = glView.convertToBacking(glView.bounds)
+            updatePerformanceContext(width: Int(backing.width), height: Int(backing.height))
+        }
     }
 
     /// Застосовується на render-треді під CGLLockContext: змінює backing-розмір GL-поверхні
@@ -1205,10 +1386,11 @@ class VisualizerController: NSObject {
         projectm_set_mesh_size(handle, mw, mh)
     }
 
-    func resize(width _: Int, height _: Int) {
+    func resize(width: Int, height: Int) {
         // Не чіпаємо GL з main-треда (крадіжка контексту → чорний екран). Render-scale + новий
         // backing-розмір застосує renderFrame під замком на render-треді.
         needsBackingResize = true
+        updatePerformanceContext(width: width, height: height)
     }
 
     private func updateCurrentPresetName() {

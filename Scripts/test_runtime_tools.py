@@ -1632,6 +1632,18 @@ class ProjectMAutomationTests(unittest.TestCase):
             "    private func adaptRenderScale() {",
             "    private func resetAdaptiveScale() {",
             "    private func updateCurrentPresetName() {",
+            "    private final class PlaylistCallbackContext {",
+            "    private func enqueuePlaylistEvent(",
+            "    private func resetPerformanceObservation() {",
+            "    private func refreshPerformanceExclusions() -> Bool {",
+            "    private func replacePlaylist(",
+            "    private func populatePlaylist(with presets: [PresetInfo]) -> Bool {",
+            "    private func playSelectedPreset(_ target: PresetInfo) {",
+            "    private func reloadPlaylist(",
+            "    func selectPreset(at index: Int) {",
+            "    func setCategory(_ category: String) {",
+            "    func setWeight(_ weight: String) {",
+            "    func getPresetSnapshot() -> [PresetInfo] {",
             "    func nextPreset() {",
             "    func previousPreset() {",
             "    func randomPreset() {",
@@ -1658,6 +1670,7 @@ class ProjectMAutomationTests(unittest.TestCase):
         result = subprocess.run(
             ["xcrun", "swiftc", "-parse-as-library", "-module-cache-path", str(directory / "module-cache"),
              str(root / "SystemEQ for Mac/Audio/Visualizer/ProjectM/ProjectMAdaptiveFPS.swift"),
+             str(root / "ProjectMHelper/ProjectMPresetPerformance.swift"),
              str(source), "-o", str(cls.binary)],
             capture_output=True, text=True, timeout=90,
         )
@@ -1677,13 +1690,26 @@ final class PendingQueue {
         for callback in pending { callback() }
     }
 }
-enum DispatchQueue { static let main = PendingQueue() }
+enum DispatchQueue {
+    enum QoS { case userInitiated }
+    static let main = PendingQueue()
+    static func global(qos: QoS) -> PendingQueue { main }
+}
 final class Engine { var locked = false }
-final class PresetOperationState { var operationFailed = false }
-struct PresetInfo { let path: String }
-final class Playlist {
-    let paths = ["/presets/first.milk", "/presets/second.milk"]
-    var position = 0
+enum PresetWeight: String { case all = "All", light = "Light", heavy = "Heavy" }
+struct PresetInfo {
+    let path: String
+    var fingerprint = "v1"
+    var category = "first"
+    var weight = PresetWeight.light
+}
+final class Playlist: Equatable {
+    static func == (lhs: Playlist, rhs: Playlist) -> Bool { lhs === rhs }
+    var paths = ["/presets/first.milk", "/presets/second.milk"]
+    var position: UInt32 = 0
+    var switched: ((UInt32) -> Void)?
+    var failed: ((String, String) -> Void)?
+    var badPaths: Set<String> = []
     var calls: [String] = []
     var shuffle = true
 }
@@ -1691,27 +1717,61 @@ func projectm_set_preset_locked(_ engine: Engine, _ locked: Bool) { engine.locke
 func projectm_playlist_set_shuffle(_ playlist: Playlist, _ enabled: Bool) { playlist.shuffle = enabled }
 func projectm_playlist_play_next(_ playlist: Playlist, _ hardCut: Bool) {
     playlist.calls.append("next:\(hardCut)")
-    playlist.position = (playlist.position + 1) % playlist.paths.count
+    playlist.position = (playlist.position + 1) % UInt32(playlist.paths.count)
+    playlist.switched?(playlist.position)
 }
 func projectm_playlist_play_previous(_ playlist: Playlist, _ hardCut: Bool) {
     playlist.calls.append("previous:\(hardCut)")
-    playlist.position = (playlist.position + playlist.paths.count - 1) % playlist.paths.count
+    playlist.position = (playlist.position + UInt32(playlist.paths.count) - 1) % UInt32(playlist.paths.count)
+    playlist.switched?(playlist.position)
 }
 func projectm_playlist_set_position(_ playlist: Playlist, _ rawPosition: UInt32, _ hardCut: Bool) {
     let position = Int(rawPosition)
     playlist.calls.append("position:\(hardCut)")
-    playlist.position = position
+    guard position < playlist.paths.count else { return }
+    playlist.position = rawPosition
+    if playlist.badPaths.contains(playlist.paths[position]) {
+        if let fallback = playlist.paths.indices.first(where: { !playlist.badPaths.contains(playlist.paths[$0]) }) {
+            playlist.position = UInt32(fallback)
+            playlist.switched?(UInt32(fallback))
+        } else {
+            playlist.failed?(playlist.paths[position], "exhausted")
+        }
+    }
+    playlist.switched?(rawPosition)
 }
-func projectm_playlist_get_position(_ playlist: Playlist) -> Int { playlist.position }
-func projectm_playlist_item(_ playlist: Playlist, _ position: Int) -> UnsafeMutablePointer<CChar>? {
-    strdup(playlist.paths[position])
+func projectm_playlist_get_position(_ playlist: Playlist) -> UInt32 { playlist.position }
+func projectm_playlist_item(_ playlist: Playlist, _ position: UInt32) -> UnsafeMutablePointer<CChar>? {
+    guard Int(position) < playlist.paths.count else { return nil }
+    return strdup(playlist.paths[Int(position)])
 }
 func projectm_free_string(_ pointer: UnsafeMutablePointer<CChar>) { free(pointer) }
 func CACurrentMediaTime() -> Double { 100 }
+func dlog(_ message: String, category: String) {}
+func projectm_playlist_clear(_ playlist: Playlist) { playlist.paths.removeAll() }
+func projectm_playlist_add_preset(_ playlist: Playlist, _ path: String, _ duplicates: Bool) -> Bool {
+    if !duplicates && playlist.paths.contains(path) { return false }
+    playlist.paths.append(path)
+    return true
+}
+typealias VisualizerController = Controller
 final class Controller {
     var projectMHandle: Engine? = Engine()
     var playlistHandle: Playlist? = Playlist()
-    var playlistCallbackContext: PresetOperationState?
+    private var playlistCallbackContext: PlaylistCallbackContext?
+    var currentCategory = "All"
+    var currentWeight = PresetWeight.all
+    var availableCategories = ["All", "first", "second"]
+    var filterGeneration: UInt64 = 0
+    var performanceGeneration: UInt64 = 0
+    var performanceObservationTime: TimeInterval?
+    var performanceSampleActive = false
+    var canRecordPresetPerformance = true
+    var performanceContext: ProjectMPresetPerformance.Context?
+    var performanceExcludedPaths: Set<String> = []
+    var performanceExpiration: Date?
+    var presetPerformance = ProjectMPresetPerformance(storageURL: URL(fileURLWithPath: CommandLine.arguments[2]))
+    var brokenPresets: Set<String> = []
     var isShuffleEnabled = true
     var isPresetLocked = false
     var adaptiveFPS = ProjectMAdaptiveFPS()
@@ -1723,7 +1783,29 @@ final class Controller {
     var fpsWindowStart = 0.0
     var presetCount = 2
     var filteredPresets = [PresetInfo(path: "/presets/first.milk"), PresetInfo(path: "/presets/second.milk")]
-    func observe(_ count: Int = 1) { for _ in 0..<count { adaptRenderScale() } }
+    var allPresets = [PresetInfo(path: "/presets/first.milk"), PresetInfo(path: "/presets/second.milk")]
+    init() {
+        playlistCallbackContext = PlaylistCallbackContext(self)
+        playlistHandle?.switched = { [weak self] index in
+            guard let self, let context = self.playlistCallbackContext else { return }
+            self.enqueuePlaylistEvent(context, index: index, failure: nil)
+        }
+        playlistHandle?.failed = { [weak self] path, reason in
+            guard let self, let context = self.playlistCallbackContext else { return }
+            self.enqueuePlaylistEvent(context, index: nil, failure: (path, reason))
+        }
+    }
+    func markPresetBroken(_ path: String, reason: String) { brokenPresets.insert(path) }
+    func sample(_ fps: Int) { measuredFPS = fps; adaptRenderScale() }
+    func observe(_ count: Int = 1) { for _ in 0..<count { sample(10) } }
+    func resetObservation() { resetPerformanceObservation() }
+    func manual(_ preset: PresetInfo) { playSelectedPreset(preset) }
+    func select(_ index: Int) { selectPreset(at: index) }
+    func configurePerformance() {
+        performanceContext = ProjectMPresetPerformance.Context(
+            hardware: "Mac1", renderer: "GPU1", quality: "High", width: 800, height: 600, version: "1"
+        )
+    }
 ''' + methods + r'''
 }
 @main enum AutomationTests {
@@ -1733,7 +1815,7 @@ final class Controller {
             exit(1)
         }
     }
-    static func main() {
+    static func main() throws {
         let scenario = CommandLine.arguments[1]
         let controller = Controller()
         let playlist = controller.playlistHandle!
@@ -1808,7 +1890,7 @@ final class Controller {
                     controller.previousPreset()
                     controller.randomPreset()
                     expect(playlist.calls == ["next:false", "previous:false", "position:true"], "Manual controls changed")
-                    expect(controller.currentPresetPath == playlist.paths[playlist.position], "Manual identity stale")
+                    expect(controller.currentPresetPath == playlist.paths[Int(playlist.position)], "Manual identity stale")
                 }
             }
             playlist.calls.removeAll()
@@ -1822,6 +1904,176 @@ final class Controller {
             controller.nextPreset()
             controller.previousPreset()
             controller.randomPreset()
+        case "performance-cache", "performance-manual", "performance-empty":
+            controller.configurePerformance()
+            if scenario == "performance-empty" {
+                controller.allPresets = [controller.allPresets[0]]
+                controller.filteredPresets = controller.allPresets
+                controller.presetCount = 1
+                playlist.paths = ["/presets/first.milk"]
+            }
+            controller.observe(6)
+            DispatchQueue.main.drain()
+            expect(controller.performanceExcludedPaths == ["/presets/first.milk"], "Slow preset not quarantined")
+            expect(!playlist.paths.contains("/presets/first.milk"), "Slow preset remains in automatic playlist")
+            let now = Date()
+            var loaded = ProjectMPresetPerformance(storageURL: URL(fileURLWithPath: CommandLine.arguments[2]))
+            try loaded.load()
+            expect(loaded.isExcluded(path: "/presets/first.milk", fingerprint: "v1", context: controller.performanceContext!, now: now), "Cache did not survive reload")
+            expect(controller.allPresets.count == (scenario == "performance-empty" ? 1 : 2), "Manual catalog truncated")
+            controller.manual(controller.allPresets[0])
+            expect(controller.currentPresetPath == "/presets/first.milk", "Manual override did not load")
+            expect(!playlist.paths.contains("/presets/first.milk"), "Manual override entered autorotation")
+            DispatchQueue.main.drain()
+            expect(controller.currentPresetPath == "/presets/first.milk", "Stale callback substituted manual identity")
+            if scenario == "performance-empty" {
+                controller.nextPreset(); controller.previousPreset(); controller.randomPreset()
+                controller.setShuffle(false); controller.setShuffle(true)
+                expect(playlist.paths.isEmpty && controller.projectMHandle!.locked, "Empty eligible pool was unlocked")
+            } else {
+                controller.nextPreset()
+                expect(controller.currentPresetPath == "/presets/second.milk", "Next failed after transient manual override")
+                controller.previousPreset(); controller.randomPreset()
+                expect(!playlist.paths.contains("/presets/first.milk"), "Navigation reintroduced slow preset")
+            }
+        case "performance-pending-reload":
+            controller.configurePerformance()
+            controller.setCategory("All")
+            controller.observe(6)
+            for _ in 0..<4 { DispatchQueue.main.drain() }
+            expect(playlist.paths == ["/presets/second.milk"], "Pending reload reintroduced quarantined preset")
+        case "performance-reload", "performance-selection", "performance-fallback", "performance-exhaustion":
+            controller.configurePerformance()
+            try controller.presetPerformance.record(path: "/presets/first.milk", fingerprint: "v1", context: controller.performanceContext!, now: Date())
+            controller.setCategory("All")
+            for _ in 0..<4 { DispatchQueue.main.drain() }
+            expect(playlist.paths == ["/presets/second.milk"], "Reload reintroduced excluded preset")
+            expect(controller.getPresetSnapshot().count == 2, "Reload truncated manual catalog")
+            if scenario == "performance-selection" {
+                controller.currentCategory = "second"
+                controller.select(0)
+                for _ in 0..<4 { DispatchQueue.main.drain() }
+                expect(controller.currentCategory == "All", "Out-of-filter manual selection did not restore All")
+                expect(controller.currentPresetPath == "/presets/first.milk", "Global manual selection failed")
+                expect(playlist.paths == ["/presets/second.milk"], "Global manual selection entered automatic pool")
+            } else if scenario == "performance-fallback" || scenario == "performance-exhaustion" {
+                playlist.calls.removeAll()
+                playlist.badPaths = scenario == "performance-exhaustion" ? ["/presets/first.milk", "/presets/second.milk"] : ["/presets/first.milk"]
+                controller.select(0)
+                for _ in 0..<4 { DispatchQueue.main.drain() }
+                expect(playlist.paths == ["/presets/second.milk"], "Failed manual preset remained in pool")
+                expect(controller.currentPresetPath == "/presets/second.milk", "Manual failure overwrote confirmed identity")
+                expect(playlist.calls.count == (scenario == "performance-fallback" ? 2 : 1), "Manual failure caused retry burst or lost position sync")
+            } else {
+                controller.setWeight("Light")
+                for _ in 0..<4 { DispatchQueue.main.drain() }
+                expect(playlist.paths == ["/presets/second.milk"], "Weight reload reintroduced exclusion")
+            }
+        case "performance-stale", "performance-context", "performance-gap", "performance-transient", "performance-inactive", "performance-hiding":
+            controller.configurePerformance()
+            if scenario == "performance-inactive" {
+                controller.canRecordPresetPerformance = false
+                controller.observe(20)
+                DispatchQueue.main.drain()
+            } else if scenario == "performance-hiding" {
+                controller.observe(6)
+                controller.canRecordPresetPerformance = false
+                DispatchQueue.main.drain()
+            } else if scenario == "performance-gap" {
+                controller.observe(4)
+                controller.performanceObservationTime = Date().timeIntervalSinceReferenceDate - 30
+                controller.observe()
+                expect(controller.adaptiveFPS.adaptiveScale == 1, "Long gap reused scale/evidence")
+            } else if scenario == "performance-transient" {
+                controller.observe(5)
+                controller.sample(60)
+                controller.observe()
+                expect(DispatchQueue.main.callbacks.isEmpty, "Transient low FPS queued exclusion")
+            } else {
+                controller.observe(6)
+                if scenario == "performance-context" { controller.performanceContext = nil }
+                else { controller.setShuffle(false); controller.setShuffle(true) }
+                DispatchQueue.main.drain()
+            }
+            expect(!FileManager.default.fileExists(atPath: CommandLine.arguments[2]), "Stale/transient evidence persisted")
+            expect(playlist.paths.count == 2, "Stale/transient evidence changed eligibility")
+        case "store-context-expiry", "store-corrupt", "store-write-failure", "store-read-failure", "store-invalid":
+            controller.configurePerformance()
+            let context = controller.performanceContext!
+            let file = URL(fileURLWithPath: CommandLine.arguments[2])
+            let now = Date(timeIntervalSince1970: 1700000000)
+            var store = ProjectMPresetPerformance(storageURL: file)
+            try store.load()
+            try store.record(path: "preset", fingerprint: "original", context: context, now: now)
+            let oldBytes = try Data(contentsOf: file)
+            let oldTime = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as! Date
+            if scenario == "store-context-expiry" {
+                expect(store.isExcluded(path: "preset", fingerprint: "original", context: context, now: now.addingTimeInterval(ProjectMPresetPerformance.lifetime - 1)), "Premature expiry")
+                expect(!store.isExcluded(path: "preset", fingerprint: "original", context: context, now: now.addingTimeInterval(ProjectMPresetPerformance.lifetime)), "Expired quarantine remains")
+                expect(!store.isExcluded(path: "preset", fingerprint: "original", context: context, now: now.addingTimeInterval(-1)), "Future evidence trusted")
+                expect(!store.isExcluded(path: "preset", fingerprint: "changed", context: context, now: now), "Changed preset excluded")
+                for changed in [
+                    ProjectMPresetPerformance.Context(hardware: "Mac2", renderer: "GPU1", quality: "High", width: 800, height: 600, version: "1"),
+                    ProjectMPresetPerformance.Context(hardware: "Mac1", renderer: "GPU2", quality: "High", width: 800, height: 600, version: "1"),
+                    ProjectMPresetPerformance.Context(hardware: "Mac1", renderer: "GPU1", quality: "Low", width: 800, height: 600, version: "1"),
+                    ProjectMPresetPerformance.Context(hardware: "Mac1", renderer: "GPU1", quality: "High", width: 1600, height: 1200, version: "1"),
+                    ProjectMPresetPerformance.Context(hardware: "Mac1", renderer: "GPU1", quality: "High", width: 800, height: 600, version: "2")
+                ] {
+                    expect(!store.isExcluded(path: "preset", fingerprint: "original", context: changed, now: now), "Different context inherited quarantine")
+                }
+            } else if scenario == "store-corrupt" {
+                for bytes in [Data("invalid json".utf8), Data("{\"version\":99,\"entries\":{}}".utf8)] {
+                    try bytes.write(to: file)
+                    let timestamp = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as! Date
+                    var rejected = false
+                    do { try store.load() } catch { rejected = true }
+                    expect(rejected, "Corrupt cache accepted")
+                    var rejectedWrite = false
+                    do { try store.record(path: "new", fingerprint: "v2", context: context, now: now) }
+                    catch { rejectedWrite = true }
+                    expect(rejectedWrite, "Record overwrote corrupt cache")
+                    expect(try Data(contentsOf: file) == bytes, "Corrupt load rewrote input")
+                    expect(try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as! Date == timestamp, "Corrupt load changed timestamp")
+                    expect(store.isExcluded(path: "preset", fingerprint: "original", context: context, now: now), "Corrupt load erased valid in-memory records")
+                }
+            } else if scenario == "store-read-failure" {
+                expect(geteuid() != 0, "Permission test requires an unprivileged process")
+                try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+                defer {
+                    do { try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+                    catch { expect(false, "Cannot restore cache permissions") }
+                }
+                var fresh = ProjectMPresetPerformance(storageURL: file)
+                var rejectedLoad = false
+                do { try fresh.load() } catch { rejectedLoad = true }
+                var rejectedWrite = false
+                do { try fresh.record(path: "new", fingerprint: "v2", context: context, now: now) }
+                catch { rejectedWrite = true }
+                expect(rejectedLoad && rejectedWrite, "Unreadable cache was replaced")
+                try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+                expect(try Data(contentsOf: file) == oldBytes, "Read failure destroyed old cache")
+                try fresh.record(path: "new", fingerprint: "v2", context: context, now: now)
+                expect(fresh.isExcluded(path: "preset", fingerprint: "original", context: context, now: now), "Recovery erased old entries")
+            } else if scenario == "store-write-failure" {
+                expect(geteuid() != 0, "Permission test requires an unprivileged process")
+                let directory = file.deletingLastPathComponent()
+                try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+                defer {
+                    do { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+                    catch { expect(false, "Cannot restore fixture permissions") }
+                }
+                var rejected = false
+                do { try store.record(path: "new", fingerprint: "v2", context: context, now: now) } catch { rejected = true }
+                expect(rejected, "Write failure hidden")
+                expect(try Data(contentsOf: file) == oldBytes, "Write failure replaced cache bytes")
+                expect(try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as! Date == oldTime, "Write failure changed cache timestamp")
+                expect(!store.isExcluded(path: "new", fingerprint: "v2", context: context, now: now), "Failed write committed state")
+            } else {
+                var rejected = false
+                do { try store.record(path: "new", fingerprint: "", context: context, now: now) } catch { rejected = true }
+                let preserved = try Data(contentsOf: file)
+                expect(rejected && preserved == oldBytes, "Invalid observation changed cache")
+            }
         default: fatalError("Unknown scenario")
         }
         print("ProjectM automation: \(scenario) passed")
@@ -1848,8 +2100,42 @@ final class Controller {
     def test_manual_transitions_remain_available(self):
         self.run_scenario("manual")
 
+    def test_sustained_fps_exclusion_and_manual_override(self):
+        for scenario in ("performance-cache", "performance-manual", "performance-empty"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_reload_manual_selection_and_failure_identity(self):
+        for scenario in ("performance-reload", "performance-selection", "performance-fallback", "performance-exhaustion"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_pending_reload_keeps_new_exclusions(self):
+        self.run_scenario("performance-pending-reload")
+
+    def test_context_gaps_and_transients_do_not_persist(self):
+        for scenario in ("performance-stale", "performance-context", "performance-gap", "performance-transient", "performance-inactive", "performance-hiding"):
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
+
+    def test_cache_context_fingerprint_and_seven_day_expiry(self):
+        self.run_scenario("store-context-expiry")
+
+    def test_corrupt_cache_preserves_previous_state(self):
+        self.run_scenario("store-corrupt")
+
+    def test_cache_write_failure_preserves_bytes_timestamp_and_state(self):
+        self.run_scenario("store-write-failure")
+
+    def test_cache_read_failure_blocks_replacement_and_recovers(self):
+        self.run_scenario("store-read-failure")
+
+    def test_invalid_observation_does_not_change_cache(self):
+        self.run_scenario("store-invalid")
+
     def run_scenario(self, scenario):
-        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True, timeout=10)
+        cache = Path(tempfile.mkdtemp(dir=self.temp.name)) / "performance.json"
+        result = subprocess.run([str(self.binary), scenario, str(cache)], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f"ProjectM automation: {scenario} passed", result.stdout)
 
@@ -2003,6 +2289,8 @@ final class VisualizerController {
     var currentCategory = "All"
     var currentWeight = PresetWeight.all
     var availableCategories = ["All"]
+    var performanceGeneration: UInt64 = 0
+    var performanceObservationTime: TimeInterval?
     var adaptiveFPS = ProjectMAdaptiveFPS()
     var measuredFPS = 10
     var fpsFrameCount = 3
@@ -2014,6 +2302,7 @@ final class VisualizerController {
     var audioBuffer = AudioBuffer()
     var audioScratch = AudioBuffer()
     func stopDisplayLink() {}
+    func removePerformanceObservers() {}
     func saveBrokenPresets() { saves += 1 }
     func start() { setupPlaylist(projectMHandle!) }
     func automaticSwitch(_ index: UInt32) { performPresetOperation { playlists[playlistHandle!]!.attempt(index) } }
@@ -2182,7 +2471,7 @@ class RuntimeToolsTests(unittest.TestCase):
             )
         renderer = (cls.root / "ProjectMHelper/ProjectMHelperApp.swift").read_text()
         methods = []
-        for signature in ("    func randomPreset() {", "    func selectPreset(at index: Int) {"):
+        for signature in ("    func randomPreset() {",):
             start = renderer.index(signature)
             cursor = renderer.index("{", start)
             depth = 1
