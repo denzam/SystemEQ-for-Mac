@@ -5,10 +5,13 @@ let size = NSSize(width: 600, height: 400)
 let image = NSImage(size: size)
 image.lockFocus()
 
-let bgGradient = NSGradient(colors: [
+guard let bgGradient = NSGradient(colors: [
     NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.14, alpha: 1.0),
     NSColor(calibratedRed: 0.16, green: 0.18, blue: 0.24, alpha: 1.0)
-])!
+]) else {
+    fputs("failed to create background gradient\n", stderr)
+    exit(1)
+}
 bgGradient.draw(in: NSRect(origin: .zero, size: size), angle: 270)
 
 func draw(
@@ -49,9 +52,9 @@ arrow.lineWidth = 3
 arrow.stroke()
 
 draw("AFTER INSTALL — first launch:", at: NSPoint(x: 30, y: 130), size: 12, color: warn, bold: true)
-draw("Right-click the app -> Open -> Open (confirm Gatekeeper)", at: NSPoint(x: 30, y: 108), size: 11, color: white)
+draw("Open the app from Applications", at: NSPoint(x: 30, y: 108), size: 11, color: white)
 draw(
-    "If blocked: System Settings -> Privacy & Security -> Open Anyway",
+    "Allow the requested Microphone or System Audio Recording permission",
     at: NSPoint(x: 30, y: 90),
     size: 11,
     color: white
@@ -63,7 +66,12 @@ draw(
     color: dim
 )
 
-draw("Open-source, unsigned. github.com/denzam/SystemEQ-for-Mac", at: NSPoint(x: 30, y: 25), size: 9, color: dim)
+draw(
+    "Developer ID signed and notarized. github.com/denzam/SystemEQ-for-Mac",
+    at: NSPoint(x: 30, y: 25),
+    size: 9,
+    color: dim
+)
 
 image.unlockFocus()
 

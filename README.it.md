@@ -75,8 +75,9 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Il workflow di rilascio richiede firme Developer ID e notarizzazione per DMG e ZIP.
-Le versioni precedenti usavano firme ad-hoc: controlla le note della versione.
+Il workflow di rilascio v1.4.5 richiede firme Developer ID e notarizzazione per
+DMG e ZIP. Le versioni fino alla v1.4.4 inclusa usano firme ad-hoc: segui le
+istruzioni di installazione della versione che scarichi.
 
 > **Perché `brew trust`?** Da Homebrew 6.0 i tap di terze parti devono essere
 > considerati attendibili in modo esplicito, altrimenti Homebrew si rifiuta di
@@ -86,9 +87,9 @@ Le versioni precedenti usavano firme ad-hoc: controlla le note della versione.
 
 #### Opzione 2: Scarica DMG o ZIP
 
-1. Scarica un pacchetto firmato Developer ID e notarizzato dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+1. Scarica un DMG o ZIP dalle [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases) e controlla le note sulla firma e sull’installazione di quella versione
 2. Apri il DMG e trascina `SystemEQ for Mac.app` in `/Applications`, oppure estrai lo ZIP e sposta l’app nella stessa cartella
-3. Apri normalmente l’app e concedi il permesso audio richiesto
+3. Per un pacchetto firmato Developer ID e notarizzato, apri normalmente l’app e concedi il permesso audio richiesto; per le vecchie versioni ad-hoc segui le istruzioni nelle relative note di rilascio
 4. Su macOS 14.4+, lascia Audio Backend su **Automatico**; installa BlackHole se SystemEQ propone il fallback o se selezioni la modalità BlackHole
 
 Firma e notarizzazione non concedono accesso al microfono o alla registrazione audio di sistema.
@@ -102,6 +103,17 @@ cd "SystemEQ for Mac"
 open "SystemEQ for Mac.xcodeproj"
 # Premi Cmd+R per compilare ed eseguire
 ```
+
+### Aggiornamento
+
+In Impostazioni → **Aggiornamenti app**, **Verifica aggiornamenti app** controlla
+le nuove versioni su GitHub. **Apri release GitHub** apre la pagina di download;
+il meccanismo attuale non installa né riavvia l’app.
+
+Per un’installazione Homebrew, esegui `brew upgrade --cask systemeq`. Per
+un’installazione manuale, chiudi SystemEQ, scarica il nuovo pacchetto e sostituisci
+l’app in `/Applications`. Il passaggio da una versione senza installazione
+integrata richiede questo aggiornamento manuale oppure Homebrew.
 
 ### Guida alla configurazione
 
@@ -258,10 +270,11 @@ Vedi la [spiegazione Apple](https://developer.apple.com/documentation/technotes/
 
 ### macOS dice che l'app "non può essere aperta"
 
-Verifica che il pacchetto sia una versione firmata Developer ID e notarizzata;
-le vecchie versioni e le build locali ad-hoc usano una diversa politica di firma.
-Scarica di nuovo il pacchetto dalla pagina ufficiale e segnala il messaggio esatto
-di macOS e la versione dell’app se una versione firmata è ancora bloccata.
+Controlla le note sulla firma e sull’installazione della versione scaricata.
+Le versioni fino alla v1.4.4 inclusa e le build locali ad-hoc usano una politica
+di firma diversa dal workflow v1.4.5 con Developer ID. Se un pacchetto firmato
+e notarizzato è ancora bloccato, scaricalo di nuovo dalla pagina ufficiale
+e segnala il messaggio esatto di macOS e la versione dell’app.
 
 ### Nessun suono dopo la configurazione
 

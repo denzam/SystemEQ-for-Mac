@@ -77,8 +77,9 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-The signed release workflow requires Developer ID signatures and notarization for
-DMG and ZIP packages. Earlier releases used ad-hoc signing; check the release notes.
+The v1.4.5 release workflow requires Developer ID signing and notarization for
+DMG and ZIP packages. Releases through v1.4.4 use ad-hoc signing; follow the
+installation instructions for the version you download.
 
 > **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
 > explicitly before Homebrew will load them, and there is no way for a tap
@@ -88,9 +89,9 @@ DMG and ZIP packages. Earlier releases used ad-hoc signing; check the release no
 
 #### Option 2: Download DMG or ZIP
 
-1. Download a Developer ID signed, notarized package from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
+1. Download a DMG or ZIP from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases) and check that version’s signing and installation notes
 2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`, or unzip the ZIP and move the app there
-3. Open the app normally and allow the requested audio permission
+3. For a Developer ID signed, notarized package, open the app normally and allow the requested audio permission; for older ad-hoc releases, follow their release-specific instructions
 4. On macOS 14.4+, leave Audio Backend set to **Automatic**; install BlackHole if SystemEQ offers the fallback or you select BlackHole mode
 
 Signing and notarization do not grant Microphone or System Audio Recording permission.
@@ -104,6 +105,17 @@ cd "SystemEQ for Mac"
 open "SystemEQ for Mac.xcodeproj"
 # Press Cmd+R to build and run
 ```
+
+### Updating
+
+In Settings → **App Updates**, **Check for App Updates** checks GitHub for a
+newer release. **Open GitHub Release** opens its download page; the current
+updater does not install or restart the app.
+
+For a Homebrew installation, run `brew upgrade --cask systemeq`. For a manual
+installation, quit SystemEQ, download the new package, and replace the app in
+`/Applications`. Moving from a version without an in-app installer requires
+this manual update or Homebrew.
 
 ### Setup Guide
 
@@ -263,10 +275,11 @@ See [Apple’s code identity explanation](https://developer.apple.com/documentat
 
 ### macOS says the app "cannot be opened"
 
-Check that the package is a Developer ID signed, notarized release; older releases
-and local ad-hoc builds use a different signing policy. Download the package again
-from the official release page and report the exact macOS message and app version
-if a signed release is still blocked.
+Check the signing and installation notes for the version you downloaded.
+Releases through v1.4.4 and local ad-hoc builds use a different signing policy
+from the v1.4.5 Developer ID release workflow. For a signed, notarized package,
+download it again from the official release page and report the exact macOS
+message and app version if it is still blocked.
 
 ### No sound after setup
 
