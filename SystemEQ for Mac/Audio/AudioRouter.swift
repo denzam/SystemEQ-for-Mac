@@ -88,6 +88,10 @@ final class RoutingWakeRecovery {
         task != nil
     }
 
+    var isSuspended: Bool {
+        shouldResume || isPending
+    }
+
     func cancel() {
         generation &+= 1
         task?.cancel()
@@ -846,6 +850,15 @@ public final class AudioRouter: ObservableObject {
         blackHoleSampleRate: Double? = nil
     ) -> Bool {
         guard !isTestHost else { return false }
+        if wakeRecovery.isSuspended {
+            guard reason == .request else {
+                DiagnosticEventStore.shared.record(
+                    "routing.enable.deferred", details: ["trigger": reason.rawValue, "reason": "wakePending"]
+                )
+                return false
+            }
+            wakeRecovery.cancel()
+        }
         let previouslyOwnedBlackHole = activeBackend == .blackHole
         let previousVirtualOutputID = previouslyOwnedBlackHole ? blackHoleOutputDevice()?.id : nil
         return AudioRoutingRequestPolicy.start(
@@ -2052,7 +2065,7 @@ public final class AudioRouter: ObservableObject {
 
     @MainActor
     private func handleDefaultOutputChange() {
-        guard !isTestHost else { return }
+        guard !isTestHost, !wakeRecovery.isSuspended else { return }
         guard isRoutingOwned,
               let device = currentSystemOutputDevice(),
               !device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) else { return }
@@ -2080,7 +2093,7 @@ public final class AudioRouter: ObservableObject {
     /// its devices in time, so a later arrival still gets picked up.
     @MainActor
     private func handleDeviceTopologyChange() {
-        guard !isTestHost else { return }
+        guard !isTestHost, !wakeRecovery.isSuspended else { return }
         if activeBackend == .native {
             guard let outputUID = activeOutputUID else { return }
             if let wantedUID = preferredOutputUID,
@@ -2193,6 +2206,11 @@ public final class AudioRouter: ObservableObject {
         // it and treat this as "was routing" too, or the intent to resume gets
         // silently dropped and wake never restores audio.
         guard wakeRecovery.suspend(isActive: CoreAudioEngine.shared.isRunning) else { return }
+
+        deviceChangeDebounceTask?.cancel()
+        deviceChangeDebounceTask = nil
+        defaultOutputChangeTask?.cancel()
+        defaultOutputChangeTask = nil
 
         DiagnosticEventStore.shared.record("routing.sleep")
 

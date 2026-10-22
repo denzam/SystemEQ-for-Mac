@@ -631,6 +631,297 @@ if !errors.isEmpty { exit(1) }
 """
 
 
+class RoutingWakeLifecycleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="systemeq-wake-lifecycle-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        directory = Path(cls.temp.name)
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "SystemEQ for Mac/Audio/AudioRouter.swift").read_text()
+
+        def extract(signature):
+            start = source.index(signature)
+            cursor = source.index("{", start)
+            end, depth = cursor + 1, 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end]
+
+        declarations = "\n".join(extract(signature) for signature in (
+            "@MainActor\nfinal class RoutingWakeRecovery {",
+            "enum RoutingRequestReason: String, CaseIterable {",
+            "enum AudioRoutingRequestPolicy {",
+        ))
+        methods = "\n".join(extract(signature) for signature in (
+            "    public var isRoutingOwned: Bool {",
+            "    func enableEQRouting(",
+            "    func disableEQRouting(persistEnabledState: Bool = true) {",
+            "    func handleSystemEvent(_ event: SystemEvent) {",
+            "    private func handleDefaultOutputChange() {",
+            "    private func handleDeviceTopologyChange() {",
+            "    private func suspendRoutingForSleep() {",
+            "    private func resumeRoutingAfterWake() {",
+        ))
+        fixture = cls.TEMPLATE.replace("__DECLARATIONS__", declarations).replace("__METHODS__", methods)
+        path = directory / "wake.swift"
+        path.write_text(fixture)
+        cls.binary = directory / "wake-tests"
+        result = subprocess.run(
+            ["xcrun", "swiftc", "-parse-as-library", "-module-cache-path", str(directory / "module-cache"),
+             str(path), "-o", str(cls.binary)],
+            capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def run_scenario(self, scenario):
+        for backend in ("blackHole", "native"):
+            with self.subTest(scenario=scenario, backend=backend):
+                result = subprocess.run([str(self.binary), scenario, backend], capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["scenario"], scenario)
+
+    def test_darkwake_defers_topology_default_output_and_all_automatic_requests(self):
+        self.run_scenario("darkwake")
+
+    def test_events_during_wake_delay_preserve_single_restart(self):
+        self.run_scenario("wake-delay")
+
+    def test_second_sleep_rejects_refresh_from_previous_wake(self):
+        self.run_scenario("second-sleep")
+
+    def test_manual_disable_during_refresh_cancels_restart(self):
+        self.run_scenario("disable")
+
+    def test_manual_enable_supersedes_pending_wake(self):
+        self.run_scenario("enable")
+
+    def test_sleep_cancels_inflight_device_and_default_output_refresh(self):
+        for scenario in ("device-refresh", "output-refresh"):
+            self.run_scenario(scenario)
+
+    def test_awake_recovery_and_disabled_sleep_keep_existing_behavior(self):
+        for scenario in ("awake", "inactive"):
+            self.run_scenario(scenario)
+
+    def test_actual_wake_start_failure_preserves_intent_without_false_running(self):
+        self.run_scenario("wake-failure")
+
+    TEMPLATE = r'''import Foundation
+
+typealias AudioDeviceID = UInt32
+struct AudioDevice {
+    let id: AudioDeviceID
+    let name: String
+    let uid: String
+}
+enum ActiveAudioRoutingBackend: String { case none, native, blackHole }
+enum LogLevel { case info, warning, error }
+enum LogCategory { case routing }
+func dlog(_ message: String, level: LogLevel = .info, category: LogCategory) {}
+enum AppConstants { enum DeviceNames { static let blackHoleLowercase = "blackhole" } }
+final class UserDefaults {
+    static let standard = UserDefaults()
+    var values: [String: Any] = ["eqWasEnabled": true]
+    func set(_ value: Any, forKey key: String) { values[key] = value }
+}
+final class DiagnosticEventStore {
+    static let shared = DiagnosticEventStore()
+    var events: [String] = []
+    func record(_ name: String, details: [String: String] = [:]) { events.append(name) }
+}
+final class CoreAudioEngine {
+    static let shared = CoreAudioEngine()
+    var isRunning = true
+    var isEnabled = true
+    var currentInputDeviceID: AudioDeviceID = 1
+    var currentOutputDeviceID: AudioDeviceID = 2
+    var rateRestores = 0
+    func stop() { isRunning = false }
+    func setEnabled(_ enabled: Bool) { isEnabled = enabled }
+    func restoreDeviceSampleRates() { rateRestores += 1 }
+}
+final class ProcessTapEngine { func stop() {} }
+__DECLARATIONS__
+@MainActor final class Gate {
+    var entered = false
+    var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            entered = true
+        }
+    }
+    func release() { continuation?.resume(); continuation = nil }
+}
+@MainActor final class AudioRouter {
+    enum SystemEvent { case devicesChanged, defaultOutputChanged, willSleep, didWake }
+    let isTestHost = false
+    let eventHandler: ((SystemEvent) -> Void)? = nil
+    let wakeRecovery = RoutingWakeRecovery()
+    var deviceChangeDebounceTask: Task<Void, Never>?
+    var defaultOutputChangeTask: Task<Void, Never>?
+    var activeBackend = ActiveAudioRoutingBackend.blackHole
+    var activeInputUID: String? = "blackhole"
+    var activeOutputUID: String? = "physical"
+    var preferredOutputUID: String? = "physical"
+    let originalOutputUIDKey = "original"
+    var originalSystemOutputDevice: AudioDevice? = AudioDevice(id: 2, name: "Scarlett", uid: "physical")
+    var selectedOutputDevice: AudioDevice? = AudioDevice(id: 2, name: "Scarlett", uid: "physical")
+    var inputDevices = [AudioDevice(id: 1, name: "BlackHole", uid: "blackhole")]
+    var outputDevices = [AudioDevice(id: 2, name: "Scarlett", uid: "physical")]
+    var processTapEngineStorage: AnyObject?
+    var systemOutput = AudioDevice(id: 1, name: "BlackHole", uid: "blackhole")
+    var hardwareReady = true
+    var starts: [RoutingRequestReason] = []
+    var refreshCount = 0
+    var outputRestores = 0
+    var gate: Gate?
+    var virtualOutput: AudioDevice? { AudioDevice(id: 1, name: "BlackHole", uid: "blackhole") }
+    func blackHoleOutputDevice() -> AudioDevice? { virtualOutput }
+    func currentSystemOutputDevice() -> AudioDevice? { systemOutput }
+    func findBestPhysicalOutputDevice() -> AudioDevice? { outputDevices.first }
+    func removeBlackHoleVolumeListeners() {}
+    func restoreOriginalSystemOutputDevice() { outputRestores += 1 }
+    func refreshDevices() async { refreshCount += 1; if let gate { await gate.wait() } }
+    func startEQRouting(forceRestart: Bool, persistEnabledStateOnFailure: Bool,
+                        reason: RoutingRequestReason, blackHoleSampleRate: Double?) -> Bool {
+        starts.append(reason)
+        guard hardwareReady else { return false }
+        CoreAudioEngine.shared.isRunning = true
+        CoreAudioEngine.shared.isEnabled = true
+        if activeBackend == .none { activeBackend = .blackHole }
+        activeOutputUID = selectedOutputDevice?.uid
+        return true
+    }
+    func topology() { handleDeviceTopologyChange() }
+    func defaultChanged() { handleDefaultOutputChange() }
+    __METHODS__
+}
+@main enum WakeTests {
+    @MainActor static func expect(_ condition: Bool, _ message: String) {
+        if !condition {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+            exit(1)
+        }
+    }
+    @MainActor static func waitUntil(_ condition: () -> Bool) async throws {
+        let started = Date()
+        while !condition() {
+            expect(Date().timeIntervalSince(started) < 6, "Timed out waiting for lifecycle transition")
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+    @MainActor static func pendingWake(_ router: AudioRouter, _ gate: Gate) -> Task<Void, Never>? {
+        router.wakeRecovery.resume(wait: {}, refresh: { await gate.wait() }, restart: {
+            router.enableEQRouting(forceRestart: true, reason: .wake)
+        })
+    }
+    @MainActor static func main() async throws {
+        let scenario = CommandLine.arguments[1]
+        let router = AudioRouter()
+        let core = CoreAudioEngine.shared
+        router.activeBackend = CommandLine.arguments[2] == "native" ? .native : .blackHole
+        if router.activeBackend == .native { router.activeInputUID = nil }
+        switch scenario {
+        case "darkwake", "wake-delay":
+            router.handleSystemEvent(.willSleep)
+            expect(router.wakeRecovery.isSuspended && !core.isRunning, "Sleep failed to retain paused intent")
+            if scenario == "wake-delay" { router.handleSystemEvent(.didWake) }
+            router.hardwareReady = false
+            router.inputDevices = []
+            router.outputDevices = []
+            router.systemOutput = AudioDevice(id: 3, name: "HDMI", uid: "fallback")
+            router.defaultChanged()
+            router.topology()
+            for reason in RoutingRequestReason.allCases where reason != .request {
+                expect(!router.enableEQRouting(forceRestart: true, reason: reason), "Premature restart reported success")
+            }
+            expect(router.starts.isEmpty, "Automatic event started engine before full wake")
+            expect(router.wakeRecovery.isSuspended, "Automatic event erased wake intent")
+            expect(router.preferredOutputUID == "physical", "DarkWake changed preferred output")
+            expect(router.outputRestores == 0 && core.rateRestores == 0, "DarkWake triggered failure cleanup")
+            expect(!DiagnosticEventStore.shared.events.contains("routing.disable.request"), "DarkWake disabled routing")
+            router.hardwareReady = true
+            router.inputDevices = [AudioDevice(id: 1, name: "BlackHole", uid: "blackhole")]
+            router.outputDevices = [AudioDevice(id: 2, name: "Scarlett", uid: "physical")]
+            router.handleSystemEvent(.didWake)
+            try await waitUntil { !router.wakeRecovery.isSuspended }
+            expect(router.starts == [.wake] && core.isRunning, "Full wake failed to restart exactly once")
+        case "second-sleep", "disable", "enable":
+            router.handleSystemEvent(.willSleep)
+            let gate = Gate()
+            let first = pendingWake(router, gate)
+            try await waitUntil { gate.entered }
+            if scenario == "second-sleep" { router.handleSystemEvent(.willSleep) }
+            else if scenario == "disable" { router.disableEQRouting() }
+            else { expect(router.enableEQRouting(), "Manual enable was blocked") }
+            gate.release()
+            await first?.value
+            if scenario == "second-sleep" {
+                expect(router.starts.isEmpty && router.wakeRecovery.shouldResume, "Stale refresh consumed second sleep")
+                let second = router.wakeRecovery.resume(wait: {}, refresh: {}, restart: {
+                    router.enableEQRouting(forceRestart: true, reason: .wake)
+                })
+                await second?.value
+                expect(router.starts == [.wake] && core.isRunning, "Second wake did not restore routing")
+            } else if scenario == "disable" {
+                router.topology(); router.defaultChanged()
+                expect(router.starts.isEmpty && !core.isRunning && !core.isEnabled, "Disabled EQ was restarted")
+                expect(!router.wakeRecovery.isSuspended, "Disable retained restart ownership")
+                expect(UserDefaults.standard.values["eqWasEnabled"] as? Bool == false, "Disable lost user intent")
+            } else {
+                expect(router.starts == [.request] && core.isRunning, "Stale wake duplicated manual enable")
+                expect(!router.wakeRecovery.isSuspended, "Manual enable retained stale ownership")
+            }
+        case "device-refresh", "output-refresh":
+            let gate = Gate()
+            router.gate = gate
+            router.handleSystemEvent(scenario == "device-refresh" ? .devicesChanged : .defaultOutputChanged)
+            let task = scenario == "device-refresh" ? router.deviceChangeDebounceTask : router.defaultOutputChangeTask
+            try await waitUntil { gate.entered }
+            router.handleSystemEvent(.willSleep)
+            expect(router.deviceChangeDebounceTask == nil && router.defaultOutputChangeTask == nil, "Sleep retained debounce tasks")
+            gate.release()
+            await task?.value
+            expect(router.starts.isEmpty && router.wakeRecovery.shouldResume, "In-flight refresh restarted during sleep")
+        case "awake":
+            core.isRunning = false
+            router.topology()
+            expect(router.starts == [.deviceRecovery] && core.isRunning, "Normal awake recovery was suppressed")
+            router.systemOutput = AudioDevice(id: 3, name: "HDMI", uid: "fallback")
+            router.defaultChanged()
+            expect(router.starts.last == .systemOutputChanged && router.preferredOutputUID == "fallback", "Awake output selection was suppressed")
+        case "inactive":
+            router.disableEQRouting()
+            let baselineRestores = core.rateRestores
+            router.handleSystemEvent(.willSleep)
+            router.handleSystemEvent(.didWake)
+            router.topology()
+            expect(router.starts.isEmpty && !router.wakeRecovery.isSuspended, "Inactive sleep created restart intent")
+            expect(core.rateRestores >= baselineRestores, "Unexpected sample-rate state")
+        case "wake-failure":
+            router.handleSystemEvent(.willSleep)
+            router.hardwareReady = false
+            let pending = router.wakeRecovery.resume(wait: {}, refresh: {}, restart: {
+                router.enableEQRouting(forceRestart: true, reason: .wake)
+            })
+            await pending?.value
+            expect(router.starts == [.wake] && !core.isRunning && !core.isEnabled, "Failed wake was reported as running")
+            expect(UserDefaults.standard.values["eqWasEnabled"] as? Bool == true, "Failed wake erased saved enabled intent")
+            expect(!router.wakeRecovery.isSuspended, "Failed wake leaked pending task")
+        default: fatalError("Unknown scenario")
+        }
+        let result: [String: Any] = ["scenario": scenario, "starts": router.starts.map(\.rawValue)]
+        let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+        print(String(decoding: data, as: UTF8.self))
+    }
+}
+'''
+
+
 class RoutingActivityStatusTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
