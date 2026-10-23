@@ -4,9 +4,9 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.5] — 2026-10-22
+## [1.4.5] — 2026-10-23
 
-Reliable AutoEQ imports, restored calibration state, automatic EQ recovery after sleep, and adaptive ProjectM preset selection.
+Signed distribution and manual in-app updates, reliable AutoEQ imports, restored calibration state, automatic EQ recovery after sleep, and adaptive ProjectM preset selection.
 
 ### Fixed
 - AutoEQ imports preserve the source response in 10-band and 31-band modes, account for headroom, and avoid applying preamp attenuation twice
@@ -21,9 +21,12 @@ Reliable AutoEQ imports, restored calibration state, automatic EQ recovery after
 - Exhausted ProjectM preset retries preserve the identity of the last displayed preset, avoid additional retry bursts, and disconnect callbacks safely during shutdown
 - EQ database and index generation validate staged data before replacing existing outputs, preserving previous files when parsing, SQLite operations, or publication fails
 
+### Added
+- Manual in-app updates through Sparkle: check, download, verify and install signed releases, then restart from the update window; signed feeds and archives are required, and automatic checks, downloads and system profiling are disabled
+
 ### Changed
 - ProjectM remembers presets that remain slow on each Mac and skips them in automatic rotation and preset navigation for seven days; direct manual selection remains available
-- Prepared the release workflow to sign and notarize the app and DMG, verify matching ZIP/DMG contents and distribution signatures and tickets, and clean up temporary signing credentials before publication
+- Release builds use Developer ID signing and Apple notarization for the app and DMG, verify matching ZIP/DMG contents and distribution signatures and tickets, publish an Ed25519-signed update feed, and clean up temporary signing credentials before publication
 - Updated installation instructions for the signed distribution workflow; microphone and system-audio permissions still require the user's approval
 
 ## [1.4.4] — 2026-10-10
