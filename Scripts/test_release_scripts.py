@@ -11,6 +11,79 @@ import tempfile
 import unittest
 
 
+class DMGBackgroundWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="systemeq-background-tests-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo with spaces"
+        assets = self.repo / "dmg-assets"
+        assets.mkdir(parents=True)
+        source = Path(__file__).resolve().parent.parent
+        shutil.copy2(source / "dmg-assets/generate-background.swift", assets)
+        workflow = (source / ".github/workflows/release.yml").read_text()
+        section = workflow.split("      - name: Generate DMG background\n", 1)[1].split("\n      - name:", 1)[0]
+        self.command = textwrap.dedent(section.split("        run: |\n", 1)[1])
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.called = self.root / "renderer-called"
+        swift = self.bin / "swift"
+        swift.write_text(f"#!{sys.executable}\n" + '''import os,sys
+from pathlib import Path
+Path(os.environ['RENDERER_CALLED']).write_text('yes')
+if os.environ.get('RENDERER_FAIL'): sys.exit(19)
+output=Path(sys.argv[2])
+if not output.parent.is_dir(): sys.exit(7)
+output.write_bytes(b'PNG fixture')
+''')
+        swift.chmod(0o755)
+        self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", RENDERER_CALLED=str(self.called))
+
+    def run_step(self, command=None, env=None):
+        return subprocess.run(["bash", "-e", "-o", "pipefail", "-c", self.command if command is None else command],
+                              cwd=self.repo, env=self.env if env is None else env, capture_output=True, timeout=60)
+
+    def test_fresh_workspace_creates_background_directory(self):
+        self.assertFalse((self.repo / "build").exists())
+        result = self.run_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.repo / "build/dmg-background.png").read_bytes(), b"PNG fixture")
+
+    def test_existing_build_directory_preserves_unrelated_data(self):
+        (self.repo / "build").mkdir()
+        user = self.repo / "build/manual-work"
+        user.write_bytes(b"preserve")
+        self.assertEqual(self.run_step().returncode, 0)
+        self.assertEqual(user.read_bytes(), b"preserve")
+
+    def test_file_instead_of_build_directory_is_preserved(self):
+        user = self.repo / "build"
+        user.write_bytes(b"preserve")
+        result = self.run_step()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(user.read_bytes(), b"preserve")
+        self.assertFalse(self.called.exists())
+
+    def test_renderer_failure_stops_the_step(self):
+        result = self.run_step(env=dict(self.env, RENDERER_FAIL="1"))
+        self.assertEqual(result.returncode, 19)
+        self.assertFalse((self.repo / "build/dmg-background.png").exists())
+
+    def test_original_missing_directory_defect_is_detected(self):
+        defective = self.command.replace("mkdir -p build\n", "", 1)
+        self.assertNotEqual(defective, self.command)
+        self.assertNotEqual(self.run_step(command=defective).returncode, 0)
+        self.assertFalse((self.repo / "build/dmg-background.png").exists())
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("swift"), "AppKit rendering requires macOS")
+    def test_real_renderer_in_fresh_workspace(self):
+        result = self.run_step(env=dict(os.environ))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        png = (self.repo / "build/dmg-background.png").read_bytes()
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual((int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")), (600, 400))
+
+
 class ReleaseScriptTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="systemeq-script-tests-")
