@@ -4,7 +4,7 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.5] — 2026-10-23
+## [1.4.6] — 2026-10-23
 
 Signed distribution and manual in-app updates, reliable AutoEQ imports, restored calibration state, automatic EQ recovery after sleep, and adaptive ProjectM preset selection.
 

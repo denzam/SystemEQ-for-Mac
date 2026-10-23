@@ -75,7 +75,7 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Il workflow di rilascio v1.4.5 richiede firme Developer ID e notarizzazione per
+Il workflow di rilascio v1.4.6 richiede firme Developer ID e notarizzazione per
 DMG e ZIP. Le versioni fino alla v1.4.4 inclusa usano firme ad-hoc: segui le
 istruzioni di installazione della versione che scarichi.
 
@@ -106,7 +106,7 @@ open "SystemEQ for Mac.xcodeproj"
 
 ### Aggiornamento
 
-A partire dalla v1.4.5, in Impostazioni → **Aggiornamenti app** seleziona
+A partire dalla v1.4.6, in Impostazioni → **Aggiornamenti app** seleziona
 **Verifica aggiornamenti app** per aprire la finestra di aggiornamento.
 Quando è disponibile una versione più recente compatibile, puoi scegliere di
 scaricarla, installarla e riavviare SystemEQ da quella finestra. Le firme del feed
@@ -276,7 +276,7 @@ Vedi la [spiegazione Apple](https://developer.apple.com/documentation/technotes/
 
 Controlla le note sulla firma e sull’installazione della versione scaricata.
 Le versioni fino alla v1.4.4 inclusa e le build locali ad-hoc usano una politica
-di firma diversa dal workflow v1.4.5 con Developer ID. Se un pacchetto firmato
+di firma diversa dal workflow v1.4.6 con Developer ID. Se un pacchetto firmato
 e notarizzato è ancora bloccato, scaricalo di nuovo dalla pagina ufficiale
 e segnala il messaggio esatto di macOS e la versione dell’app.
 

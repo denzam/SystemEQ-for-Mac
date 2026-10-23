@@ -77,7 +77,7 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-The v1.4.5 release workflow requires Developer ID signing and notarization for
+The v1.4.6 release workflow requires Developer ID signing and notarization for
 DMG and ZIP packages. Releases through v1.4.4 use ad-hoc signing; follow the
 installation instructions for the version you download.
 
@@ -108,7 +108,7 @@ open "SystemEQ for Mac.xcodeproj"
 
 ### Updating
 
-Starting with v1.4.5, Settings → **App Updates** → **Check for App Updates**
+Starting with v1.4.6, Settings → **App Updates** → **Check for App Updates**
 opens the update window. When a compatible newer release is available, you can
 choose to download it, install it, and restart SystemEQ from that window.
 The updater verifies signed update information and packages before installation;
@@ -280,7 +280,7 @@ See [Apple’s code identity explanation](https://developer.apple.com/documentat
 
 Check the signing and installation notes for the version you downloaded.
 Releases through v1.4.4 and local ad-hoc builds use a different signing policy
-from the v1.4.5 Developer ID release workflow. For a signed, notarized package,
+from the v1.4.6 Developer ID release workflow. For a signed, notarized package,
 download it again from the official release page and report the exact macOS
 message and app version if it is still blocked.
 
