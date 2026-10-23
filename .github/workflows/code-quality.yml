@@ -133,6 +133,9 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
+      - name: Verify DMG background in a clean workspace
+        run: python3 Scripts/test_release_scripts.py DMGBackgroundWorkflowTests
+
       - name: Verify CPU measurement and IPC lifecycle
         run: python3 Scripts/test_runtime_tools.py
       
