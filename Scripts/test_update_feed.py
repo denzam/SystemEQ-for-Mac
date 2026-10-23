@@ -96,6 +96,44 @@ sys.exit(7 if os.environ.get('FEED_TEST_MODE')=='verify-fail' or not pathlib.Pat
         with self.assertRaises(RuntimeError): self.invoke()
         self.assertEqual(target.read_bytes(),b'preserve')
 
+    def test_feed_read_failure_does_not_create_output(self):
+        original = Path.read_bytes
+        def read(path):
+            if path.name == 'appcast.xml': raise OSError('Read failed')
+            return original(path)
+        with patch.object(Path,'read_bytes',read):
+            with self.assertRaises(OSError): self.invoke()
+        self.assertFalse(self.output.exists())
+
+    def test_partial_staged_write_does_not_create_output(self):
+        original = Path.open
+        class PartialWrite:
+            def __init__(self,stream): self.stream=stream
+            def __enter__(self): return self
+            def __exit__(self,*args): self.stream.close()
+            def write(self,data):
+                self.stream.write(data[:2]);self.stream.flush()
+                raise OSError('Write failed')
+        def open_file(path,*args,**kwargs):
+            stream=original(path,*args,**kwargs)
+            if path.name=='verified-appcast.xml' and args==('xb',): return PartialWrite(stream)
+            return stream
+        with patch.object(Path,'open',open_file):
+            with self.assertRaises(OSError): self.invoke()
+        self.assertFalse(self.output.exists())
+        self.assertEqual(next(self.root.rglob('verified-appcast.xml')).read_bytes(),b'<f')
+
+    def test_atomic_publication_failure_and_existing_file_race(self):
+        with patch.object(builder.os,'link',side_effect=OSError('Link failed')):
+            with self.assertRaises(OSError): self.invoke()
+        self.assertFalse(self.output.exists())
+        def race(source,destination):
+            self.output.write_bytes(b'preserve racing file')
+            raise FileExistsError('Output appeared')
+        with patch.object(builder.os,'link',side_effect=race):
+            with self.assertRaises(FileExistsError): self.invoke()
+        self.assertEqual(self.output.read_bytes(),b'preserve racing file')
+
     def test_generator_failure_redacts_and_cannot_publish(self):
         with self.assertRaises(RuntimeError): self.invoke('command-fail')
         self.assertFalse(self.output.exists())

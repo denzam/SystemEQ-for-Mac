@@ -52,13 +52,20 @@ def generate(app, archive, tools, output, version, notes):
     (attempt / 'generation.log').write_text((result.stdout + result.stderr).decode(errors='replace').replace(key, '<redacted>'))
     require(result.returncode == 0, 'Appcast generation failed; sanitized diagnostics preserved')
     require(staged.read_bytes() == archive.read_bytes(), 'Archive changed while generating feed')
-    checked = subprocess.run(['swift', str(ROOT / 'Scripts/verify_update_feed.swift'), str(attempt / 'appcast.xml'), str(staged),
+    verified = attempt / 'verified-appcast.xml'
+    generated = attempt / 'appcast.xml'
+    require(generated.is_file() and not generated.is_symlink(), 'Generated feed is missing or symlinked')
+    content = generated.read_bytes()
+    with verified.open('xb') as stream:
+        require(stream.write(content) == len(content), 'Incomplete feed write')
+        stream.flush()
+        os.fsync(stream.fileno())
+    checked = subprocess.run(['swift', str(ROOT / 'Scripts/verify_update_feed.swift'), str(verified), str(staged),
                               info['SUPublicEDKey'], url_prefix + archive.name, str(info['CFBundleVersion']), version],
                              capture_output=True, timeout=90, env=environment)
     (attempt / 'verification.log').write_bytes(checked.stdout + checked.stderr)
     require(checked.returncode == 0, 'Signed appcast validation failed')
-    with output.open('xb') as stream:
-        stream.write((attempt / 'appcast.xml').read_bytes())
+    os.link(verified, output)
     print('Signed update feed and archive verified; feed written')
 
 def main():
