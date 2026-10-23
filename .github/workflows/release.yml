@@ -250,6 +250,29 @@ jobs:
             "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
             "${{ steps.version.outputs.version }}"
 
+      - name: Generate and verify signed update feed
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+          NOTARIZED_APP: ${{ steps.notarized.outputs.app }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir "$RUNNER_TEMP/systemeq-sparkle-tools"
+          curl --fail --location --silent --show-error --max-time 120 \
+            --output "$RUNNER_TEMP/systemeq-sparkle-tools/Sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/systemeq-sparkle-tools/Sparkle.tar.xz" | shasum -a 256 -c -
+          tar -xf "$RUNNER_TEMP/systemeq-sparkle-tools/Sparkle.tar.xz" -C "$RUNNER_TEMP/systemeq-sparkle-tools"
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          record = json.loads((Path(os.environ['RUNNER_TEMP']) / 'systemeq-release-check.json').read_text())
+          Path('build/update-notes.txt').write_text(record['release_notes'])
+          PYTHON
+          python3 Scripts/build_update_feed.py --app "$NOTARIZED_APP" \
+            --archive "build/SystemEQ-v${VERSION}.zip" --version "$VERSION" \
+            --tools "$RUNNER_TEMP/systemeq-sparkle-tools" --output build/appcast.xml \
+            --notes build/update-notes.txt
+
       - name: Preserve signing diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -338,6 +361,7 @@ jobs:
           files: |
             build/SystemEQ-v${{ steps.version.outputs.version }}.dmg
             build/SystemEQ-v${{ steps.version.outputs.version }}.zip
+            build/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

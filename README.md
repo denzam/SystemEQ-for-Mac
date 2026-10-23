@@ -108,14 +108,17 @@ open "SystemEQ for Mac.xcodeproj"
 
 ### Updating
 
-In Settings → **App Updates**, **Check for App Updates** checks GitHub for a
-newer release. **Open GitHub Release** opens its download page; the current
-updater does not install or restart the app.
+Starting with v1.4.5, Settings → **App Updates** → **Check for App Updates**
+opens the update window. When a compatible newer release is available, you can
+choose to download it, install it, and restart SystemEQ from that window.
+The updater verifies signed update information and packages before installation;
+checks and installation are initiated by you. EQ settings and profiles remain local.
+Update checks contact GitHub and include the app and updater version, without
+sending your audio, EQ settings, or a system profile.
 
-For a Homebrew installation, run `brew upgrade --cask systemeq`. For a manual
-installation, quit SystemEQ, download the new package, and replace the app in
-`/Applications`. Moving from a version without an in-app installer requires
-this manual update or Homebrew.
+Versions without the in-app installer need one manual update: quit SystemEQ,
+download the new package, and replace the app in `/Applications`. If installed
+with Homebrew, use `brew upgrade --cask systemeq` instead.
 
 ### Setup Guide
 

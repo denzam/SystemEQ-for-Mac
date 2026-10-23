@@ -19,10 +19,25 @@ ROOT = Path(sys.argv.pop(1)).resolve().parent.parent
 NAME = "SystemEQ for Mac"
 HELPER = Path("Contents/Helpers/ProjectMHelper.app")
 LIBRARIES = ("libprojectM-4.4.dylib", "libprojectM-4-playlist.4.dylib")
+SPARKLE = Path("Contents/Frameworks/Sparkle.framework")
+SPARKLE_BASE = SPARKLE / "Versions/B"
+SPARKLE_VERSION = "2.10.0"
+SPARKLE_COMPONENTS = (
+    SPARKLE_BASE / "XPCServices/Installer.xpc",
+    SPARKLE_BASE / "XPCServices/Downloader.xpc",
+    SPARKLE_BASE / "Autoupdate",
+    SPARKLE_BASE / "Updater.app",
+    SPARKLE,
+)
 MACHOS = (
     Path("Contents/MacOS") / NAME,
     HELPER / "Contents/MacOS/ProjectMHelper",
     *(base / "Contents/Frameworks" / name for base in (Path("."), HELPER) for name in LIBRARIES),
+    SPARKLE_BASE / "Sparkle",
+    SPARKLE_BASE / "Autoupdate",
+    SPARKLE_BASE / "Updater.app/Contents/MacOS/Updater",
+    SPARKLE_BASE / "XPCServices/Installer.xpc/Contents/MacOS/Installer",
+    SPARKLE_BASE / "XPCServices/Downloader.xpc/Contents/MacOS/Downloader",
 )
 MAGIC = {bytes.fromhex(value) for value in (
     "feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca",
@@ -92,18 +107,25 @@ def diagnostic(name):
     return RUN / name if RUN is not None else None
 
 
+def signing_components(app):
+    return [app / path for path in (*MACHOS[2:6], *SPARKLE_COMPONENTS, HELPER, Path("."))]
+
+
 def verify(app, state, label):
     inventory(app)
     requirement = f'anchor apple generic and certificate leaf[subject.OU] = "{state["team"]}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
-    components = [app / path for path in MACHOS[2:]] + [app / HELPER, app]
+    components = signing_components(app)
     for index, component in enumerate(components):
         run(["codesign", "--verify", "--strict", "--all-architectures", "-R", f"={requirement}", component], diagnostic(f"{label}-{index}-verify.log"))
         executable = component
         if component.is_dir():
-            with (component / "Contents/Info.plist").open("rb") as stream:
+            framework = component == app / SPARKLE
+            info_path = component / ("Versions/B/Resources/Info.plist" if framework else "Contents/Info.plist")
+            with info_path.open("rb") as stream:
                 info = plistlib.load(stream)
-            require(info["CFBundleShortVersionString"] == state["version"], "App/helper version mismatch")
-            executable = component / "Contents/MacOS" / info["CFBundleExecutable"]
+            expected_version = state["version"] if component in (app, app / HELPER) else SPARKLE_VERSION
+            require(info["CFBundleShortVersionString"] == expected_version, "App/helper or Sparkle version mismatch")
+            executable = component / ("Versions/B" if framework else "Contents/MacOS") / info["CFBundleExecutable"]
         arches = run(["lipo", "-archs", executable], diagnostic(f"{label}-{index}-architectures.log")).stdout.decode().split()
         require(set(arches) == {"arm64", "x86_64"}, f"Not a universal binary: {component}")
         for arch in ("arm64", "x86_64"):
@@ -379,20 +401,23 @@ def main():
         RUN = Path(tempfile.mkdtemp(prefix="release-", dir=base))
         print(f"Artifacts and diagnostics: {RUN}", flush=True)
         archive = RUN / "SystemEQ.xcarchive"
-        run(["xcodebuild", "archive", "-project", ROOT / f"{NAME}.xcodeproj", "-scheme", NAME, "-configuration", "Release", "-destination", "generic/platform=macOS", "-derivedDataPath", RUN / "DerivedData", "-archivePath", archive, "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO", "CODE_SIGNING_ALLOWED=NO", "-quiet"], RUN / "archive.log", timeout=1800)
+        run(["xcodebuild", "archive", "-project", ROOT / f"{NAME}.xcodeproj", "-scheme", NAME, "-configuration", "Release", "-destination", "generic/platform=macOS", "-derivedDataPath", RUN / "DerivedData", "-archivePath", archive, "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO", "CODE_SIGNING_ALLOWED=NO", "-onlyUsePackageVersionsFromResolvedFile", "-quiet"], RUN / "archive.log", timeout=1800)
         source = archive / "Products/Applications" / f"{NAME}.app"
         inventory(source)
         app = RUN / f"{NAME}.app"
         shutil.copytree(source, app, symlinks=True)
         shutil.copyfile(ROOT / "Config/SystemEQ.entitlements", RUN / "SystemEQ.entitlements")
+        (RUN / "Empty.entitlements").write_bytes(plistlib.dumps({}))
         with (app / "Contents/Info.plist").open("rb") as stream:
             version = plistlib.load(stream)["CFBundleShortVersionString"]
         state = {"identity": args.identity, "team": args.team, "version": version}
-        components = [app / path for path in MACHOS[2:]] + [app / HELPER, app]
+        components = signing_components(app)
         for index, component in enumerate(components):
             command = ["codesign", "--force", "--sign", args.identity, "--timestamp", "--options", "runtime"]
             if component == app:
                 command += ["--entitlements", RUN / "SystemEQ.entitlements"]
+            elif component == app / SPARKLE_BASE / "Autoupdate":
+                command += ["--entitlements", RUN / "Empty.entitlements"]
             run([*command, component], RUN / f"sign-{index}.log")
         verify(app, state, "signed")
         package = RUN / "SystemEQ-signed.zip"

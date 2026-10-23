@@ -25,7 +25,7 @@ enum EnglishTranslations {
         .languageDesc: "Choose your preferred language for the app interface",
         .general: "General",
         .appUpdates: "App Updates",
-        .appUpdatesDesc: "Check GitHub for a newer version of SystemEQ.",
+        .appUpdatesDesc: "Check, download, and install signed SystemEQ updates. Restart when you choose to install.",
         .appCurrentVersion: "Current version: %@",
         .checkAppUpdates: "Check for App Updates",
         .appUpdateChecking: "Checking for updates…",

@@ -25,7 +25,7 @@ enum UkrainianTranslations {
         .languageDesc: "Оберіть бажану мову інтерфейсу програми",
         .general: "Загальне",
         .appUpdates: "Оновлення програми",
-        .appUpdatesDesc: "Перевірити на GitHub, чи доступна нова версія SystemEQ.",
+        .appUpdatesDesc: "Перевіряй, завантажуй і встановлюй підписані оновлення SystemEQ із перезапуском після твого підтвердження.",
         .appCurrentVersion: "Поточна версія: %@",
         .checkAppUpdates: "Перевірити оновлення програми",
         .appUpdateChecking: "Перевірка оновлень…",

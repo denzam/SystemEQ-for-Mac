@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A51000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A51000000000000000000004 /* Sparkle */; };
 		C012D7D12F410D2F00DB5B39 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D02F410D2F00DB5B39 /* AppKit.framework */; };
 		C012D7D32F410D3A00DB5B39 /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D22F410D3A00DB5B39 /* OpenGL.framework */; };
 		C012D7D52F410D4300DB5B39 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C012D7D42F410D4300DB5B39 /* CoreVideo.framework */; };
@@ -66,6 +67,12 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+        A51000000000000000000002 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (A51000000000000000000001 /* Sparkle in Frameworks */,);
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 		C012D7B72F410A9300DB5B39 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -148,6 +155,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = C06457302E959CD300CF1B0E /* Build configuration list for PBXNativeTarget "SystemEQ for Mac" */;
 			buildPhases = (
+				A51000000000000000000002 /* Frameworks */,
 				C06457212E959CD100CF1B0E /* Sources */,
 				C06457232E959CD100CF1B0E /* Resources */,
 				C0PROJECTM001 /* Copy projectM Libraries */,
@@ -162,6 +170,7 @@
 			);
 			name = "SystemEQ for Mac";
 			packageProductDependencies = (
+				A51000000000000000000004 /* Sparkle */,
 			);
 			productName = "SystemEQ for Mac";
 			productReference = C06457252E959CD100CF1B0E /* SystemEQ for Mac.app */;
@@ -224,6 +233,7 @@
 			mainGroup = C064571C2E959CD100CF1B0E;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (A51000000000000000000003 /* Sparkle */,);
 			productRefGroup = C06457262E959CD100CF1B0E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -338,6 +348,21 @@
 			targetProxy = C0TEST00D2F4120000000000D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+        A51000000000000000000003 /* Sparkle */ = {
+            isa = XCRemoteSwiftPackageReference;
+            repositoryURL = "https://github.com/sparkle-project/Sparkle";
+            requirement = {kind = exactVersion; version = 2.10.0;};
+        };
+/* End XCRemoteSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+        A51000000000000000000004 /* Sparkle */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = A51000000000000000000003 /* Sparkle */;
+            productName = Sparkle;
+        };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		C012D7C32F410A9500DB5B39 /* Debug */ = {

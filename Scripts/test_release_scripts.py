@@ -234,6 +234,17 @@ elif name == "xcodebuild":
         (base / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.4.4", "CFBundleExecutable": executable}))
         for target in [base / "Contents/MacOS" / executable, *(base / "Contents/Frameworks" / lib for lib in ("libprojectM-4.4.dylib", "libprojectM-4-playlist.4.dylib"))]:
             target.write_bytes(bytes.fromhex("cafebabe") + b"fixture")
+    sparkle = app / "Contents/Frameworks/Sparkle.framework/Versions/B"
+    nested = [(sparkle / "Resources/Info.plist", sparkle / "Sparkle", "Sparkle"),
+        (sparkle / "Updater.app/Contents/Info.plist", sparkle / "Updater.app/Contents/MacOS/Updater", "Updater"),
+        (sparkle / "XPCServices/Installer.xpc/Contents/Info.plist", sparkle / "XPCServices/Installer.xpc/Contents/MacOS/Installer", "Installer"),
+        (sparkle / "XPCServices/Downloader.xpc/Contents/Info.plist", sparkle / "XPCServices/Downloader.xpc/Contents/MacOS/Downloader", "Downloader")]
+    for metadata, binary, executable in nested:
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "2.10.0", "CFBundleExecutable": executable}))
+        binary.write_bytes(bytes.fromhex("cafebabe") + b"sparkle fixture")
+    (sparkle / "Autoupdate").write_bytes(bytes.fromhex("cafebabe") + b"autoupdate fixture")
     if mode == "extra-code": (app / "Contents/MacOS/Unexpected").write_bytes(bytes.fromhex("cafebabe"))
     if mode == "escaping-link": (app / "Contents/escape").symlink_to(os.environ["OUTSIDE"])
 elif name == "codesign":
@@ -381,13 +392,14 @@ else: sys.exit(99)
         self.assertIn("ONLY_ACTIVE_ARCH=NO", archive)
         self.assertIn("CODE_SIGNING_ALLOWED=NO", archive)
         signed = [call for call in calls if call[0] == "codesign" and "--force" in call]
-        self.assertEqual(len(signed), 6)
+        self.assertEqual(len(signed), 11)
         self.assertTrue(all(call[-1].endswith(".dylib") for call in signed[:4]))
-        self.assertTrue(signed[4][-1].endswith("ProjectMHelper.app"))
-        self.assertTrue(signed[5][-1].endswith("SystemEQ for Mac.app"))
+        self.assertTrue(signed[9][-1].endswith("ProjectMHelper.app"))
+        self.assertTrue(signed[10][-1].endswith("SystemEQ for Mac.app"))
         self.assertTrue(all("--deep" not in call for call in signed))
-        self.assertTrue(all("--entitlements" not in call for call in signed[:5]))
-        self.assertIn("--entitlements", signed[5])
+        self.assertTrue(all("--entitlements" not in call for index, call in enumerate(signed[:10]) if index != 6))
+        self.assertIn("--entitlements", signed[6])
+        self.assertIn("--entitlements", signed[10])
         self.assertTrue((directory / "manifest.json").is_file())
         self.assertFalse((directory / "completed.json").exists())
         self.assertFalse(any(call[0] == "xcrun" for call in calls))

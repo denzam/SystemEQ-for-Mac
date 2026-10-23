@@ -136,6 +136,9 @@ jobs:
       - name: Verify CPU measurement and IPC lifecycle
         run: python3 Scripts/test_runtime_tools.py
       
+      - name: Verify signed update feed and failure paths
+        run: python3 Scripts/test_update_feed.py
+
       - name: Verify Unique Database Resource
         run: |
           count=$(find . -name "EQDatabase.db" -not -path "./DerivedData/*" -not -path "./build/*" -not -path "./LocalArtifacts/*" | wc -l | tr -d ' ')

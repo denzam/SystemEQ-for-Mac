@@ -7,7 +7,7 @@ struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
     @StateObject private var launchManager = LaunchAtLoginManager()
     @StateObject private var audioRouter = AudioRouter.shared
-    @StateObject private var appUpdateChecker = AppUpdateChecker()
+    @ObservedObject private var appUpdateChecker = AppUpdateChecker.shared
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("hideDockIcon") private var hideDockIcon = false
     @AppStorage(DevicePresetManager.autoSwitchKey) private var autoSwitchPresetPerDevice = false
@@ -405,7 +405,7 @@ struct SettingsView: View {
                 appUpdateStatus
 
                 Button {
-                    Task { await appUpdateChecker.checkForUpdates() }
+                    appUpdateChecker.checkForUpdates()
                 } label: {
                     Label(
                         localization.localized(.checkAppUpdates),
@@ -413,7 +413,7 @@ struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(appUpdateChecker.state == .checking)
+                .disabled(!appUpdateChecker.canCheckForUpdates)
             }
             .padding()
             .background(Color(NSColor.textBackgroundColor).opacity(0.05))
@@ -426,39 +426,8 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var appUpdateStatus: some View {
-        switch appUpdateChecker.state {
-        case .idle:
-            EmptyView()
-        case .checking:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text(localization.localized(.appUpdateChecking))
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(.secondary)
-            }
-        case let .upToDate(version):
-            Text(String(format: localization.localized(.appUpToDate), version))
-                .font(AppTypography.bodySmall)
-                .foregroundColor(.green)
-        case let .updateAvailable(_, release):
-            VStack(alignment: .leading, spacing: 8) {
-                Text(String(format: localization.localized(.appUpdateAvailable), release.version))
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(.orange)
-
-                Button {
-                    NSWorkspace.shared.open(release.url)
-                } label: {
-                    Label(
-                        localization.localized(.appUpdateOpenRelease),
-                        systemImage: "arrow.up.right.square"
-                    )
-                }
-                .buttonStyle(.bordered)
-            }
-        case let .failed(message):
-            Text(message)
+        if appUpdateChecker.startupFailed {
+            Text(localization.localized(.appUpdateCheckFailed))
                 .font(AppTypography.bodySmall)
                 .foregroundColor(.secondary)
         }
