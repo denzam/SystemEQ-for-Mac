@@ -11,9 +11,11 @@ start so you do not waste effort.
   not allowed.
 - **No paid features.** The app is and will remain free. Donations are
   fine; paywalls, "pro" tiers, telemetry, or analytics will not be merged.
-- **No Apple Developer ID requirement.** The project intentionally ships
-  unsigned / ad-hoc signed. Do not introduce build steps that require a
-  paid Apple Developer account, App Store entitlements, or notarization.
+- **Signing is required for public releases.** Since v1.4.6, official releases
+  use Developer ID signing and Apple notarization, with signed Sparkle updates.
+  Contributors can build and test locally without the maintainer’s certificate,
+  private keys or notarization credentials. Never commit credentials or private
+  keys. App Store entitlements and sandbox compatibility are outside this project.
 
 ## Reporting issues
 
@@ -28,11 +30,12 @@ start so you do not waste effort.
 
 - Xcode 16.2 or newer
 - macOS 13 (Ventura) or newer
-- BlackHole 2ch installed for runtime testing
+- macOS 14.4+: Automatic audio backend uses native capture; BlackHole 2ch is
+  needed for macOS 13–14.3, fallback and explicit BlackHole-mode runtime tests
 
 ```bash
 git clone https://github.com/denzam/SystemEQ-for-Mac.git
-cd "SystemEQ for Mac"
+cd SystemEQ-for-Mac
 open "SystemEQ for Mac.xcodeproj"
 ```
 
@@ -72,8 +75,8 @@ its memory ordering without a benchmark.
 
 ## What is unlikely to be merged
 
-- Telemetry, crash reporting, or any network call not strictly required by
-  AutoEQ fetching.
+- Telemetry, crash reporting, or network calls unrelated to AutoEQ data,
+  ProjectM presets or user-initiated app updates.
 - App Store / sandbox compatibility shims.
 - Code obfuscation, licensing checks, or DRM.
 - Large refactors without a prior issue discussing the motivation.

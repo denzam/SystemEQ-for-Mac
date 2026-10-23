@@ -63,7 +63,7 @@
 
 - macOS 13.0 (Ventura) або новіша
 - Apple Silicon або Intel Mac
-- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (необов’язковий резервний маршрут для macOS 13–14.3 або ручного режиму BlackHole)
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (потрібен на macOS 13–14.3; на macOS 14.4+ — необов’язковий резервний або ручний backend)
 - 4 ГБ RAM (рекомендовано 8 ГБ)
 
 ### Встановлення
@@ -75,9 +75,10 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Релізний workflow v1.4.6 вимагає підпис Developer ID та нотаризацію DMG і ZIP.
-Релізи до v1.4.4 включно мають ad-hoc підпис; дотримуйся інструкцій
-встановлення саме тієї версії, яку завантажуєш.
+Починаючи з v1.4.6, офіційні релізи містять застосунок із підписом Developer ID
+та нотаризацією Apple; DMG також підписаний і нотаризований. Відкривай застосунок
+звичайним способом, без зняття quarantine. Релізи до v1.4.4 включно мають ad-hoc
+підпис; для них дотримуйся інструкцій у відповідних старих релізах.
 
 > **Навіщо `brew trust`?** Починаючи з Homebrew 6.0, сторонні тапи треба
 > явно позначити довіреними, інакше Homebrew відмовиться їх завантажувати
@@ -99,7 +100,7 @@ brew install --cask denzam/systemeq/systemeq
 
 ```bash
 git clone https://github.com/denzam/SystemEQ-for-Mac.git
-cd "SystemEQ for Mac"
+cd SystemEQ-for-Mac
 open "SystemEQ for Mac.xcodeproj"
 # Натисни Cmd+R для збірки та запуску
 ```
@@ -128,7 +129,7 @@ SystemEQ, завантаж новий пакет і заміни застосу�
 
 2. **Використовуй BlackHole лише за потреби** (macOS 13–14.3, fallback або ручний вибір):
    - Встанови [BlackHole 2ch](https://existential.audio/blackhole/) і перезапусти SystemEQ
-   - У Routing обери BlackHole як вхід, а навушники або колонки — як вихід
+   - У Settings → Audio Backend обери **BlackHole**, а в Routing — навушники або колонки як вихід
    - Встанови **BlackHole 2ch** системним виходом macOS і натисни **Увімкнути EQ**
 
 3. **Застосуй пресет EQ**:
@@ -283,7 +284,7 @@ Ad-hoc збірка або зміна ідентичності підпису м
 
 На macOS 14.4+ спершу обери **Автоматичний** у Settings → Audio Backend і ще раз увімкни EQ. Системний вихід має лишатися фізичним пристроєм. Якщо Automatic перейшов у fallback або не запускається, встанови BlackHole і виконай інструкції нижче.
 
-У **Routing** обери BlackHole як вхід, а навушники або колонки — як вихід.
+У **Settings → Audio Backend** обери **BlackHole**, а в **Routing** — навушники або колонки як вихід.
 Встанови **BlackHole 2ch** системним виходом macOS, натисни **Увімкнути EQ**
 і тримай SystemEQ запущеним.
 
@@ -297,7 +298,7 @@ macOS зберігає окрему гучність для кожного ви�
 - Застосунок **не sandboxed** (несумісно з CoreAudio/AUHAL віртуальними пристроями)
 - **Без телеметрії, аналітики та збору даних** — всі дані залишаються на твоєму Mac
 - Встановлюй лише з офіційних [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-- Релізний workflow вимагає Developer ID, нотаризацію та перевірку Gatekeeper
+- Офіційні релізи від v1.4.6 мають підпис Developer ID та нотаризацію Apple; перед публікацією перевіряються підписи й прикріплені квитки нотаризації
 
 ## 🤝 Внесок у проєкт
 

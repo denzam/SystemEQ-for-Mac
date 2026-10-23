@@ -4,15 +4,19 @@
 
 ### Встановлення
 ```bash
-brew tap denzam/systemeq
 brew trust denzam/systemeq
-brew install --cask systemeq
+brew install --cask denzam/systemeq/systemeq
 ```
 
 Починаючи з Homebrew 6.0, сторонні тапи треба явно позначити довіреними —
 без `brew trust` встановлення падає з `Refusing to load cask ... from
 untrusted tap`. Робиться один раз на кожному Mac; на Homebrew 5 і старіших
 цієї команди немає, тому її пропускають.
+
+Офіційні релізи від v1.4.6 містять застосунок із підписом Developer ID та
+нотаризацією Apple; DMG також підписаний і нотаризований. Знімати quarantine
+не потрібно. BlackHole потрібен на macOS 13–14.3, для резервного маршруту або
+ручного режиму BlackHole; на macOS 14.4+ рекомендований backend — Automatic.
 
 ### Оновлення
 ```bash
@@ -26,22 +30,13 @@ brew uninstall --cask systemeq
 
 ---
 
-## Для розробника (налаштування Homebrew Tap)
+## Для розробника
 
-### Крок 1: Створити окремий репозиторій
-Створіть репозиторій на GitHub з назвою `homebrew-systemeq`
+Чинний cask міститься в [denzam/homebrew-systemeq](https://github.com/denzam/homebrew-systemeq/blob/main/Casks/systemeq.rb).
+Після успішної публікації релізний workflow автоматично оновлює в ньому
+версію та SHA256 опублікованого DMG. Окреме ручне копіювання не потрібне.
 
-### Крок 2: Додати формулу
-```bash
-git clone https://github.com/denzam/homebrew-systemeq.git
-mkdir -p homebrew-systemeq/Casks
-cp Casks/systemeq.rb homebrew-systemeq/Casks/
-cd homebrew-systemeq
-git add . && git commit -m "Add SystemEQ cask"
-git push
-```
-
-### Крок 3: Оновлення при новому релізі
-1. Оновити `version` в `systemeq.rb`
-2. Оновити `sha256` (отримати: `shasum -a 256 SystemEQ-v*.dmg`)
-3. Push в `homebrew-systemeq` репозиторій
+`Casks/systemeq.rb` у цьому репозиторії — довідкова копія для v1.4.6;
+для встановлення й перевірки поточної версії використовуй чинний tap.
+Не замінюй його cask старою довідковою копією. Перед будь-якою ручною зміною
+звір версію та SHA256 з фактичним DMG відповідного GitHub-релізу.

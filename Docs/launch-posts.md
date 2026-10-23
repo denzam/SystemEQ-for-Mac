@@ -34,11 +34,11 @@ What it does:
 - Real-time visualizer
 - No telemetry, no subscriptions, no ads — everything stays local
 
-It's GPLv3 and completely free. I didn't pay Apple's $99 developer fee, which is exactly what keeps it free and open.
+It's GPLv3 and completely free. Official releases from v1.4.6 are Developer ID signed and notarized by Apple.
 
 GitHub: https://github.com/denzam/SystemEQ-for-Mac
 
-Happy to answer anything about the audio architecture or how the BlackHole routing works.
+Happy to answer anything about the audio architecture, native capture or BlackHole fallback.
 ```
 
 ---
@@ -77,15 +77,15 @@ What it does:
 - Real-time visualizer (spectrum, waveform, particles)
 - No subscriptions, no ads, no telemetry — everything stays on your Mac
 
-How it works: routing is handled via the free BlackHole driver (the app has a
-guided Setup Assistant for it).
+How it works: Automatic mode uses native system-audio capture on macOS 14.4+.
+The free BlackHole driver provides capture on older macOS versions and fallback.
 
 Honest caveats:
-- Ad-hoc signed, NOT notarized (I don't pay the $99 Apple Developer fee — that's
-  what keeps it free). Gatekeeper warns on first launch; right-click → Open
-  once and you're done. Homebrew install bypasses this automatically.
-- Needs BlackHole installed (free, guided).
-- Adds ~10-20ms latency vs direct output (architectural limit of the routing).
+- Official releases from v1.4.6 are Developer ID signed and notarized by Apple;
+  open them normally and approve the requested audio permission.
+- BlackHole is needed on macOS 13–14.3, for fallback or manual BlackHole mode.
+- Audio processing adds latency; it depends on the backend, device and buffer size.
+- From v1.4.6, check and install signed updates manually from Settings → App Updates.
 
 Download (official GitHub Releases):
 https://github.com/denzam/SystemEQ-for-Mac/releases/latest
@@ -129,16 +129,16 @@ Technical bits that might interest this crowd:
 - Audio engine is low-level AUHAL dual I/O with a lock-free SPSC ring buffer
   (C11 atomics), biquad filtering via vDSP/Accelerate (~5-10x faster than a
   scalar loop), running on a real-time thread.
-- System audio is captured through the BlackHole virtual driver and bridged
-  directly to the physical output — no macOS Multi-Output Device needed.
+- Automatic mode captures system audio natively on macOS 14.4+, with BlackHole
+  for older macOS versions and fallback — no macOS Multi-Output Device needed.
 - Ships a local SQLite AutoEQ database (8,665 headphone models, ~18MB) so
   preset search is fully offline and <10ms.
 - Also has a hearing-calibration module and a real-time visualizer.
 
-Honest tradeoffs: it's ad-hoc signed rather than notarized (no $99 Apple
-Developer fee — keeps it free), so Gatekeeper warns on first launch. And
-routing through BlackHole adds ~10-20ms latency. A proper HAL plugin would
-fix both but also requires the paid Apple account.
+Official releases from v1.4.6 are Developer ID signed and notarized by Apple,
+and include manual signed updates through Sparkle. Audio processing adds
+latency depending on the backend, device and buffer size. Audio permissions
+still require the user's approval.
 
 Source: https://github.com/denzam/SystemEQ-for-Mac
 Would appreciate feedback, especially on the audio architecture.
@@ -171,8 +171,8 @@ What it does:
 → Real-time audio visualizer
 → No tracking, no subscriptions, no ads — everything stays on your Mac
 
-It's completely free. I chose not to pay Apple's $99 developer fee, and that's
-exactly what lets me keep it free and open for everyone.
+It's completely free and open source. Official releases from v1.4.6 are
+Developer ID signed and notarized by Apple.
 
 You don't need the right job title to build something real. You just need to start.
 
@@ -200,8 +200,8 @@ Cosa fa:
 → Visualizzatore audio in tempo reale
 → Nessun tracciamento, nessun abbonamento, nessuna pubblicità — tutto resta sul tuo Mac
 
-È completamente gratuita. Ho scelto di non pagare la quota sviluppatore di Apple
-da 99 $, ed è proprio questo che mi permette di tenerla gratuita e aperta a tutti.
+È completamente gratuita e open source. Le versioni ufficiali dalla v1.4.6
+sono firmate Developer ID e notarizzate da Apple.
 
 Non serve avere il titolo giusto per costruire qualcosa di reale. Basta iniziare.
 

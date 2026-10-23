@@ -19,18 +19,28 @@ week or two rather than within hours.
 ## Security model
 
 SystemEQ processes system audio locally. It has **no telemetry, no analytics,
-and no account system**, and never uploads user data. Network access is limited
-to three fixed HTTPS endpoints:
+and no account system**. Audio, EQ settings and profiles stay on your Mac.
+Network access is used for:
 
 - the AutoEQ preset repository (preset index and preset files),
 - the ProjectM visualizer preset archive,
-- GitHub Releases (update check).
+- GitHub Releases (manual update checks, signed update feeds and package downloads).
+
+Starting with v1.4.6, app updates use Sparkle. Checks and installation are
+initiated by the user; automatic checks, automatic downloads and system
+profiling are disabled. Requests include the app and updater version, without
+sending audio, EQ settings or a system profile. Both the update feed and archive
+require Ed25519 signatures, verified before extraction and installation.
 
 The app is **not sandboxed** — CoreAudio/AUHAL virtual audio routing is
-incompatible with the App Sandbox. It is distributed ad-hoc signed and without
-Apple notarization, which is why Gatekeeper requires a right-click → Open on
-first launch. Install only from the official GitHub Releases page or the
-Homebrew tap.
+incompatible with the App Sandbox. Official releases from v1.4.6 contain a
+Developer ID signed and Apple-notarized app; the DMG is also signed and
+notarized. The release pipeline validates signatures, stapled notarization
+tickets and matching ZIP/DMG contents before publication. Open these releases
+normally, without removing quarantine. Releases through v1.4.4 and local
+development builds may use ad-hoc signing. Install only from the official
+GitHub Releases page or the Homebrew tap. Signing does not grant microphone or
+system-audio recording permission; the user must approve those separately.
 
 ## Audit history
 

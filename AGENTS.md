@@ -4,7 +4,7 @@
 
 ## Проект
 
-macOS-застосунок системного параметричного еквалайзера. Перехоплює системний звук через BlackHole 2ch, застосовує biquad-фільтри, виводить на фізичний пристрій. Візуалізатор — ProjectM в окремому helper-процесі (IPC через Unix-socket). MVP завершено (грудень 2025).
+macOS-застосунок системного параметричного еквалайзера. На macOS 14.4+ автоматично захоплює системний звук через Native Process Tap; BlackHole 2ch використовується на macOS 13–14.3, як резервний або вручну обраний backend. Застосовує biquad-фільтри й виводить звук на фізичний пристрій. Візуалізатор — ProjectM в окремому helper-процесі (IPC через Unix-socket). MVP завершено (грудень 2025).
 
 **Стек:** Swift 5.9 / SwiftUI, CoreAudio / AUHAL, vDSP, SQLite3 (FTS5), Combine, AppKit, BlackHole 2ch, ProjectM.
 **Збірка:** Xcode 16.2+, чистий Xcode-проект (немає `Package.swift`). Локалізація EN/IT/UK у рантаймі.
@@ -13,7 +13,7 @@ macOS-застосунок системного параметричного е�
 xcodebuild test -project "SystemEQ for Mac.xcodeproj" -scheme "SystemEQ for Mac" -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO -quiet
 ```
 
-**Дистрибуція:** open source, GPLv3. GitHub Releases (DMG + ZIP) + Homebrew tap `denzam/homebrew-systemeq` (авто-синк релізним workflow). **НЕ App Store** — AUHAL/BlackHole несумісні з sandbox. **Без Apple Developer ID** (свідоме рішення користувача, не пропонувати) — збірка ad-hoc signed без нотаризації; обхід Gatekeeper задокументовано в README і release notes. Донати ОК; платної версії не буде.
+**Дистрибуція:** open source, GPLv3. GitHub Releases (DMG + ZIP) + Homebrew tap `denzam/homebrew-systemeq` (авто-синк релізним workflow). **НЕ App Store** — AUHAL/BlackHole несумісні з sandbox. Офіційні релізи від v1.4.6 містять застосунок із підписом Developer ID та нотаризацією Apple; DMG також підписаний і нотаризований. Перед публікацією перевіряються підписи, прикріплені квитки нотаризації та відповідність DMG/ZIP. Оновлення з програми через Sparkle запускає користувач; стрічка й архів потребують Ed25519-підписів, автоматичні перевірки, завантаження та профілювання системи вимкнені. Локальні збірки й тести не потребують приватних ключів релізу; секрети не комітити. Релізи до v1.4.4 включно використовують ad-hoc підпис. Донати ОК; платної версії не буде.
 
 Користувач перевіряє UI сам на реальному Mac. Зміни мають бути малими й сфокусованими; не полірувати UI без окремого запиту.
 

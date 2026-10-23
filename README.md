@@ -65,7 +65,7 @@ no telemetry.
 
 - macOS 13.0 (Ventura) or later
 - Apple Silicon or Intel Mac
-- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (optional fallback for macOS 13–14.3 or manual BlackHole mode)
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) (required on macOS 13–14.3; optional fallback or manual backend on macOS 14.4+)
 - 4GB RAM (8GB recommended)
 
 ### Installation
@@ -77,9 +77,10 @@ brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-The v1.4.6 release workflow requires Developer ID signing and notarization for
-DMG and ZIP packages. Releases through v1.4.4 use ad-hoc signing; follow the
-installation instructions for the version you download.
+Starting with v1.4.6, official releases contain a Developer ID signed,
+Apple-notarized app; the DMG is also signed and notarized. Open the app normally
+without removing quarantine. Releases through v1.4.4 use ad-hoc signing; follow
+the installation instructions in those older releases.
 
 > **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
 > explicitly before Homebrew will load them, and there is no way for a tap
@@ -101,7 +102,7 @@ Local development builds may still use ad-hoc signing.
 
 ```bash
 git clone https://github.com/denzam/SystemEQ-for-Mac.git
-cd "SystemEQ for Mac"
+cd SystemEQ-for-Mac
 open "SystemEQ for Mac.xcodeproj"
 # Press Cmd+R to build and run
 ```
@@ -130,7 +131,7 @@ with Homebrew, use `brew upgrade --cask systemeq` instead.
 
 2. **Use BlackHole only when needed** (macOS 13–14.3, fallback, or manual selection):
    - Install [BlackHole 2ch](https://existential.audio/blackhole/) and restart SystemEQ
-   - In Routing, select BlackHole as input and your speakers/headphones as output
+   - In Settings → Audio Backend, select **BlackHole**; in Routing, select your speakers/headphones as output
    - Set **BlackHole 2ch** as the macOS System Output, then click **Enable EQ**
 
 3. **Apply EQ Preset**:
@@ -288,8 +289,8 @@ message and app version if it is still blocked.
 
 On macOS 14.4+, first choose **Automatic** in Settings → Audio Backend and enable EQ again. The system output should stay on your physical device. If Automatic falls back or cannot start, install BlackHole and follow the BlackHole setup below.
 
-In **Routing**, select BlackHole as input and your speakers or headphones as
-output. Set **BlackHole 2ch** as the macOS System Output, click **Enable EQ**,
+In **Settings → Audio Backend**, select **BlackHole**, then select your speakers
+or headphones as output in **Routing**. Set **BlackHole 2ch** as the macOS System Output, click **Enable EQ**,
 and keep SystemEQ running.
 
 ### Sound is quieter after switching to BlackHole
@@ -303,7 +304,7 @@ macOS Sound settings.
 - This app is **not sandboxed** (incompatible with CoreAudio/AUHAL virtual audio devices)
 - **No telemetry, analytics, or data collection** — all data stays on your Mac
 - Only install from official [GitHub Releases](https://github.com/denzam/SystemEQ-for-Mac/releases)
-- Distribution workflow requires Developer ID signing, notarization and Gatekeeper validation
+- Official releases from v1.4.6 are Developer ID signed and Apple-notarized; distribution checks validate signatures and stapled tickets before publication
 
 ### Security audits
 
