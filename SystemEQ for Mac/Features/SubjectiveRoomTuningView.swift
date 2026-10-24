@@ -30,6 +30,7 @@ struct SubjectiveRoomTuningView: View {
     @State private var abIsFiltered: Bool = true
     @State private var abTimer: Timer?
     @State private var abComparisonProfile: CalibrationProfile?
+    @State private var abComparisonID: UUID?
 
     enum TuningTab: String, CaseIterable, FeatureTab, Identifiable {
         case tuning = "Tuning"
@@ -817,11 +818,17 @@ struct SubjectiveRoomTuningView: View {
     }
 
     private func applyNotchFilters() {
-        if appliedNotchFilters.isEmpty {
-            stopABComparison(restoreFilters: false)
-        }
         let tuples = appliedNotchFilters.map { f in
             (frequency: Float(f.frequency), gain: f.gain, q: f.q)
+        }
+        if isComparing {
+            if let id = CoreAudioEngine.shared.beginRoomABComparison(tuples) {
+                abComparisonID = id
+                abIsFiltered = true
+                gainMatchOffset = CoreAudioEngine.shared.roomABGainMatchOffset(for: id) ?? 0
+                return
+            }
+            stopABComparison(restoreFilters: false)
         }
         CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
         dlog("🏠 Applied \(tuples.count) room notch filter(s)", category: .calibration)
@@ -837,16 +844,13 @@ struct SubjectiveRoomTuningView: View {
 
     private func startABComparison() {
         stopABComparison(restoreFilters: false)
-        guard !appliedNotchFilters.isEmpty else { return }
+        let tuples = appliedNotchFilters.map { (frequency: Float($0.frequency), gain: $0.gain, q: $0.q) }
+        guard let id = CoreAudioEngine.shared.beginRoomABComparison(tuples) else { return }
+        abComparisonID = id
         isComparing = true
         abComparisonProfile = calibration.activeProfile
-
-        // Average notch gain across all filters to estimate loudness change
-        let avgGain = appliedNotchFilters.map(\.gain).reduce(0, +) / Float(appliedNotchFilters.count)
-        gainMatchOffset = -avgGain // compensate: filters cut, so add back when bypassed
-
+        gainMatchOffset = CoreAudioEngine.shared.roomABGainMatchOffset(for: id) ?? 0
         abIsFiltered = true
-        applyNotchFilters()
 
         abTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { timer in
             MainActor.assumeIsolated {
@@ -855,13 +859,14 @@ struct SubjectiveRoomTuningView: View {
                     stopABComparison(restoreFilters: false)
                     return
                 }
-                abIsFiltered.toggle()
-                if abIsFiltered {
-                    let tuples = appliedNotchFilters.map { (frequency: Float($0.frequency), gain: $0.gain, q: $0.q) }
-                    CoreAudioEngine.shared.applyRoomNotchFilters(tuples)
-                } else {
-                    CoreAudioEngine.shared.clearRoomNotchFilters()
+                guard let id = abComparisonID,
+                      CoreAudioEngine.shared.setRoomABComparisonPhase(id, filtered: !abIsFiltered)
+                else {
+                    stopABComparison(restoreFilters: false)
+                    return
                 }
+                abIsFiltered.toggle()
+                gainMatchOffset = CoreAudioEngine.shared.roomABGainMatchOffset(for: id) ?? 0
             }
         }
         dlog("▶️ A/B comparison started (2s interval, gain offset: \(gainMatchOffset) dB)", category: .calibration)
@@ -869,15 +874,16 @@ struct SubjectiveRoomTuningView: View {
 
     private func stopABComparison(restoreFilters: Bool = true) {
         let shouldRestore = isComparing && restoreFilters && calibration.activeProfile == abComparisonProfile
+        if let id = abComparisonID {
+            CoreAudioEngine.shared.endRoomABComparison(id, restoreFilters: shouldRestore)
+        }
+        abComparisonID = nil
         isComparing = false
         abTimer?.invalidate()
         abTimer = nil
         abComparisonProfile = nil
         abIsFiltered = true
         gainMatchOffset = 0
-        if shouldRestore {
-            applyNotchFilters()
-        }
         dlog("⏹ A/B comparison stopped", category: .calibration)
     }
 

@@ -1861,10 +1861,81 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - Room Correction
 
     private var activeRoomNotchFilters: [(frequency: Float, gain: Float, q: Float)] = []
+    private var roomABComparison: (id: UUID, filtered: Bool, bypassGain: Float)?
+
+    static func roomABBypassGain(
+        notchFilters: [(frequency: Float, gain: Float, q: Float)], sampleRate: Double
+    ) -> Float? {
+        guard sampleRate.isFinite, sampleRate >= 100, Float(sampleRate).isFinite,
+              !notchFilters.isEmpty, notchFilters.count <= 256,
+              notchFilters.allSatisfy({
+                  $0.frequency.isFinite && $0.frequency > 0 && $0.gain.isFinite && $0.gain <= 0
+                      && $0.gain >= -60 && $0.q.isFinite && $0.q > 0
+              })
+        else { return nil }
+        let bands = notchFilters.map {
+            ParametricBand(frequency: $0.frequency, gain: $0.gain, q: $0.q, filterType: .peak)
+        }
+        let coefficients = BiquadResponseCalculator.preparedCoefficients(bands: bands, sampleRate: Float(sampleRate))
+        let upper = min(20000, sampleRate * 0.49)
+        let logRange = log(upper / 20)
+        let pointCount = 4097
+        var energy = 0.0
+        for index in 0..<pointCount {
+            let frequency = 20 * exp(logRange * Double(index) / Double(pointCount - 1))
+            let omega = 2 * Double.pi * frequency / sampleRate
+            let c1 = cos(omega), s1 = sin(omega), c2 = cos(2 * omega), s2 = sin(2 * omega)
+            var power = 1.0
+            for c in coefficients {
+                let nr = Double(c.b0) + Double(c.b1) * c1 + Double(c.b2) * c2
+                let ni = Double(c.b1) * s1 + Double(c.b2) * s2
+                let dr = 1 + Double(c.a1) * c1 + Double(c.a2) * c2
+                let di = Double(c.a1) * s1 + Double(c.a2) * s2
+                let denominator = dr * dr + di * di
+                guard denominator.isFinite, denominator > 0 else { return nil }
+                power *= (nr * nr + ni * ni) / denominator
+            }
+            guard power.isFinite, power >= 0 else { return nil }
+            energy += min(1, power) * (index == 0 || index == pointCount - 1 ? 0.5 : 1)
+        }
+        let meanPower = max(Double.leastNonzeroMagnitude, energy / Double(pointCount - 1))
+        return Float(max(-60, min(0, 10 * log10(meanPower))))
+    }
+
+    func beginRoomABComparison(_ notchFilters: [(frequency: Float, gain: Float, q: Float)]) -> UUID? {
+        guard let gain = Self.roomABBypassGain(notchFilters: notchFilters, sampleRate: currentSampleRate)
+        else { return nil }
+        let id = UUID()
+        activeRoomNotchFilters = notchFilters
+        roomABComparison = (id, true, gain)
+        rebuildRoomFilter(sampleRate: currentSampleRate)
+        return id
+    }
+
+    func roomABGainMatchOffset(for id: UUID) -> Float? {
+        guard roomABComparison?.id == id else { return nil }
+        return roomABComparison?.bypassGain
+    }
+
+    @discardableResult
+    func setRoomABComparisonPhase(_ id: UUID, filtered: Bool) -> Bool {
+        guard roomABComparison?.id == id else { return false }
+        roomABComparison?.filtered = filtered
+        rebuildRoomFilter(sampleRate: currentSampleRate)
+        return roomABComparison?.id == id
+    }
+
+    func endRoomABComparison(_ id: UUID, restoreFilters: Bool = true) {
+        guard let comparison = roomABComparison, comparison.id == id else { return }
+        if !restoreFilters, !comparison.filtered { activeRoomNotchFilters = [] }
+        roomABComparison = nil
+        rebuildRoomFilter(sampleRate: currentSampleRate)
+    }
 
     /// Apply notch filters on top of the current EQ preset (room correction).
     /// Run as an independent filter cascade so active EQ presets are preserved.
     public func applyRoomNotchFilters(_ notchFilters: [(frequency: Float, gain: Float, q: Float)]) {
+        roomABComparison = nil
         activeRoomNotchFilters = notchFilters
         guard !notchFilters.isEmpty else {
             clearRoomNotchFilters()
@@ -1877,20 +1948,34 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Clear room correction notch filters (restore previous EQ state).
     public func clearRoomNotchFilters() {
+        roomABComparison = nil
         activeRoomNotchFilters = []
         self.roomFilter = nil
         dlog("🏠 Room correction filters cleared", category: .engine)
     }
 
     func rebuildRoomFilter(sampleRate: Double) {
-        guard !activeRoomNotchFilters.isEmpty else { return }
-        let bands = activeRoomNotchFilters.map { f in
-            ParametricBand(frequency: f.frequency, gain: f.gain, q: f.q, filterType: .peak)
+        guard sampleRate.isFinite, sampleRate > 0, Float(sampleRate).isFinite else { return }
+        if roomABComparison != nil {
+            guard let gain = Self.roomABBypassGain(notchFilters: activeRoomNotchFilters, sampleRate: sampleRate) else {
+                roomABComparison = nil
+                rebuildRoomFilter(sampleRate: sampleRate)
+                return
+            }
+            roomABComparison?.bypassGain = gain
         }
+        guard !activeRoomNotchFilters.isEmpty else {
+            self.roomFilter = nil
+            return
+        }
+        let filtered = roomABComparison?.filtered ?? true
+        let bands = filtered ? activeRoomNotchFilters.map { f in
+            ParametricBand(frequency: f.frequency, gain: f.gain, q: f.q, filterType: .peak)
+        } : []
         let filter = BiquadFilterVDSP(sampleRate: Float(sampleRate))
         filter.configure(
             bands: bands,
-            preamp: 0.0,
+            preamp: filtered ? 0 : (roomABComparison?.bypassGain ?? 0),
             outputBoost: 0.0,
             sampleRate: Float(sampleRate)
         )

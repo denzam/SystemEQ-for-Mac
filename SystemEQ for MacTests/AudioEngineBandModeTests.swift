@@ -2158,6 +2158,165 @@ final class AudioEngineBandModeTests: XCTestCase {
 
 @MainActor
 final class CalibrationProfileTests: XCTestCase {
+    func testRoomABAttenuatesBypassAndRestoresNotchesWithoutChangingAutoEQ() throws {
+        for mode in [EQBandMode.tenBand, .thirtyOneBand] {
+            try withProfile(mode: mode) { engine, _, core, defaults in
+                core.setEnabled(true)
+                let baseFilter = core.vdspFilter
+                let gains = engine.bands.map(\.gain)
+                let snapshot = defaults.data(forKey: "lastPlayback.snapshot")
+                let id = try XCTUnwrap(core.beginRoomABComparison([(125, -8, 4)]))
+                let offset = try XCTUnwrap(core.roomABGainMatchOffset(for: id))
+                XCTAssertLessThan(offset, 0)
+                XCTAssertGreaterThan(offset, -8)
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: 125, includingRoom: true) - measuredGain(core, frequency: 125),
+                    -8, accuracy: 0.2
+                )
+                XCTAssertTrue(core.setRoomABComparisonPhase(id, filtered: false))
+                for frequency in [125.0, 1000.0, 8000.0] {
+                    XCTAssertEqual(
+                        try measuredGain(core, frequency: frequency, includingRoom: true) - measuredGain(
+                            core,
+                            frequency: frequency
+                        ),
+                        Double(offset), accuracy: 0.05
+                    )
+                }
+                core.endRoomABComparison(id)
+                XCTAssertNil(core.roomABGainMatchOffset(for: id))
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: 125, includingRoom: true) - measuredGain(core, frequency: 125),
+                    -8, accuracy: 0.2
+                )
+                XCTAssertTrue(core.vdspFilter === baseFilter)
+                XCTAssertEqual(engine.bands.map(\.gain), gains)
+                XCTAssertEqual(defaults.data(forKey: "lastPlayback.snapshot"), snapshot)
+            }
+        }
+    }
+
+    func testRoomABBroadbandEstimateMatchesRenderedLogSpacedTones() throws {
+        for rate in [48000.0, 96000.0] {
+            let core = CoreAudioEngine()
+            core.prepareProcessTap(sampleRate: rate, outputDeviceID: 0, bufferFrames: 512)
+            let id = try XCTUnwrap(core.beginRoomABComparison([(500, -12, 0.7), (3500, -8, 1)]))
+            let filtered = try renderedRoomEnergy(core, sampleRate: rate)
+            XCTAssertTrue(core.setRoomABComparisonPhase(id, filtered: false))
+            let bypassed = try renderedRoomEnergy(core, sampleRate: rate)
+            XCTAssertEqual(10 * log10(filtered / bypassed), 0, accuracy: 0.2, "sample rate \(rate)")
+        }
+    }
+
+    func testRoomABRejectsMalformedStartsWithoutReplacingCurrentSession() throws {
+        let core = CoreAudioEngine()
+        let id = try XCTUnwrap(core.beginRoomABComparison([(125, -6, 4)]))
+        let original = core.roomFilter
+        let invalid: [[(Float, Float, Float)]] = [
+            [], [(0, -6, 4)], [(.nan, -6, 4)], [(.infinity, -6, 4)],
+            [(125, .nan, 4)], [(125, .infinity, 4)], [(125, 1, 4)], [(125, -61, 4)],
+            [(125, -6, 0)], [(125, -6, .nan)], [(125, -6, .infinity)],
+            [(125, -6, 4), (250, -4, -1)]
+        ]
+        for filters in invalid {
+            XCTAssertNil(core.beginRoomABComparison(filters))
+            XCTAssertTrue(core.roomFilter === original)
+            XCTAssertNotNil(core.roomABGainMatchOffset(for: id))
+        }
+        for rate in [Double.nan, .infinity, 0, -1, Double.greatestFiniteMagnitude] {
+            XCTAssertNil(CoreAudioEngine.roomABBypassGain(notchFilters: [(125, -6, 4)], sampleRate: rate))
+        }
+    }
+
+    func testRoomABStaleSessionsCannotChangeReplacementOrClearedProfile() throws {
+        let core = CoreAudioEngine()
+        let first = try XCTUnwrap(core.beginRoomABComparison([(125, -6, 4)]))
+        XCTAssertTrue(core.setRoomABComparisonPhase(first, filtered: false))
+        let second = try XCTUnwrap(core.beginRoomABComparison([(250, -10, 3)]))
+        let replacement = core.roomFilter
+        XCTAssertFalse(core.setRoomABComparisonPhase(first, filtered: false))
+        core.endRoomABComparison(first)
+        XCTAssertTrue(core.roomFilter === replacement)
+        XCTAssertNotNil(core.roomABGainMatchOffset(for: second))
+        XCTAssertTrue(core.setRoomABComparisonPhase(second, filtered: false))
+        core.applyRoomNotchFilters([(500, -4, 2)])
+        let profile = core.roomFilter
+        XCTAssertFalse(core.setRoomABComparisonPhase(second, filtered: true))
+        core.endRoomABComparison(second)
+        XCTAssertTrue(core.roomFilter === profile)
+        let third = try XCTUnwrap(core.beginRoomABComparison([(125, -6, 4)]))
+        core.clearRoomNotchFilters()
+        core.endRoomABComparison(third)
+        XCTAssertFalse(core.setRoomABComparisonPhase(third, filtered: false))
+        XCTAssertNil(core.roomFilter)
+    }
+
+    func testRoomABRateRebuildAndStopWithoutRestoreRemoveTemporaryGain() throws {
+        let core = CoreAudioEngine()
+        let id = try XCTUnwrap(core.beginRoomABComparison([(16000, -8, 2)]))
+        XCTAssertTrue(core.setRoomABComparisonPhase(id, filtered: false))
+        core.rebuildRoomFilter(sampleRate: 24000)
+        XCTAssertEqual(core.roomFilter?.sampleRate, 24000)
+        XCTAssertEqual(try XCTUnwrap(core.roomABGainMatchOffset(for: id)), 0, accuracy: 0.0001)
+        core.rebuildRoomFilter(sampleRate: 96000)
+        XCTAssertEqual(core.roomFilter?.sampleRate, 96000)
+        XCTAssertLessThan(try XCTUnwrap(core.roomABGainMatchOffset(for: id)), 0)
+        core.endRoomABComparison(id, restoreFilters: false)
+        XCTAssertNil(core.roomFilter)
+        XCTAssertFalse(core.setRoomABComparisonPhase(id, filtered: true))
+        core.rebuildRoomFilter(sampleRate: 48000)
+        XCTAssertNil(core.roomFilter)
+    }
+
+    func testRoomABBypassProcessesZeroOneAndUnequalBlockSizes() throws {
+        let core = CoreAudioEngine()
+        let id = try XCTUnwrap(core.beginRoomABComparison([(125, -6, 4)]))
+        XCTAssertTrue(core.setRoomABComparisonPhase(id, filtered: false))
+        let offset = try XCTUnwrap(core.roomABGainMatchOffset(for: id))
+        let scalar = pow(10, offset / 20)
+        let room = try XCTUnwrap(core.roomFilter)
+        for count in [0, 1, 127, 513] {
+            var left = [Float](repeating: 0.001, count: count + 1)
+            var right = [Float](repeating: -0.002, count: count + 1)
+            try left.withUnsafeMutableBufferPointer { l in
+                try right.withUnsafeMutableBufferPointer { r in
+                    _ = try room.processStereo(XCTUnwrap(l.baseAddress), XCTUnwrap(r.baseAddress), frameCount: count)
+                }
+            }
+            for value in left.prefix(count) {
+                XCTAssertEqual(value, 0.001 * scalar, accuracy: 0.0000001)
+            }
+            for value in right.prefix(count) {
+                XCTAssertEqual(value, -0.002 * scalar, accuracy: 0.0000001)
+            }
+            XCTAssertEqual(left[count], 0.001)
+            XCTAssertEqual(right[count], -0.002)
+        }
+    }
+
+    private func renderedRoomEnergy(_ core: CoreAudioEngine, sampleRate: Double) throws -> Double {
+        let period = 65536
+        let count = period * 2
+        var source = [Float](repeating: 0, count: period)
+        var bins = Set<Int>()
+        for tone in 0..<128 {
+            let target = 20 * exp(log(1000) * Double(tone) / 127)
+            let bin = Int((target * Double(period) / sampleRate).rounded())
+            guard bins.insert(bin).inserted else { continue }
+            for index in source.indices {
+                source[index] += Float(0.00004 * sin(2 * .pi * Double(bin * index) / Double(period) + Double(tone)))
+            }
+        }
+        var left = source + source, right = source + source
+        let room = try XCTUnwrap(core.roomFilter)
+        try left.withUnsafeMutableBufferPointer { l in
+            try right.withUnsafeMutableBufferPointer { r in
+                _ = try room.processStereo(XCTUnwrap(l.baseAddress), XCTUnwrap(r.baseAddress), frameCount: count)
+            }
+        }
+        return left.dropFirst(period).reduce(0.0) { $0 + Double($1) * Double($1) }
+    }
+
     func testRoomProfileRoundTripLegacyDecodingAndDraftPreserveNotches() throws {
         let profile = CalibrationProfile(
             name: "Room", type: .roomCorrection, notes: "Saved room",

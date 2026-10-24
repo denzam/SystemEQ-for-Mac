@@ -1567,6 +1567,12 @@ class RoomComparisonTests(unittest.TestCase):
     def test_foundation_runloop_has_no_writes_after_close(self):
         self.check_comparison("realRunLoop")
 
+    def test_external_dsp_replacement_rejects_old_comparison(self):
+        self.check_comparison("externalReplacement")
+
+    def test_invalid_filters_do_not_start_comparison(self):
+        self.check_comparison("invalidFilters")
+
     TEMPLATE = r"""
 import Foundation
 enum LogCategory { case calibration }
@@ -1589,11 +1595,42 @@ final class CoreAudioEngine {
     static let shared = CoreAudioEngine()
     var filters: [NotchFilterConfig] = []
     var writes = 0
+    var bypassGain: Float = 0
+    var comparison: (id: UUID, filters: [NotchFilterConfig])?
     func applyRoomNotchFilters(_ values: [(frequency: Float, gain: Float, q: Float)]) {
+        comparison = nil
+        bypassGain = 0
         filters = values.map { .init(frequency: Double($0.frequency), gain: $0.gain, q: $0.q) }
         writes += 1
     }
-    func clearRoomNotchFilters() { filters = []; writes += 1 }
+    func clearRoomNotchFilters() { applyRoomNotchFilters([]) }
+    func beginRoomABComparison(_ values: [(frequency: Float, gain: Float, q: Float)]) -> UUID? {
+        guard !values.isEmpty, values.allSatisfy({
+            $0.frequency.isFinite && $0.frequency > 0 && $0.gain.isFinite && $0.gain <= 0
+                && $0.q.isFinite && $0.q > 0
+        }) else { return nil }
+        applyRoomNotchFilters(values)
+        let id = UUID()
+        comparison = (id, filters)
+        return id
+    }
+    func roomABGainMatchOffset(for id: UUID) -> Float? {
+        comparison?.id == id ? -1 : nil
+    }
+    func setRoomABComparisonPhase(_ id: UUID, filtered: Bool) -> Bool {
+        guard let active = comparison, active.id == id else { return false }
+        filters = filtered ? active.filters : []
+        bypassGain = filtered ? 0 : -1
+        writes += 1
+        return true
+    }
+    func endRoomABComparison(_ id: UUID, restoreFilters: Bool = true) {
+        guard let active = comparison, active.id == id else { return }
+        if restoreFilters { filters = active.filters }
+        bypassGain = 0
+        comparison = nil
+        writes += 1
+    }
 }
 @propertyWrapper struct State<Value> {
     final class Storage {
@@ -1642,6 +1679,7 @@ struct RoomView {
     @State var abIsFiltered = true
     @State var abTimer: Timer?
     @State var abComparisonProfile: CalibrationProfile?
+    @State var abComparisonID: UUID?
     func start() { startABComparison() }
     func stop() { stopABComparison() }
     func toggle() { toggleComparison() }
@@ -1660,17 +1698,17 @@ func begin(_ profile: CalibrationProfile? = nil) -> RoomView {
     view.calibration.activeProfile = profile
     view.appliedNotchFilters = local
     view.start()
-    require(view.isComparing && view.abTimer?.isValid == true, "start not active")
+    require(view.isComparing && view.abTimer?.isValid == true && view.gainMatchOffset < 0, "start not active")
     require(core.filters == local, "start did not apply local filters")
     return view
 }
 func requireIdle(_ view: RoomView) {
-    require(!view.isComparing && view.abTimer == nil && view.abComparisonProfile == nil,
+    require(!view.isComparing && view.abTimer == nil && view.abComparisonProfile == nil && view.abComparisonID == nil,
             "comparison still owns timer/profile")
-    require(view.abIsFiltered && view.gainMatchOffset == 0, "idle flags stale")
+    require(view.abIsFiltered && view.gainMatchOffset == 0 && core.bypassGain == 0, "idle flags stale")
 }
 func selectExternal(_ view: RoomView, _ profile: CalibrationProfile?) {
-    core.filters = external
+    core.applyRoomNotchFilters(external.map { (Float($0.frequency), $0.gain, $0.q) })
     view.calibration.activeProfile = profile
 }
 let scenario = CommandLine.arguments[1]
@@ -1679,7 +1717,7 @@ case "phasesClose":
     for bypassed in [false, true] {
         let view = begin()
         let timer = view.abTimer!
-        if bypassed { timer.fire(); require(core.filters.isEmpty, "tick did not bypass") }
+        if bypassed { timer.fire(); require(core.filters.isEmpty && core.bypassGain < 0, "tick did not bypass with attenuation") }
         view.disappear()
         requireIdle(view)
         require(core.filters == local && !timer.isValid, "close did not settle filtered state")
@@ -1772,6 +1810,25 @@ case "profileNotificationAfterRestart":
     current.fire()
     require(core.filters.isEmpty && !view.abIsFiltered, "new comparison did not keep running")
     view.stop(); requireIdle(view)
+case "externalReplacement":
+    let view = begin()
+    let timer = view.abTimer!
+    core.applyRoomNotchFilters(external.map { (Float($0.frequency), $0.gain, $0.q) })
+    let writes = core.writes
+    timer.fire(); requireIdle(view)
+    timer.deliverQueued(); view.disappear()
+    require(core.filters == external && core.writes == writes, "stale token changed replacement")
+case "invalidFilters":
+    for filter in [NotchFilterConfig(frequency: 125, gain: 1, q: 4),
+                   NotchFilterConfig(frequency: .nan, gain: -6, q: 4),
+                   NotchFilterConfig(frequency: 125, gain: -6, q: 0)] {
+        let view = RoomView()
+        selectExternal(view, CalibrationProfile(id: 10))
+        view.appliedNotchFilters = [filter]
+        let writes = core.writes
+        view.start(); requireIdle(view)
+        require(core.filters == external && core.writes == writes, "invalid start changed DSP")
+    }
 case "realRunLoop":
     let view = begin()
     let writes = core.writes
