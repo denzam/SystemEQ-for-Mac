@@ -91,6 +91,13 @@ public enum LocalizedString: String, CaseIterable {
     case diagnosticsPrivacy
     case revealDiagnostics
     case shareDiagnostics
+    case reportProblem
+    case feedbackPrivacy
+    case feedbackRecipient
+    case feedbackDescription
+    case feedbackPreview
+    case feedbackCopy
+    case feedbackCopyFailed
 
     // Links
     case linkGitHub

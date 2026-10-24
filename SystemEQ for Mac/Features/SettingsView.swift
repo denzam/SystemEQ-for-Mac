@@ -17,6 +17,10 @@ struct SettingsView: View {
     @State private var isExportingDiagnostics = false
     @State private var diagnosticsExportMessage: String?
     @State private var diagnosticReportURL: URL?
+    @State private var isFeedbackPresented = false
+    @State private var feedbackDescription = ""
+    @State private var feedbackDiagnostics = ""
+    @State private var feedbackCopyFailed = false
 
     private var startupMode: EQStartupMode {
         EQStartupMode(rawValue: startupModeRaw) ?? .restoreLastState
@@ -57,6 +61,9 @@ struct SettingsView: View {
         .onAppear {
             dbStats = EQDatabase.shared.getDatabaseStats()
             dbVersion = EQDatabase.shared.getVersion()
+        }
+        .sheet(isPresented: $isFeedbackPresented) { [feedbackDiagnostics] in
+            feedbackSheet(diagnostics: feedbackDiagnostics)
         }
     }
 
@@ -601,6 +608,11 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
 
+            Button(action: prepareFeedback) {
+                Label(localization.localized(.reportProblem), systemImage: "envelope")
+            }
+            .padding(.horizontal, 4)
+
             HStack(spacing: 12) {
                 Button(action: exportDiagnosticReport) {
                     HStack {
@@ -642,6 +654,77 @@ struct SettingsView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    private func feedbackSheet(diagnostics: String) -> some View {
+        let feedbackBody = FeedbackReport.message(description: feedbackDescription, diagnostics: diagnostics)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(localization.localized(.reportProblem))
+                .font(AppTypography.heading2)
+            Text(localization.localized(.feedbackPrivacy))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(String(format: localization.localized(.feedbackRecipient), FeedbackReport.recipient))
+                .textSelection(.enabled)
+            Text(localization.localized(.feedbackDescription))
+            TextEditor(text: $feedbackDescription)
+                .frame(height: 80)
+                .border(Color.secondary.opacity(0.3))
+                .onChange(of: feedbackDescription) { value in
+                    if value.count > FeedbackReport.descriptionLimit {
+                        feedbackDescription = String(value.prefix(FeedbackReport.descriptionLimit))
+                    }
+                }
+            Text(localization.localized(.feedbackPreview))
+            ScrollView {
+                Text(feedbackBody)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(height: 210)
+            .padding(8)
+            .background(Color.secondary.opacity(0.06))
+            if feedbackCopyFailed {
+                Text(localization.localized(.feedbackCopyFailed))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.red)
+            }
+            HStack {
+                Button(localization.localized(.cancel)) {
+                    isFeedbackPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(localization.localized(.feedbackCopy)) {
+                    NSPasteboard.general.clearContents()
+                    feedbackCopyFailed = !NSPasteboard.general.setString(feedbackBody, forType: .string)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 600)
+    }
+
+    private func prepareFeedback() {
+        feedbackCopyFailed = false
+        let engine = AudioEngine.shared
+        let core = CoreAudioEngine.shared
+        feedbackDiagnostics = FeedbackReport(
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            operatingSystem: ProcessInfo.processInfo.operatingSystemVersion,
+            eqEnabled: engine.isEnabled,
+            engineRunning: core.isRunning,
+            bandCount: engine.bands.count,
+            backend: audioRouter.activeBackend.rawValue,
+            sampleRate: core.processingSampleRate,
+            preamp: Double(engine.preampGain),
+            outputBoost: Double(engine.outputBoostGain),
+            events: DiagnosticEventStore.shared.snapshot()
+        ).text
+        isFeedbackPresented = true
     }
 
     private func exportDiagnosticReport() {
