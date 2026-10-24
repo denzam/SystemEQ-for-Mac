@@ -328,7 +328,7 @@ final class AutoEQModelsTests: XCTestCase {
 
     func testFallbackIndexRejectsEmptyOrUnrelatedResponses() {
         for text in ["", " \n\t", "# Unavailable", "[Help](https://example.com)", "[Docs](./docs/README.md)"] {
-            XCTAssertThrowsError(try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))) { error in
+            XCTAssertThrowsError(try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))) { error in
                 XCTAssertEqual((error as? URLError)?.code, .cannotParseResponse)
             }
         }
@@ -336,7 +336,7 @@ final class AutoEQModelsTests: XCTestCase {
 
     func testFallbackIndexRejectsInvalidUTF8() {
         for data in [Data([0xFF]), Data([0xC3, 0x28])] {
-            XCTAssertThrowsError(try AutoEQView.fallbackIndexEntries(from: data)) { error in
+            XCTAssertThrowsError(try AutoEQLegacyRepository.fallbackIndexEntries(from: data)) { error in
                 XCTAssertEqual((error as? URLError)?.code, .cannotDecodeContentData)
             }
         }
@@ -355,7 +355,7 @@ final class AutoEQModelsTests: XCTestCase {
             "[Encoded slash](./oratory1990/over-ear/Model%2FOther)"
         ]
         for text in responses {
-            XCTAssertThrowsError(try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))) { error in
+            XCTAssertThrowsError(try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))) { error in
                 XCTAssertEqual((error as? URLError)?.code, .cannotParseResponse)
             }
         }
@@ -367,7 +367,7 @@ final class AutoEQModelsTests: XCTestCase {
         [Custom Art](./new-source/711%20in-ear/Custom%20Art%20Ei.3)
         [Earbud](./new-source/earbud/Example%20Earbud)
         """
-        let entries = try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))
+        let entries = try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))
         XCTAssertEqual(entries.count, 3)
         XCTAssertEqual(entries.first(where: { $0.brand == "Altiat" })?.model, "Cal.1H")
         XCTAssertEqual(Set(entries.compactMap(\.type)), Set(["GRAS RA0045 over-ear", "711 in-ear", "earbud"]))
@@ -376,7 +376,7 @@ final class AutoEQModelsTests: XCTestCase {
 
     func testFallbackIndexPreservesSourceModelAndPresetPaths() throws {
         let text = "[Sennheiser HD 600](./oratory1990/over-ear/Sennheiser%20HD%20600)\n"
-        let entries = try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))
+        let entries = try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))
         let entry = try XCTUnwrap(entries.first)
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entry.brand, "Sennheiser")
@@ -403,7 +403,7 @@ final class AutoEQModelsTests: XCTestCase {
         [HIFIMAN](./oratory1990/over-ear/HIFIMAN%20HE400se%20(non-stealth%20magnet))
         [Audio Technica](./oratory1990/over-ear/Audio%20Technica%20ATH-M50x)
         """
-        let entries = try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))
+        let entries = try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(entries.first(where: { $0.brand == "HIFIMAN" })?.model, "HE400se (non-stealth magnet)")
         XCTAssertEqual(entries.first(where: { $0.brand == "Audio Technica" })?.model, "ATH-M50x")
@@ -415,7 +415,7 @@ final class AutoEQModelsTests: XCTestCase {
         [Duplicate](./oratory1990/over-ear/Sennheiser%20HD%20600)
         [Other source](./rtings/over-ear/Sennheiser%20HD%20600)
         """
-        let entries = try AutoEQView.fallbackIndexEntries(from: Data(text.utf8))
+        let entries = try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(Set(entries.compactMap(\.source)), Set(["oratory1990", "rtings"]))
     }

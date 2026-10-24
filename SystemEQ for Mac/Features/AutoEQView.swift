@@ -6,19 +6,6 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Favorites Model
-
-struct FavoritePreset: Codable, Identifiable, Equatable {
-    let id: String
-    let name: String
-    let source: String?
-    let target: String?
-    let path: String
-    let timestamp: Date
-    var rawText: String? // Повний вміст .txt для custom-імпортованих пресетів
-    var preamp: Double?
-}
-
 struct LimiterIndicatorView: View {
     @ObservedObject var peakMeter: PeakMeter
     let description: String
@@ -143,28 +130,17 @@ struct AutoEQView: View {
     @State private var indexTruncated: Bool = false
 
     // Optimization: Caching and request management
-    @State private var readmeCache: [String: String] = [:]
-    @State private var activeRequests: Set<String> = []
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var draggingBandIndex: Int?
     @State private var hoveredBandIndex: Int?
 
-    /// ✅ Import cache: prevents re-importing same preset and getting different values
-    struct ImportCacheEntry {
-        let input: AutoEQImportedPreset
-        let text: String
-        let name: String
-        let source: String?
-        let target: String?
-        let path: String
-    }
-
-    @State private var importCache: [String: ImportCacheEntry] = [:]
-
     // MARK: - Favorites State
 
-    @AppStorage("autoEQFavorites") private var favoritesData: Data = .init()
-    @State private var favorites: [FavoritePreset] = []
+    @StateObject private var favoritesRepository = AutoEQFavoritesRepository()
+
+    private var favorites: [FavoritePreset] {
+        favoritesRepository.favorites
+    }
     @State private var showFavorites: Bool = false
 
     private let tenCenters: [Double] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
@@ -888,94 +864,13 @@ struct AutoEQView: View {
         )
     }
 
-    static func fallbackIndexEntries(from data: Data) throws -> [OfflineIndexEntry] {
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw URLError(.cannotDecodeContentData)
-        }
-        var map: [String: OfflineIndexEntry] = [:]
-        let linkPattern = #"\[[^\n]+?\]\((\./[^\n]+?)\)(?:\s|$)"#
-        let re = try NSRegularExpression(pattern: linkPattern, options: [])
-        do {
-            let nsr = NSRange(text.startIndex..<text.endIndex, in: text)
-            re.enumerateMatches(in: text, options: [], range: nsr) { m, _, _ in
-                guard let m, m.numberOfRanges >= 2, let r1 = Range(m.range(at: 1), in: text) else { return }
-                let rel =
-                    String(text[r1])
-                let relPath = String(rel.dropFirst(2))
-                guard let decodedRelPath = relPath.removingPercentEncoding else { return }
-                let comps = decodedRelPath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-                guard comps.count == 3,
-                      comps.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains(where: \.isNewline) }),
-                      ["in-ear", "over-ear", "earbud"].contains(where: {
-                          comps[1] == $0 || comps[1].hasSuffix(" " + $0)
-                      })
-                else { return }
-                guard let lastSeg = comps.last else { return }
-                guard !["md", "txt", "json", "csv", "png", "jpg", "jpeg", "pdf"].contains(
-                    (lastSeg as NSString).pathExtension.lowercased()
-                ) else { return }
-                var guessedBrand = ""
-                var guessedModel = lastSeg
-
-                let words = lastSeg.split(separator: " ").map(String.init)
-                if words.count >= 2 {
-                    let twoWords = words[0] + " " + words[1]
-                    let knownTwoWordBrands = [
-                        "Audio Technica",
-                        "Beats by",
-                        "Sony WH",
-                        "Bose QuietComfort",
-                        "Bang Olufsen"
-                    ]
-                    if knownTwoWordBrands.contains(where: { twoWords.hasPrefix($0) }), words.count > 2 {
-                        guessedBrand = twoWords
-                        guessedModel = words.dropFirst(2).joined(separator: " ")
-                    } else {
-                        guessedBrand = words[0]
-                        guessedModel = words.dropFirst().joined(separator: " ")
-                    }
-                }
-
-                let key = decodedRelPath
-
-                let source = comps[0]
-                let type = comps[1]
-                let basePath = "results/" + decodedRelPath
-
-                let entry = OfflineIndexEntry(
-                    brand: guessedBrand,
-                    model: guessedModel,
-                    source: source,
-                    type: type,
-                    pathFixedBandEQ: basePath + "/" + lastSeg + " FixedBandEQ.txt",
-                    pathGraphicEQ: basePath + "/" + lastSeg + " GraphicEQ.txt",
-                    pathParametric: basePath + "/" + lastSeg + " ParametricEQ.txt",
-                    pathReadme: basePath + "/README.md"
-                )
-
-                map[key] = entry
-            }
-        }
-        let entries = Array(map.values).filter { $0.pathReadme != nil || $0.pathParametric != nil }
-        guard !entries.isEmpty else { throw URLError(.cannotParseResponse) }
-        return entries
-    }
-
     private func buildOrUpdateIndex() async {
         guard !isBuildingIndex else { return }
         isBuildingIndex = true
         indexStatusRaw = .building
         defer { isBuildingIndex = false }
         do {
-            guard let url = URL(string: AppConstants.URLs.autoEQIndex)
-            else { indexStatusRaw = .raw("Invalid URL"); return }
-            let (data, resp) = try await legacyRepository.session.data(from: url)
-            guard let http = resp as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode)
-            else { indexStatusRaw = .error(localization.localized(.httpError)); return }
-            try Task.checkCancellation()
-            let out = try Self.fallbackIndexEntries(from: data)
-            try legacyRepository.saveOfflineIndex(out)
+            let out = try await legacyRepository.refreshOfflineIndex()
             offlineIndex = out
             indexTruncated = false
             indexStatusRaw = .updatedNow(count: out.count)
@@ -983,6 +878,10 @@ struct AutoEQView: View {
                 let local = offlineSearch(normalizedQuery)
                 candidates = rank(local, query: normalizedQuery)
             }
+        } catch AutoEQLegacyRepository.IndexRefreshError.invalidURL {
+            indexStatusRaw = .raw("Invalid URL")
+        } catch AutoEQLegacyRepository.IndexRefreshError.http {
+            indexStatusRaw = .error(localization.localized(.httpError))
         } catch {
             indexStatusRaw = .error(friendlyNetworkError(error))
         }
@@ -1334,7 +1233,7 @@ struct AutoEQView: View {
         defer { presetState.finishFetch(request) }
         guard presetState.isCurrent(request) else { return }
         searchError = nil
-        if let cached = importCache[candidate.path] {
+        if let cached = legacyRepository.cachedImport(for: candidate.path) {
             startPreparedImport(
                 cached.input,
                 text: cached.text,
@@ -1357,72 +1256,18 @@ struct AutoEQView: View {
             return
         }
         do {
-            let localRoot = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("CascadeProjects/SystemEQ for Mac/AutoEq").resolvingSymlinksInPath()
-            if let entry = offlineIndex
-                .first(where: { $0.pathReadme == candidate.path || $0.pathParametric == candidate.path }) {
-                for path in [entry.pathParametric, entry.pathFixedBandEQ, entry.pathGraphicEQ, entry.pathReadme]
-                    .compactMap(\.self) {
-                    let file = localRoot.appendingPathComponent(path).resolvingSymlinksInPath()
-                    guard file.path.hasPrefix(localRoot.path + "/") else { throw AutoEQImportError.invalidSource }
-                    if FileManager.default.fileExists(atPath: file.path) {
-                        let text = try String(contentsOf: file, encoding: .utf8)
-                        guard presetState.isCurrent(request) else { return }
-                        try acceptImportedText(
-                            text,
-                            candidate: candidate,
-                            resolvedPath: path,
-                            preservePlayback: preservePlayback,
-                            request: request
-                        )
-                        return
-                    }
-                }
+            let resolved = try await legacyRepository.resolveCandidateText(candidate, offlineIndex: offlineIndex) {
+                guard presetState.isCurrent(request) else { throw CancellationError() }
             }
-            if let text = readmeCache[candidate.path] {
-                try acceptImportedText(
-                    text,
-                    candidate: candidate,
-                    resolvedPath: candidate.path,
-                    preservePlayback: preservePlayback,
-                    request: request
-                )
-                return
-            }
-            let path = candidate.path.removingPercentEncoding ?? candidate.path
-            guard !path.hasPrefix("/"), !path.split(separator: "/").contains(".."),
-                  let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-                  let url = URL(string: AppConstants.URLs.autoEQRawBase + encoded)
-            else { throw AutoEQImportError.invalidSource }
-            let (data, response) = try await legacyRepository.session.data(from: url)
-            try Task.checkCancellation()
             guard presetState.isCurrent(request) else { return }
-            guard let http = response as? HTTPURLResponse else { throw AutoEQImportError.invalidSource }
-            var resolvedPath = candidate.path
-            var text: String
-            if http.statusCode == 200, let decoded = String(data: data, encoding: .utf8) {
-                text = decoded
-            } else if http.statusCode == 404, candidate.isParametric {
-                resolvedPath = candidate.path.split(separator: "/").dropLast().joined(separator: "/") + "/README.md"
-                guard let encodedFallback = resolvedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-                      let fallbackURL = URL(string: AppConstants.URLs.autoEQRawBase + encodedFallback)
-                else { throw AutoEQImportError.invalidSource }
-                let (fallback, fallbackResponse) = try await legacyRepository.session.data(from: fallbackURL)
-                try Task.checkCancellation()
-                guard presetState.isCurrent(request) else { return }
-                guard (fallbackResponse as? HTTPURLResponse)?.statusCode == 200,
-                      let decoded = String(data: fallback, encoding: .utf8)
-                else { throw AutoEQImportError.invalidSource }
-                text = decoded
-            } else { throw AutoEQImportError.invalidSource }
             try acceptImportedText(
-                text,
+                resolved.text,
                 candidate: candidate,
-                resolvedPath: resolvedPath,
+                resolvedPath: resolved.resolvedPath,
                 preservePlayback: preservePlayback,
                 request: request
             )
-            readmeCache[resolvedPath] = text
+            legacyRepository.rememberDownloadedText(resolved)
         } catch is CancellationError {
             return
         } catch {
@@ -1526,7 +1371,7 @@ struct AutoEQView: View {
             let preset = imported.preset
             let name = candidate.display.components(separatedBy: " · ").first ?? candidate.display
             let source = !preset.author.isEmpty ? preset.author : preset.source
-            let entry = ImportCacheEntry(
+            let entry = AutoEQLegacyRepository.ImportCacheEntry(
                 input: imported.input,
                 text: "EQDatabase.db",
                 name: name,
@@ -1534,7 +1379,7 @@ struct AutoEQView: View {
                 target: preset.targetCurve,
                 path: candidate.path
             )
-            importCache[candidate.path] = entry
+            legacyRepository.cacheImport(entry, for: candidate.path)
             startPreparedImport(
                 entry.input,
                 text: entry.text,
@@ -1569,25 +1414,13 @@ struct AutoEQView: View {
         request: AutoEQState.Request
     ) throws {
         guard presetState.isCurrent(request) else { return }
-        let input = try AutoEQImportParser.parse(text)
-        let components = resolvedPath.split(separator: "/")
-        let source = (components.first == "results" ? components.dropFirst().first : components.first).map(String.init)
-        let displayParts = candidate.display.components(separatedBy: " / ")
-        let name = displayParts.count > 1 ? displayParts.dropFirst().joined(separator: " / ")
-            : candidate.display.components(separatedBy: " · ").first ?? candidate.display
-        importCache[candidate.path] = ImportCacheEntry(
-            input: input,
-            text: text,
-            name: name,
-            source: source,
-            target: nil,
-            path: resolvedPath
-        )
+        let entry = try legacyRepository.prepareImport(text, candidate: candidate, resolvedPath: resolvedPath)
+        legacyRepository.cacheImport(entry, for: candidate.path)
         startPreparedImport(
-            input,
+            entry.input,
             text: text,
-            name: name,
-            source: source,
+            name: entry.name,
+            source: entry.source,
             target: nil,
             path: resolvedPath,
             autoApply: !preservePlayback,
@@ -1665,57 +1498,44 @@ struct AutoEQView: View {
     // MARK: - Favorites Management
 
     private func loadFavoritesFromStorage() {
-        guard !favoritesData.isEmpty else {
-            favorites = []
-            return
-        }
-
         do {
-            favorites = try JSONDecoder().decode([FavoritePreset].self, from: favoritesData)
+            try favoritesRepository.load()
         } catch {
             dlog("Failed to decode favorites: \(error)", category: .network)
-            favorites = []
         }
     }
 
-    private func saveFavoritesToStorage() {
+    private func updateFavorites(_ update: () throws -> Void) {
         do {
-            favoritesData = try JSONEncoder().encode(favorites)
+            try update()
         } catch {
-            dlog("Failed to encode favorites: \(error)", category: .network)
+            dlog("Failed to save favorites: \(error)", category: .network)
         }
     }
 
     private func isFavorite(_ candidate: SearchCandidate) -> Bool {
-        favorites.contains { $0.path == candidate.path }
+        favoritesRepository.contains(path: candidate.path)
     }
 
     private func toggleFavoriteForCandidate(_ candidate: SearchCandidate) {
-        if let index = favorites.firstIndex(where: { $0.path == candidate.path }) {
-            favorites.remove(at: index)
-        } else {
-            let favorite = FavoritePreset(
-                id: UUID().uuidString,
+        updateFavorites {
+            try favoritesRepository.togglePath(
+                path: candidate.path,
                 name: candidate.display,
                 source: Self.databaseSource(from: candidate),
-                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix) ? targetProfile : nil,
-                path: candidate.path,
-                timestamp: Date()
+                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix) ? targetProfile : nil
             )
-            favorites.append(favorite)
         }
-        saveFavoritesToStorage()
     }
 
     private func removeFavorite(_ favorite: FavoritePreset) {
-        favorites.removeAll { $0.id == favorite.id }
-        saveFavoritesToStorage()
+        updateFavorites { try favoritesRepository.remove(id: favorite.id) }
     }
 
     /// Чи збережений поточний custom-пресет в обране (за іменем)
     private var isCurrentCustomFavorite: Bool {
         guard let name = presetState.activePresetName, !presetState.appliedText.isEmpty else { return false }
-        return favorites.contains { $0.rawText != nil && $0.name == name }
+        return favoritesRepository.containsCustom(named: name)
     }
 
     private var canToggleCurrentFavorite: Bool {
@@ -1725,50 +1545,32 @@ struct AutoEQView: View {
 
     private var isCurrentPresetFavorite: Bool {
         if let path = presetState.activePresetPath {
-            return favorites.contains { $0.path == path }
+            return favoritesRepository.contains(path: path)
         }
         return isCurrentCustomFavorite
     }
 
     private func toggleCurrentFavorite() {
         if let path = presetState.activePresetPath, let name = presetState.activePresetName {
-            if let index = favorites.firstIndex(where: { $0.path == path }) {
-                favorites.remove(at: index)
-            } else {
-                favorites.append(FavoritePreset(
-                    id: UUID().uuidString,
-                    name: name,
-                    source: presetState.activePresetSource,
-                    target: presetState.activePresetTarget,
-                    path: path,
-                    timestamp: Date()
-                ))
+            updateFavorites {
+                try favoritesRepository.togglePath(
+                    path: path, name: name,
+                    source: presetState.activePresetSource, target: presetState.activePresetTarget
+                )
             }
-            saveFavoritesToStorage()
             return
         }
-
         toggleCurrentCustomFavorite()
     }
 
-    /// Додати/прибрати поточний імпортований custom-пресет в обране
     private func toggleCurrentCustomFavorite() {
         guard let name = presetState.activePresetName, !presetState.appliedText.isEmpty else { return }
-        if let index = favorites.firstIndex(where: { $0.rawText != nil && $0.name == name }) {
-            favorites.remove(at: index)
-        } else {
-            favorites.append(FavoritePreset(
-                id: UUID().uuidString,
-                name: name,
-                source: presetState.activePresetSource,
-                target: presetState.activePresetTarget,
-                path: "custom:\(name)",
-                timestamp: Date(),
-                rawText: presetState.appliedText,
-                preamp: presetState.preampDB
-            ))
+        updateFavorites {
+            try favoritesRepository.toggleCustom(
+                name: name, source: presetState.activePresetSource, target: presetState.activePresetTarget,
+                rawText: presetState.appliedText, preamp: presetState.preampDB
+            )
         }
-        saveFavoritesToStorage()
     }
 
     private func loadFavorite(_ favorite: FavoritePreset) {
