@@ -4,6 +4,21 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] — 2026-10-24
+
+Manual problem reports and response-based gain matching for room A/B comparison.
+
+### Added
+- Settings now provides a privacy-safe diagnostic preview, an optional description, the support address and a Copy Message button; users send the copied report themselves, without automatic uploads
+
+### Fixed
+- Room A/B comparison attenuates the bypass phase using a broadband filter-response estimate, recalculates matching after sample-rate changes and clears temporary compensation on stop or profile replacement while preserving the base EQ
+- AutoEQ favorites remain unchanged when encoding or the persistence adapter fails
+
+### Changed
+- AutoEQ preset loading, index parsing, caches and favorites storage are separated from the interface while preserving request cancellation and preset-application ownership
+- Installation and security documentation now describe signed releases and current setup; the repository's example Homebrew cask references the existing signed v1.4.6 release
+
 ## [1.4.6] — 2026-10-23
 
 Signed distribution and manual in-app updates, reliable AutoEQ imports, restored calibration state, automatic EQ recovery after sleep, and adaptive ProjectM preset selection.
