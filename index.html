@@ -846,6 +846,51 @@
   .cl-ver h4 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
   .cl-ver .cl-date { font-size: 12px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
   .cl-item p { color: var(--text-dim); font-size: 14px; line-height: 1.55; }
+  .changelog-toggle-wrap {
+    margin: 10px 0 22px -28px;
+    text-align: center;
+  }
+  .changelog-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+  }
+  .changelog-toggle:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .changelog-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px; height: 14px;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .changelog-arrow svg {
+    width: 12px; height: 12px;
+  }
+  .changelog-toggle[aria-expanded="true"] .changelog-arrow {
+    transform: rotate(180deg);
+  }
+  .changelog-older {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .changelog-older.open {
+    padding-top: 6px;
+  }
   .changelog-link { display: block; text-align: center; margin-top: 28px; color: var(--accent); font-size: 14px; font-weight: 500; }
   .changelog-link:hover { color: var(--accent-hover); }
 
@@ -970,6 +1015,8 @@
     .cl-item::before { left: -21px; width: 10px; height: 10px; }
     .cl-ver h4 { font-size: 15px; }
     .cl-item p { font-size: 13px; }
+    .changelog-toggle-wrap { margin: 8px 0 20px -22px; }
+    .changelog-toggle { font-size: 12px; padding: 7px 15px; }
     .changelog-link { margin-top: 22px; font-size: 13px; }
 
     footer { padding: 36px 0 calc(28px + var(--safe-bot)); }
@@ -989,7 +1036,7 @@
   "description": "Free, open-source parametric equalizer for macOS 13+. Developer ID signed and Apple-notarized releases from v1.4.6. Native audio capture, AutoEQ, calibration and visualizer.",
   "url": "https://denzam.github.io/SystemEQ-for-Mac/",
   "downloadUrl": "https://github.com/denzam/SystemEQ-for-Mac/releases/latest",
-  "softwareVersion": "1.4.6",
+  "softwareVersion": "1.4.7",
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
   "image": "https://denzam.github.io/SystemEQ-for-Mac/og-image.png",
   "author": {
@@ -1216,18 +1263,50 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
     <div class="section-label reveal" data-i18n="changelog.label">Changelog</div>
     <h2 class="section-title reveal" data-i18n="changelog.title">Actively maintained.</h2>
     <p class="section-sub reveal" data-i18n="changelog.sub">Recent releases — see the full history on GitHub.</p>
-    <div class="changelog reveal" id="recentReleases">
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.4.0</h4><span class="cl-date">2026-08-26</span></div>
-        <p data-i18n="changelog.v140">Native system-audio capture, safer output switching, and unified EQ controls.</p>
+    <div class="changelog reveal">
+      <div id="recentReleases">
+        <div class="cl-item">
+          <div class="cl-ver"><h4>v1.4.7</h4><span class="cl-date">2026-10-24</span></div>
+          <p data-i18n="changelog.v147">Privacy-safe diagnostic report in Settings and response-based gain matching for room A/B comparison.</p>
+        </div>
+        <div class="cl-item">
+          <div class="cl-ver"><h4>v1.4.6</h4><span class="cl-date">2026-10-23</span></div>
+          <p data-i18n="changelog.v146">Developer ID signed and Apple-notarized packages with privacy-first Sparkle updates.</p>
+        </div>
+        <div class="cl-item">
+          <div class="cl-ver"><h4>v1.4.4</h4><span class="cl-date">2026-10-10</span></div>
+          <p data-i18n="changelog.v144">Buffer stability improvements, safer output switching, and updated AutoEQ database.</p>
+        </div>
       </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.3.0</h4><span class="cl-date">2026-08-16</span></div>
-        <p data-i18n="changelog.v130">Audio reliability, safer output control, and privacy-safe diagnostics.</p>
+      <div class="changelog-toggle-wrap">
+        <button class="changelog-toggle" id="changelogToggle" type="button" aria-expanded="false" aria-controls="olderReleases">
+          <span class="changelog-toggle-text" data-i18n="changelog.showOlder">Older versions</span>
+          <span class="changelog-arrow" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l5 5 5-5"/></svg></span>
+        </button>
       </div>
-      <div class="cl-item">
-        <div class="cl-ver"><h4>v1.2.0</h4><span class="cl-date">2026-08-09</span></div>
-        <p data-i18n="changelog.v120">Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.</p>
+      <div class="changelog-older" id="olderReleases">
+        <div id="olderReleasesList">
+          <div class="cl-item">
+            <div class="cl-ver"><h4>v1.4.0</h4><span class="cl-date">2026-08-26</span></div>
+            <p data-i18n="changelog.v140">Native system-audio capture, safer output switching, and unified EQ controls.</p>
+          </div>
+          <div class="cl-item">
+            <div class="cl-ver"><h4>v1.3.0</h4><span class="cl-date">2026-08-16</span></div>
+            <p data-i18n="changelog.v130">Audio reliability, safer output control, and privacy-safe diagnostics.</p>
+          </div>
+          <div class="cl-item">
+            <div class="cl-ver"><h4>v1.2.0</h4><span class="cl-date">2026-08-09</span></div>
+            <p data-i18n="changelog.v120">Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.</p>
+          </div>
+          <div class="cl-item">
+            <div class="cl-ver"><h4>v1.0.7</h4><span class="cl-date">2026-06-28</span></div>
+            <p data-i18n="changelog.v107">AutoEQ <code>.txt</code> import (4 formats auto-detected) and live localization fixes for the AutoEQ window.</p>
+          </div>
+          <div class="cl-item">
+            <div class="cl-ver"><h4>v1.0.0</h4><span class="cl-date">2026-05-16</span></div>
+            <p data-i18n="changelog.v100">First public release — 10/31-band EQ, 8,850+ AutoEQ presets, calibration, BlackHole integration and the MilkDrop visualizer.</p>
+          </div>
+        </div>
       </div>
     </div>
     <a class="changelog-link reveal" href="https://github.com/denzam/SystemEQ-for-Mac/blob/main/CHANGELOG.md" data-i18n="changelog.link">View full changelog →</a>
@@ -1416,6 +1495,11 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "changelog.label": "Changelog",
       "changelog.title": "Actively maintained.",
       "changelog.sub": "Recent releases — see the full history on GitHub.",
+      "changelog.v147": "Privacy-safe diagnostic report in Settings and response-based gain matching for room A/B comparison.",
+      "changelog.v146": "Developer ID signed and Apple-notarized packages with privacy-first Sparkle updates.",
+      "changelog.v144": "Buffer stability improvements, safer output switching, and updated AutoEQ database.",
+      "changelog.showOlder": "Older versions",
+      "changelog.hideOlder": "Hide older versions",
       "changelog.v140": "Native system-audio capture, safer output switching, and unified EQ controls.",
       "changelog.v130": "Audio reliability, safer output control, and privacy-safe diagnostics.",
       "changelog.v120": "Auto-switch presets per output, Hide Dock Icon, working Launch at Login, and stronger startup/preset restoration.",
@@ -1572,6 +1656,11 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "changelog.label": "Changelog",
       "changelog.title": "Mantenuto attivamente.",
       "changelog.sub": "Versioni recenti — la cronologia completa è su GitHub.",
+      "changelog.v147": "Report diagnostico rispettoso della privacy nelle Impostazioni e compensazione del guadagno per il confronto A/B della stanza.",
+      "changelog.v146": "Pacchetti firmati Developer ID e notarizzati da Apple con aggiornamenti Sparkle incentrati sulla privacy.",
+      "changelog.v144": "Miglioramenti della stabilità del buffer, commutazione delle uscite più sicura e database AutoEQ aggiornato.",
+      "changelog.showOlder": "Versioni precedenti",
+      "changelog.hideOlder": "Nascondi versioni precedenti",
       "changelog.v140": "Cattura audio di sistema nativa, commutazione dell'uscita più sicura e controlli EQ unificati.",
       "changelog.v130": "Audio più affidabile, controllo dell'uscita più sicuro e diagnostica rispettosa della privacy.",
       "changelog.v120": "Preset automatici per uscita, Nascondi icona dal Dock, avvio al login funzionante e ripristino di avvio/preset più affidabile.",
@@ -1728,6 +1817,11 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "changelog.label": "Список змін",
       "changelog.title": "Активно підтримується.",
       "changelog.sub": "Останні випуски — повну історію дивіться на GitHub.",
+      "changelog.v147": "Приватні звіти діагностики в Налаштуваннях та компенсація гучності при A/B порівнянні корекції кімнати.",
+      "changelog.v146": "Підпис Developer ID та нотаризація Apple разом із приватними оновленнями через Sparkle.",
+      "changelog.v144": "Покращена стабільність буферів, безпечніше перемикання виводів та оновлена база пресетів AutoEQ.",
+      "changelog.showOlder": "Попередні версії",
+      "changelog.hideOlder": "Приховати попередні версії",
       "changelog.v140": "Нативне захоплення системного звуку, безпечніше перемикання виводу та об'єднані контролери EQ.",
       "changelog.v130": "Надійніший звук, безпечніший контроль виводу й приватна діагностика.",
       "changelog.v120": "Авто-пресети для кожного виводу, приховування іконки з Dock, робочий запуск при вході та надійніше відновлення стану й пресетів.",
@@ -2047,6 +2141,39 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
     });
   });
 
+  // === Changelog older versions accordion toggle ===
+  const changelogToggle = document.getElementById('changelogToggle');
+  const olderReleases = document.getElementById('olderReleases');
+  const updateChangelogLabel = () => {
+    if (!changelogToggle) return;
+    const expanded = changelogToggle.getAttribute('aria-expanded') === 'true';
+    const lang = document.documentElement.lang || 'en';
+    const labelKey = expanded ? 'changelog.hideOlder' : 'changelog.showOlder';
+    const textEl = changelogToggle.querySelector('.changelog-toggle-text');
+    if (textEl && I18N[lang] && I18N[lang][labelKey]) {
+      textEl.textContent = I18N[lang][labelKey];
+    }
+  };
+
+  if (changelogToggle && olderReleases) {
+    changelogToggle.addEventListener('click', () => {
+      const expanded = changelogToggle.getAttribute('aria-expanded') === 'true';
+      const nextExpanded = !expanded;
+      changelogToggle.setAttribute('aria-expanded', String(nextExpanded));
+      olderReleases.classList.toggle('open', nextExpanded);
+      olderReleases.style.maxHeight = nextExpanded ? (olderReleases.scrollHeight + 30) + 'px' : '0';
+      updateChangelogLabel();
+    });
+
+    window.addEventListener('resize', () => {
+      if (changelogToggle.getAttribute('aria-expanded') === 'true') {
+        olderReleases.style.maxHeight = (olderReleases.scrollHeight + 30) + 'px';
+      }
+    });
+
+    document.addEventListener('seq-language-changed', updateChangelogLabel);
+  }
+
   // === Live GitHub stars + latest version ===
   fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac')
     .then(r => r.ok ? r.json() : Promise.reject())
@@ -2071,28 +2198,39 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
     return highlights.join(' · ') || 'Release notes available on GitHub.';
   };
 
-  const renderRecentReleases = releases => {
-    const container = document.getElementById('recentReleases');
-    if (!container) return;
-    container.replaceChildren(...releases.map(release => {
-      const item = document.createElement('div');
-      item.className = 'cl-item';
-      const version = document.createElement('div');
-      version.className = 'cl-ver';
-      const tag = document.createElement('h4');
-      tag.textContent = release.tag_name;
-      const date = document.createElement('span');
-      date.className = 'cl-date';
-      date.textContent = release.published_at.slice(0, 10);
-      const summary = document.createElement('p');
-      summary.textContent = releaseSummary(release.body || '');
-      version.append(tag, date);
-      item.append(version, summary);
-      return item;
-    }));
+  const renderReleaseItem = release => {
+    const item = document.createElement('div');
+    item.className = 'cl-item';
+    const version = document.createElement('div');
+    version.className = 'cl-ver';
+    const tag = document.createElement('h4');
+    tag.textContent = release.tag_name;
+    const date = document.createElement('span');
+    date.className = 'cl-date';
+    date.textContent = release.published_at.slice(0, 10);
+    const summary = document.createElement('p');
+    summary.textContent = releaseSummary(release.body || '');
+    version.append(tag, date);
+    item.append(version, summary);
+    return item;
   };
 
-  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases?per_page=3')
+  const renderRecentReleases = releases => {
+    const container = document.getElementById('recentReleases');
+    const olderContainer = document.getElementById('olderReleasesList');
+    if (!container) return;
+    const recent = releases.slice(0, 3);
+    const older = releases.slice(3);
+    container.replaceChildren(...recent.map(renderReleaseItem));
+    if (olderContainer && older.length > 0) {
+      olderContainer.replaceChildren(...older.map(renderReleaseItem));
+      if (changelogToggle && changelogToggle.getAttribute('aria-expanded') === 'true') {
+        olderReleases.style.maxHeight = (olderReleases.scrollHeight + 30) + 'px';
+      }
+    }
+  };
+
+  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases?per_page=12')
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(releases => {
       const latest = releases[0];
