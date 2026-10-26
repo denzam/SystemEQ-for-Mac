@@ -12,6 +12,7 @@ no telemetry.
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Download](https://img.shields.io/github/v/release/denzam/SystemEQ-for-Mac?label=download)](https://github.com/denzam/SystemEQ-for-Mac/releases/latest)
 [![Website](https://img.shields.io/badge/website-denzam.github.io-black)](https://denzam.github.io/SystemEQ-for-Mac/)
+[![Application downloads (DMG and ZIP)](https://denzam.github.io/SystemEQ-for-Mac/app-downloads.svg)](https://github.com/denzam/SystemEQ-for-Mac/releases)
 
 > 🇬🇧 English | 🇺🇦 [Українська](README.ua.md) | 🇮🇹 [Italiano](README.it.md)
 

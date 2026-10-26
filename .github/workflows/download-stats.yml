@@ -1,0 +1,66 @@
+name: Application Download Statistics
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [Build & Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-download-statistics
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'denzam/SystemEQ-for-Mac' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          path: tooling
+          persist-credentials: false
+      - name: Verify statistics collector
+        run: python3 tooling/Scripts/test_download_stats.py
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: gh-pages
+          path: site
+      - name: Collect package downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tooling/Scripts/update_download_stats.py --output-dir site
+      - name: Publish statistics
+        working-directory: site
+        run: |
+          set -euo pipefail
+          git add -- app-downloads.json app-downloads.svg
+          if git diff --cached --quiet; then
+            exit 0
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then exit "$status"; fi
+          fi
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(site): update application download count'
+          git push origin HEAD:gh-pages
+      - name: Request Pages rebuild
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST repos/denzam/SystemEQ-for-Mac/pages/builds > pages-build.json
+          python3 -c 'import json; d=json.load(open("pages-build.json")); assert d.get("status") in ("queued", "building", "built"), d'
