@@ -96,16 +96,23 @@ final class ProcessTapEngine {
     private let scratchLeft = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
     private let scratchRight = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
     private let scratchCapacity = 4096
+    nonisolated(unsafe) private let outputVolumeGain: UnsafeMutablePointer<SEQAtomicInt32>
+    nonisolated(unsafe) private var previousOutputGain: Float
     var onSampleRateChange: (() -> Void)?
 
     init(
         processor: CoreAudioEngine = .shared,
+        initialOutputVolumeGain: Float = 1,
         deviceUIDProvider: ((AudioDeviceID) -> String?)? = nil,
         createTap: @escaping (CATapDescription, inout AudioObjectID) -> OSStatus = {
             AudioHardwareCreateProcessTap($0, &$1)
         }
     ) {
         self.processor = processor
+        let gain = initialOutputVolumeGain.isFinite ? min(max(initialOutputVolumeGain, 0), 1) : 0
+        outputVolumeGain = .allocate(capacity: 1)
+        seq_atomic_int32_init(outputVolumeGain, Int32(bitPattern: gain.bitPattern))
+        previousOutputGain = gain
         self.deviceUIDProvider = deviceUIDProvider
         self.createTap = createTap
     }
@@ -114,6 +121,33 @@ final class ProcessTapEngine {
         stop()
         scratchLeft.deallocate()
         scratchRight.deallocate()
+        outputVolumeGain.deallocate()
+    }
+
+    nonisolated func setOutputVolumeGain(_ value: Float) {
+        let gain = value.isFinite ? min(max(value, 0), 1) : 0
+        seq_atomic_int32_store_release(outputVolumeGain, Int32(bitPattern: gain.bitPattern))
+    }
+
+    @inline(__always)
+    nonisolated func applyOutputVolume(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frameCount: Int
+    ) {
+        guard frameCount > 0 else { return }
+        let gain = Float(bitPattern: UInt32(bitPattern: seq_atomic_int32_load(outputVolumeGain)))
+        if gain == 0 {
+            vDSP_vclr(left, 1, vDSP_Length(frameCount))
+            vDSP_vclr(right, 1, vDSP_Length(frameCount))
+        } else if gain != 1 || previousOutputGain != 1 {
+            var startLeft = previousOutputGain
+            var startRight = previousOutputGain
+            var increment = (gain - previousOutputGain) / Float(frameCount)
+            vDSP_vrampmul(left, 1, &startLeft, &increment, left, 1, vDSP_Length(frameCount))
+            vDSP_vrampmul(right, 1, &startRight, &increment, right, 1, vDSP_Length(frameCount))
+        }
+        previousOutputGain = gain
     }
 
     func start(
@@ -296,7 +330,7 @@ final class ProcessTapEngine {
     }
 
     @inline(__always)
-    fileprivate func render(
+    func render(
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>
     ) {
@@ -329,6 +363,7 @@ final class ProcessTapEngine {
             frameCount: frameCount
         )
         processor.processStereoInPlace(left: scratchLeft, right: scratchRight, frameCount: frameCount)
+        applyOutputVolume(left: scratchLeft, right: scratchRight, frameCount: frameCount)
 
         var sourceChannel = 0
         var copiedFrames = 0

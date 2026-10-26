@@ -753,6 +753,11 @@ final class CoreAudioEngine {
     func restoreDeviceSampleRates() { rateRestores += 1 }
 }
 final class ProcessTapEngine { func stop() {} }
+final class NativeVolumeControl {
+    static let shared = NativeVolumeControl()
+    var stopCalls = 0
+    func stop() { stopCalls += 1 }
+}
 __DECLARATIONS__
 @MainActor final class Gate {
     var entered = false
@@ -916,6 +921,7 @@ __DECLARATIONS__
             router.disableEQRouting()
             expect(core.rateRestores == 0, "Failed resource release restored sample rates")
             expect(!core.isRunning && !core.isEnabled, "Disable retained active processing")
+            expect(NativeVolumeControl.shared.stopCalls == 1, "Disable retained native volume control")
         case "wake-failure":
             router.handleSystemEvent(.willSleep)
             router.hardwareReady = false

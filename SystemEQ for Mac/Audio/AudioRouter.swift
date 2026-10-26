@@ -984,7 +984,13 @@ public final class AudioRouter: ObservableObject {
 
         let previousDefaultOutput = currentSystemOutputDevice()
         setAsDefaultOutputDevice(output)
-        let nativeEngine = ProcessTapEngine()
+        let volume = NativeVolumeControl.shared
+        let initialGain = volume.prepare(
+            outputID: output.id,
+            uid: output.uid,
+            needsSoftwareVolume: NativeVolumeControl.needsSoftwareVolume(output.id)
+        )
+        let nativeEngine = ProcessTapEngine(initialOutputVolumeGain: initialGain)
         nativeEngine.onSampleRateChange = { [weak self] in
             self?.enableEQRouting(forceRestart: true, reason: .sampleRateChanged)
         }
@@ -1002,6 +1008,9 @@ public final class AudioRouter: ObservableObject {
             activeInputUID = nil
             activeOutputUID = output.uid
             CoreAudioEngine.shared.markProcessTapStarted()
+            volume.activate { [weak nativeEngine] gain in
+                nativeEngine?.setOutputVolumeGain(gain)
+            }
             DiagnosticEventStore.shared.record(
                 "routing.enable.succeeded",
                 details: [
@@ -1014,6 +1023,7 @@ public final class AudioRouter: ObservableObject {
             dlog("EQ routing active: native Process Tap → \(output.name)", level: .info, category: .routing)
             return true
         case let .failure(error):
+            volume.stop()
             processTapEngineStorage = nil
             CoreAudioEngine.shared.stop()
             let recovery = NativeRoutingFailureRecoveryPolicy.recovery(
@@ -1179,6 +1189,7 @@ public final class AudioRouter: ObservableObject {
     private func stopActiveBackendForRestart(restoreSystemOutput: Bool = true) {
         let previousBackend = activeBackend
         removeBlackHoleVolumeListeners()
+        NativeVolumeControl.shared.stop()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
             nativeEngine.stop()
         }
@@ -1314,6 +1325,7 @@ public final class AudioRouter: ObservableObject {
         // Drop any pending wake restart — routing is off on purpose now.
         wakeRecovery.cancel()
         removeBlackHoleVolumeListeners()
+        NativeVolumeControl.shared.stop()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
             nativeEngine.stop()
         }
@@ -2230,6 +2242,7 @@ public final class AudioRouter: ObservableObject {
         DiagnosticEventStore.shared.record("routing.sleep")
 
         removeBlackHoleVolumeListeners()
+        NativeVolumeControl.shared.stop()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
             nativeEngine.stop()
         }

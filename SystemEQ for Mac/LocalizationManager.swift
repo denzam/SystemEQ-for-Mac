@@ -70,6 +70,11 @@ public enum LocalizedString: String, CaseIterable {
     case appUpdateAvailable
     case appUpdateOpenRelease
     case appUpdateCheckFailed
+    case nativeVolumeTitle
+    case nativeVolumeMute
+    case nativeVolumeKeysActive
+    case nativeVolumeKeysDesc
+    case nativeVolumeAllowKeys
     case audioBackend
     case audioBackendDesc
     case audioBackendAutomatic

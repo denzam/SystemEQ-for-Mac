@@ -7,13 +7,12 @@ struct SettingsView: View {
     @StateObject private var localization = LocalizationManager.shared
     @StateObject private var launchManager = LaunchAtLoginManager()
     @StateObject private var audioRouter = AudioRouter.shared
+    @ObservedObject private var nativeVolume = NativeVolumeControl.shared
     @ObservedObject private var appUpdateChecker = AppUpdateChecker.shared
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
     @AppStorage("hideDockIcon") private var hideDockIcon = false
     @AppStorage(DevicePresetManager.autoSwitchKey) private var autoSwitchPresetPerDevice = false
     @AppStorage("eqStartupMode") private var startupModeRaw: String = EQStartupMode.restoreLastState.rawValue
-    @AppStorage(AudioRouter.backendPreferenceKey) private var audioBackendRaw =
-        AudioRoutingBackendPreference.automatic.rawValue
     @State private var isExportingDiagnostics = false
     @State private var diagnosticsExportMessage: String?
     @State private var diagnosticReportURL: URL?
@@ -42,7 +41,7 @@ struct SettingsView: View {
                 // EQ Startup Behavior Section
                 eqStartupSection
 
-                audioBackendSection
+                if nativeVolume.isAvailable { nativeVolumeSection }
 
                 // General Section
                 generalSection
@@ -65,42 +64,6 @@ struct SettingsView: View {
         .sheet(isPresented: $isFeedbackPresented) { [feedbackDiagnostics] in
             feedbackSheet(diagnostics: feedbackDiagnostics)
         }
-    }
-
-    // MARK: - Audio Backend Section
-
-    private var audioBackendSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(localization.localized(.audioBackend))
-                .font(AppTypography.heading2)
-                .padding(.horizontal, 4)
-
-            Text(localization.localized(.audioBackendDesc))
-                .font(AppTypography.bodySmall)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-
-            Picker("", selection: $audioBackendRaw) {
-                Text(localization.localized(.audioBackendAutomatic))
-                    .tag(AudioRoutingBackendPreference.automatic.rawValue)
-                if #available(macOS 14.4, *) {
-                    Text(localization.localized(.audioBackendNative))
-                        .tag(AudioRoutingBackendPreference.native.rawValue)
-                }
-                Text(localization.localized(.audioBackendBlackHole))
-                    .tag(AudioRoutingBackendPreference.blackHole.rawValue)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .onChange(of: audioBackendRaw) { rawValue in
-                guard let preference = AudioRoutingBackendPreference(rawValue: rawValue) else { return }
-                audioRouter.setBackendPreference(preference)
-            }
-        }
-        .padding(AppSpacing.xl)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
     }
 
     // MARK: - Language Section
@@ -380,6 +343,25 @@ struct SettingsView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    private var nativeVolumeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(localization.localized(.nativeVolumeTitle))
+                .font(AppTypography.heading2)
+            if nativeVolume.keyboardEnabled {
+                Text(localization.localized(.nativeVolumeKeysActive))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Button(localization.localized(.nativeVolumeAllowKeys)) {
+                    nativeVolume.requestKeyboardAccess()
+                }
+            }
+        }
+        .padding(AppSpacing.xl)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var appUpdateSection: some View {
@@ -778,7 +760,7 @@ struct SettingsView: View {
 
         return """
         SystemEQ diagnostic report
-        Report format: 4
+        Report format: 5
         Privacy: This report contains SystemEQ state, generic audio-device capabilities, and process resource metrics. It contains no audio, media metadata, device names, UIDs, file paths, or automatic upload.
         Created: \(ISO8601DateFormatter().string(from: Date()))
         App version: \(version)
@@ -806,6 +788,9 @@ struct SettingsView: View {
 
         --- Core Audio state ---
         \(core.diagnosticSummary(backend: router.activeBackend))
+
+        --- Native volume keys ---
+        \(nativeVolume.diagnosticSummary())
 
         --- Process health ---
         \(processHealthSummary())

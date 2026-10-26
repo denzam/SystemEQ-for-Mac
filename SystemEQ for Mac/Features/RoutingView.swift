@@ -82,14 +82,10 @@ struct RoutingView: View {
 
     private var devicesSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // BlackHole Status
-            blackHoleStatusCard
-
             // System Output Management
             systemOutputCard
 
-            // Audio Capture Section
-            audioCaptureSection
+            audioBackendSection
 
             // Output Device Selection
             deviceSelectionCard(
@@ -101,8 +97,68 @@ struct RoutingView: View {
                     audioRouter.selectOutputDevice(device)
                 }
             )
+
+            audioCaptureSection
         }
         .padding(AppSpacing.xl)
+    }
+
+    private var audioBackendSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(localization.localized(.audioBackend))
+                .font(AppTypography.heading2)
+                .padding(.horizontal, 4)
+
+            Text(localization.localized(.audioBackendDesc))
+                .font(AppTypography.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+
+            Picker("", selection: Binding(
+                get: { audioRouter.backendPreference.rawValue },
+                set: { rawValue in
+                    guard let preference = AudioRoutingBackendPreference(rawValue: rawValue) else { return }
+                    audioRouter.setBackendPreference(preference)
+                }
+            )) {
+                Text(localization.localized(.audioBackendAutomatic))
+                    .tag(AudioRoutingBackendPreference.automatic.rawValue)
+                if #available(macOS 14.4, *) {
+                    Text(localization.localized(.audioBackendNative))
+                        .tag(AudioRoutingBackendPreference.native.rawValue)
+                }
+                Text(localization.localized(.audioBackendBlackHole))
+                    .tag(AudioRoutingBackendPreference.blackHole.rawValue)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            HStack {
+                Text(localization.localized(activeBackendKey))
+                    .font(AppTypography.bodySmall)
+                Spacer()
+                if core.isRunning {
+                    Text(
+                        Measurement(value: core.processingSampleRate, unit: UnitFrequency.hertz),
+                        format: .measurement(width: .abbreviated, usage: .asProvided)
+                    )
+                    .font(AppTypography.bodySmall)
+                }
+            }
+            .foregroundColor(.secondary)
+        }
+        .padding(AppSpacing.xl)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
+
+    private var activeBackendKey: LocalizedString {
+        guard core.isRunning else { return .eqInactive }
+        switch audioRouter.activeBackend {
+        case .native: return .audioBackendNative
+        case .blackHole: return .audioBackendBlackHole
+        case .none: return .eqInactive
+        }
     }
 
     // MARK: - BlackHole Status Card
@@ -432,12 +488,7 @@ struct RoutingView: View {
                 .padding(.horizontal, 4)
 
             // Status checks
-            statusCheckCard(
-                title: localization.localized(.blackHole),
-                status: audioRouter.blackHoleDetected ? .success : .warning,
-                message: audioRouter.blackHoleDetected ? localization.localized(.installed) : localization
-                    .localized(.notInstalled)
-            )
+            blackHoleStatusCard
 
             if audioRouter.activeBackend == .native {
                 statusCheckCard(
