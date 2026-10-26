@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ./Scripts/setup_projectm.sh                       # лише перевірка
-#   ./Scripts/setup_projectm.sh --build              # зібрати з source (native arch, v4.1.6)
+#   ./Scripts/setup_projectm.sh --build              # зібрати з source (native arch, v4.1.8)
 #   ./Scripts/setup_projectm.sh --build-universal    # universal binary (arm64 + x86_64) для Intel+AS
 #
 
@@ -13,9 +13,8 @@ set -euo pipefail
 shopt -s nullglob
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROJECTM_VERSION="4.1.6"
-PROJECTM_SOURCE_COMMIT="3158ee615eaafd93a8912b5f6dd84a9c47b2e00a"
-PROJECTM_TEXTURE_FIX_COMMIT="97bf8845f3c5684857e0cdef54f68942e54839b9"
+PROJECTM_VERSION="4.1.8"
+PROJECTM_SOURCE_COMMIT="4967dc003e5206d7df3ff447287f7609c47d2343"
 REQUIRED_MIN_VERSION="4.1.5"
 
 LIB_SEARCH_PATHS=(
@@ -65,17 +64,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-apply_texture_sampler_fix() {
+verify_texture_sampler_fix() {
     python3 - "$1/src/libprojectM/Renderer/TextureSamplerDescriptor.cpp" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 source = path.read_text()
-original = "    return m_texture->Empty();"
-if source.count(original) != 1:
+fixed = "    return !m_texture || m_texture->Empty();"
+if source.count(fixed) != 1 or "    return m_texture->Empty();" in source:
     raise SystemExit("Unexpected TextureSamplerDescriptor source; refusing to build")
-path.write_text(source.replace(original, "    return !m_texture || m_texture->Empty();", 1))
 PY
 }
 
@@ -210,8 +208,8 @@ if [[ $WANT_BUILD -eq 1 ]]; then
         echo "Unexpected projectM source commit; refusing to build." >&2
         exit 1
     fi
-    apply_texture_sampler_fix "$BUILD_SRC"
-    echo "Applied upstream texture fix $PROJECTM_TEXTURE_FIX_COMMIT"
+    verify_texture_sampler_fix "$BUILD_SRC"
+    echo "Verified upstream texture sampler null guard"
 
     CMAKE_ARGS=(
         -S "$BUILD_SRC"
@@ -219,6 +217,7 @@ if [[ $WANT_BUILD -eq 1 ]]; then
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX=/usr/local
         -DENABLE_PLAYLIST=ON
+        -DENABLE_SYSTEM_PROJECTM_EVAL=OFF
     )
     if [[ $UNIVERSAL -eq 1 ]]; then
         CMAKE_ARGS+=(-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0)

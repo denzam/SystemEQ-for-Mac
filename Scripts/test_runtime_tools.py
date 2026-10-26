@@ -1876,10 +1876,10 @@ class TextureSamplerFixTests(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parent.parent
         source = (root / "Scripts/setup_projectm.sh").read_text()
-        match = re.search(r"(?ms)^apply_texture_sampler_fix\(\) \{\n.*?^\}\n", source)
+        match = re.search(r"(?ms)^verify_texture_sampler_fix\(\) \{\n.*?^\}\n", source)
         if match is None:
-            raise ValueError("apply_texture_sampler_fix function not found")
-        cls.command = "set -euo pipefail\n" + match.group(0) + '\napply_texture_sampler_fix "$1"\n'
+            raise ValueError("verify_texture_sampler_fix function not found")
+        cls.command = "set -euo pipefail\n" + match.group(0) + '\nverify_texture_sampler_fix "$1"\n'
 
     def run_fix(self, source):
         with tempfile.TemporaryDirectory(prefix="systemeq texture sampler ") as directory:
@@ -1894,11 +1894,25 @@ class TextureSamplerFixTests(unittest.TestCase):
             actual = path.read_text() if path.exists() else None
             return result, actual
 
-    def test_texture_sampler_fix_changes_only_expected_line(self):
-        original = "bool Empty() const\n{\n    return m_texture->Empty();\n}\n"
+    def test_texture_sampler_guard_accepts_upstream_source_without_changes(self):
+        original = "bool Empty() const\n{\n    return !m_texture || m_texture->Empty();\n}\n"
         result, actual = self.run_fix(original)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(actual, "bool Empty() const\n{\n    return !m_texture || m_texture->Empty();\n}\n")
+        self.assertEqual(actual, original)
+
+    def test_texture_sampler_guard_rejects_unpatched_source(self):
+        original = "bool Empty() const\n{\n    return m_texture->Empty();\n}\n"
+        result, actual = self.run_fix(original)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unexpected TextureSamplerDescriptor source", result.stderr)
+        self.assertEqual(actual, original)
+
+    def test_texture_sampler_guard_rejects_mixed_source(self):
+        original = "    return !m_texture || m_texture->Empty();\n    return m_texture->Empty();\n"
+        result, actual = self.run_fix(original)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unexpected TextureSamplerDescriptor source", result.stderr)
+        self.assertEqual(actual, original)
 
     def test_texture_sampler_fix_rejects_missing_source(self):
         result, actual = self.run_fix(None)
@@ -1914,7 +1928,7 @@ class TextureSamplerFixTests(unittest.TestCase):
         self.assertEqual(actual, original)
 
     def test_texture_sampler_fix_rejects_duplicate_pattern(self):
-        original = "    return m_texture->Empty();\n    return m_texture->Empty();\n"
+        original = "    return !m_texture || m_texture->Empty();\n    return !m_texture || m_texture->Empty();\n"
         result, actual = self.run_fix(original)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Unexpected TextureSamplerDescriptor source", result.stderr)

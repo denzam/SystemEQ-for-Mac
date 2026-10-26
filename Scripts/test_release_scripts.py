@@ -240,10 +240,10 @@ case "$1" in
 clone)
     source_root="${@: -1}"
     mkdir -p "$source_root/src/libprojectM/Renderer"
-    printf '    return m_texture->Empty();\\n' > "$source_root/src/libprojectM/Renderer/TextureSamplerDescriptor.cpp" ;;
+    printf '    return !m_texture || m_texture->Empty();\\n' > "$source_root/src/libprojectM/Renderer/TextureSamplerDescriptor.cpp" ;;
 -C)
     [[ "$3" == rev-parse && "$4" == HEAD ]] || exit 99
-    echo 3158ee615eaafd93a8912b5f6dd84a9c47b2e00a ;;
+    echo 4967dc003e5206d7df3ff447287f7609c47d2343 ;;
 *) exit 99 ;;
 esac''')
         self.stub("cmake", "exit 0")

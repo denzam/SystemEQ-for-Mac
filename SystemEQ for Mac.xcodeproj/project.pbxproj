@@ -278,8 +278,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib",
-				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.8.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.8.dylib",
 			);
 			name = "Copy projectM Libraries";
 			outputFileListPaths = (
@@ -290,7 +290,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.8.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.8.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
 		};
 		C0PROJECTM002 /* Copy projectM Libraries */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -300,8 +300,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib",
-				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4.4.1.8.dylib",
+				"$(SRCROOT)/Vendor/projectM/lib/libprojectM-4-playlist.4.1.8.dylib",
 			);
 			name = "Copy projectM Libraries";
 			outputFileListPaths = (
@@ -312,7 +312,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.6.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
+			shellScript = "# Copy projectM dylibs to Frameworks and re-sign ad-hoc (Xcode CodeSign requires signed input)\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks\"\nmkdir -p \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4.4.1.8.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncp -f \"${SRCROOT}/Vendor/projectM/lib/libprojectM-4-playlist.4.1.8.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n\nchmod u+w \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\" \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4.4.dylib\"\ncodesign --force --sign - --timestamp=none \"${FRAMEWORKS_DIR}/libprojectM-4-playlist.4.dylib\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
