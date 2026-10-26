@@ -111,8 +111,10 @@ A partire dalla v1.4.6, in Impostazioni → **Aggiornamenti app** seleziona
 **Verifica aggiornamenti app** per aprire la finestra di aggiornamento.
 Quando è disponibile una versione più recente compatibile, puoi scegliere di
 scaricarla, installarla e riavviare SystemEQ da quella finestra. Le firme del feed
-e del pacchetto vengono verificate prima dell’installazione; verifica e
-installazione vengono avviate da te. Impostazioni EQ e profili restano locali.
+e del pacchetto vengono verificate prima dell’installazione; le verifiche automatiche
+sono disattivate inizialmente. Puoi abilitare le verifiche giornaliere in background
+nelle Impostazioni mentre SystemEQ è in esecuzione, anche dopo l’avvio al login.
+Download e installazione vengono sempre avviati da te. Impostazioni EQ e profili restano locali.
 Le verifiche contattano GitHub e includono le versioni dell’app e del sistema di
 aggiornamento, senza inviare audio, impostazioni EQ o un profilo del sistema.
 

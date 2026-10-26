@@ -168,6 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         DiagnosticEventStore.shared.startSession()
+        _ = AppUpdateChecker.shared
         MainThreadHealthMonitor.shared.start()
 
         // Issue #30: опція «сховати з Dock» — лише menu-bar-режим

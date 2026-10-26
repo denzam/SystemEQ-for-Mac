@@ -112,7 +112,9 @@ Starting with v1.4.6, Settings → **App Updates** → **Check for App Updates**
 opens the update window. When a compatible newer release is available, you can
 choose to download it, install it, and restart SystemEQ from that window.
 The updater verifies signed update information and packages before installation;
-checks and installation are initiated by you. EQ settings and profiles remain local.
+automatic checks are off by default. You can enable daily background checks in
+Settings while SystemEQ is running, including when it launches at login. Downloads
+and installation always start when you choose. EQ settings and profiles remain local.
 Update checks contact GitHub and include the app and updater version, without
 sending your audio, EQ settings, or a system profile.
 

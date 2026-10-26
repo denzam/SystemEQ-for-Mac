@@ -393,6 +393,19 @@ struct SettingsView: View {
 
                 appUpdateStatus
 
+                Toggle(isOn: Binding(
+                    get: { appUpdateChecker.automaticChecksEnabled },
+                    set: { appUpdateChecker.setAutomaticChecksEnabled($0) }
+                )) {
+                    Text(localization.localized(.automaticAppUpdates))
+                }
+                .disabled(appUpdateChecker.startupFailed)
+
+                Text(localization.localized(.automaticAppUpdatesDesc))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Button {
                     appUpdateChecker.checkForUpdates()
                 } label: {

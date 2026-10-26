@@ -63,6 +63,8 @@ public enum LocalizedString: String, CaseIterable {
     case general
     case appUpdates
     case appUpdatesDesc
+    case automaticAppUpdates
+    case automaticAppUpdatesDesc
     case appCurrentVersion
     case checkAppUpdates
     case appUpdateChecking

@@ -26,6 +26,8 @@ enum ItalianTranslations {
         .general: "Generale",
         .appUpdates: "Aggiornamenti app",
         .appUpdatesDesc: "Verifica, scarica e installa gli aggiornamenti firmati di SystemEQ. Il riavvio avviene quando scegli di installare.",
+        .automaticAppUpdates: "Verifica automaticamente gli aggiornamenti app",
+        .automaticAppUpdatesDesc: "Verifica circa una volta al giorno mentre SystemEQ è in esecuzione, anche dopo l’avvio al login. Download e installazione iniziano solo quando lo scegli. Le verifiche contattano GitHub; audio e impostazioni EQ restano sul Mac.",
         .appCurrentVersion: "Versione attuale: %@",
         .checkAppUpdates: "Verifica aggiornamenti app",
         .appUpdateChecking: "Verifica aggiornamenti…",

@@ -12,6 +12,14 @@ final class AppUpdateCheckerTests: XCTestCase {
         var availability: AnyPublisher<Bool, Never> {
             subject.eraseToAnyPublisher()
         }
+        let automaticSubject = CurrentValueSubject<Bool, Never>(false)
+        var automaticChecksEnabled: Bool {
+            get { automaticSubject.value }
+            set { automaticSubject.send(newValue) }
+        }
+        var automaticCheckChanges: AnyPublisher<Bool, Never> {
+            automaticSubject.eraseToAnyPublisher()
+        }
         var startError: Error?
         var starts = 0
         var checks = 0
@@ -71,5 +79,51 @@ final class AppUpdateCheckerTests: XCTestCase {
         XCTAssertEqual(retained?.checks, 1)
         checker = nil
         XCTAssertNil(retained)
+    }
+    func testAutomaticChecksAreOptInAndDoNotRunForegroundChecks() {
+        let driver = Driver()
+        let checker = AppUpdateChecker(driver: driver)
+        XCTAssertFalse(checker.automaticChecksEnabled)
+        checker.setAutomaticChecksEnabled(true)
+        XCTAssertTrue(driver.automaticChecksEnabled)
+        XCTAssertTrue(checker.automaticChecksEnabled)
+        XCTAssertEqual(driver.checks, 0)
+        checker.setAutomaticChecksEnabled(false)
+        XCTAssertFalse(driver.automaticChecksEnabled)
+        XCTAssertFalse(checker.automaticChecksEnabled)
+    }
+
+    func testAutomaticPreferenceSurvivesCheckerRecreationAndExternalChanges() {
+        let driver = Driver()
+        driver.automaticChecksEnabled = true
+        var checker: AppUpdateChecker? = AppUpdateChecker(driver: driver)
+        XCTAssertTrue(checker?.automaticChecksEnabled == true)
+        checker = nil
+        let reopened = AppUpdateChecker(driver: driver)
+        XCTAssertTrue(reopened.automaticChecksEnabled)
+        driver.automaticSubject.send(false)
+        XCTAssertFalse(reopened.automaticChecksEnabled)
+        XCTAssertEqual(driver.checks, 0)
+    }
+
+    func testFailedStartupCannotEnableAutomaticChecks() {
+        let driver = Driver()
+        driver.startError = NSError(domain: "fixture", code: 2)
+        let checker = AppUpdateChecker(driver: driver)
+        checker.setAutomaticChecksEnabled(true)
+        driver.automaticSubject.send(true)
+        XCTAssertFalse(checker.automaticChecksEnabled)
+        XCTAssertTrue(checker.startupFailed)
+        XCTAssertEqual(driver.checks, 0)
+    }
+
+    func testBusyUpdaterCanKeepAutomaticPreferenceWithoutStartingManualCheck() {
+        let driver = Driver()
+        let checker = AppUpdateChecker(driver: driver)
+        driver.subject.send(false)
+        checker.setAutomaticChecksEnabled(true)
+        checker.checkForUpdates()
+        XCTAssertTrue(checker.automaticChecksEnabled)
+        XCTAssertEqual(driver.checks, 0)
     }
 }
