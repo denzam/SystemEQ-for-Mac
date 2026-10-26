@@ -12,20 +12,23 @@ final class AutoEQStateTests: XCTestCase {
         var uid: String? = "A"
         var rate = 48000.0
         var applyCount = 0
+        var modeChangeCount = 0
+        var preampChangeCount = 0
+        var enableCount = 0
         var records: [(DevicePresetRecord, String?)] = []
         var saved: [(EQBandMode, [Float], Float, Float)] = []
 
         var engine: AutoEQState.Engine {
             AutoEQState.Engine(
                 mode: { self.mode },
-                setMode: { self.mode = $0 },
+                setMode: { self.mode = $0; self.modeChangeCount += 1 },
                 gains: { self.gains },
                 preamp: { self.preamp },
-                setPreamp: { self.preamp = $0 },
+                setPreamp: { self.preamp = $0; self.preampChangeCount += 1 },
                 headroom: { _, _ in self.limit },
                 apply: { self.gains = $0; self.applyCount += 1 },
                 enabled: { self.enabled },
-                enable: { self.enabled = true }
+                enable: { self.enabled = true; self.enableCount += 1 }
             )
         }
     }
@@ -163,6 +166,206 @@ final class AutoEQStateTests: XCTestCase {
                 descriptorJSON: json
             )
         ))
+    }
+
+    private func restoreEditedPlayback(
+        _ state: AutoEQState,
+        harness: Harness,
+        mode: AutoEQState.BandMode,
+        uid: String = "A",
+        revision: UInt64 = 1,
+        name: String = "saved"
+    ) throws -> [Double] {
+        let clean = (0..<mode.audioEngineMode.bandCount).map { Float($0 % 5) - 2 }
+        let gains = zip(mode.audioEngineMode.frequencies, clean).map {
+            $0.1 + Float(BassBoostCurve.gain(at: Double($0.0), amount: 3))
+        }
+        try restoreDevice(
+            state,
+            harness: harness,
+            uid: uid,
+            revision: revision,
+            gains: gains,
+            name: name,
+            bassBoost: 3
+        )
+        harness.gains = harness.gains.map { $0 - 0.5 }
+        harness.preamp = -9
+        harness.enabled = false
+        state.synchronizePlayback()
+        return clean.map { Double($0) - 0.5 }
+    }
+
+    private func assertPlaybackRestore(
+        _ state: AutoEQState,
+        harness: Harness,
+        clean: [Double],
+        playback: [Float],
+        name: String = "saved",
+        persistedDefaults: NSDictionary,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(state.appliedIdentity, identity(name), file: file, line: line)
+        XCTAssertEqual(state.previewIdentity, identity(name), file: file, line: line)
+        XCTAssertEqual(state.bandMode.audioEngineMode, harness.mode, file: file, line: line)
+        XCTAssertEqual(state.mapped.count, clean.count, file: file, line: line)
+        for (actual, expected) in zip(state.mapped.map(\.gain), clean) {
+            XCTAssertEqual(actual, expected, accuracy: 0.000001, file: file, line: line)
+        }
+        XCTAssertEqual(state.bassBoost, 3, file: file, line: line)
+        XCTAssertEqual(state.preampDB, -9, file: file, line: line)
+        XCTAssertEqual(harness.gains, playback, file: file, line: line)
+        XCTAssertEqual(harness.preamp, -9, file: file, line: line)
+        XCTAssertFalse(harness.enabled, file: file, line: line)
+        XCTAssertFalse(state.importNeedsApply, file: file, line: line)
+        XCTAssertTrue(state.importCurveEdited, file: file, line: line)
+        XCTAssertNil(state.importError, file: file, line: line)
+        XCTAssertEqual(harness.applyCount, 0, file: file, line: line)
+        XCTAssertEqual(harness.modeChangeCount, 0, file: file, line: line)
+        XCTAssertEqual(harness.preampChangeCount, 0, file: file, line: line)
+        XCTAssertEqual(harness.enableCount, 0, file: file, line: line)
+        XCTAssertTrue(harness.saved.isEmpty, file: file, line: line)
+        XCTAssertTrue(harness.records.isEmpty, file: file, line: line)
+        XCTAssertEqual(
+            NSDictionary(dictionary: defaults.persistentDomain(forName: suiteName) ?? [:]),
+            persistedDefaults,
+            file: file,
+            line: line
+        )
+    }
+
+    func testPlaybackRestoreKeepsManualCurveAndPreampWithoutApplyingInEitherMode() async throws {
+        for mode in [AutoEQState.BandMode.ten, .thirtyOne] {
+            let harness = Harness()
+            let state = owner(harness, prepare: { Self.prepared($0, rate: $1, gain: -6, requiresReview: true) })
+            let clean = try restoreEditedPlayback(state, harness: harness, mode: mode)
+            let playback = harness.gains
+            let persistedDefaults = NSDictionary(dictionary: defaults.persistentDomain(forName: suiteName) ?? [:])
+            harness.limit = nil
+            let source = try input()
+            state.startImport(source, identity: identity("saved"), autoApply: false, preservePlayback: true)
+            try await waitForImport(state)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, persistedDefaults: persistedDefaults
+            )
+            XCTAssertFalse(state.isImporting)
+            XCTAssertEqual(state.parsed.map(\.freq), source.displayBands.map(\.freq))
+            XCTAssertEqual(state.parsed.map(\.gain), source.displayBands.map(\.gain))
+            XCTAssertEqual(state.parsed.map(\.q), source.displayBands.map(\.q))
+            XCTAssertEqual(state.parsed.map(\.type), source.displayBands.map(\.type))
+            XCTAssertEqual(
+                try XCTUnwrap(state.preparedImport).result(for: mode.audioEngineMode).gains,
+                Array(repeating: -6, count: mode.audioEngineMode.bandCount)
+            )
+            harness.limit = -3
+            XCTAssertTrue(state.apply())
+            for (actual, expected) in zip(harness.gains, playback) {
+                XCTAssertEqual(actual, expected, accuracy: 0.000001)
+            }
+            XCTAssertEqual(harness.preamp, -9)
+            XCTAssertEqual(harness.applyCount, 1)
+            XCTAssertEqual(harness.enableCount, 1)
+            XCTAssertEqual(harness.saved.count, 1)
+            XCTAssertEqual(harness.records.count, 1)
+            XCTAssertEqual(harness.records.last?.1, "A")
+            for (actual, expected) in try zip(XCTUnwrap(harness.saved.last).1, clean) {
+                XCTAssertEqual(Double(actual), expected, accuracy: 0.000001)
+            }
+        }
+    }
+
+    func testPlaybackRestoreFromClosedSessionCannotReplaceReopenedPreparation() async throws {
+        for mode in [AutoEQState.BandMode.ten, .thirtyOne] {
+            let harness = Harness()
+            let oldGate = PreparationGate()
+            let currentGate = PreparationGate()
+            let state = owner(harness, prepare: { input, _ in
+                try await (input.preamp == -4 ? oldGate : currentGate).prepare()
+            })
+            let clean = try restoreEditedPlayback(state, harness: harness, mode: mode)
+            let playback = harness.gains
+            let persistedDefaults = NSDictionary(dictionary: defaults.persistentDomain(forName: suiteName) ?? [:])
+            try state.startImport(input(), identity: identity("closed"), autoApply: false, preservePlayback: true)
+            try await waitForGate(oldGate)
+            state.close()
+            state.open()
+            let currentInput = try AutoEQImportParser.parse("Preamp: -5 dB\nFilter 1: ON PK Fc 2000 Hz Gain 2 dB Q 1")
+            state.startImport(currentInput, identity: identity("saved"), autoApply: false, preservePlayback: true)
+            try await waitForGate(currentGate)
+            try await oldGate.complete(Self.prepared(input(), gain: -6))
+            try await Task.sleep(nanoseconds: 10_000_000)
+            XCTAssertTrue(state.isImporting)
+            XCTAssertNil(state.preparedImport)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, persistedDefaults: persistedDefaults
+            )
+            await currentGate.complete(Self.prepared(currentInput, gain: -5))
+            try await waitForImport(state)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, persistedDefaults: persistedDefaults
+            )
+            XCTAssertEqual(state.parsed.map(\.freq), currentInput.displayBands.map(\.freq))
+            XCTAssertEqual(state.parsed.map(\.gain), currentInput.displayBands.map(\.gain))
+            XCTAssertEqual(state.parsed.map(\.q), currentInput.displayBands.map(\.q))
+            XCTAssertEqual(state.parsed.map(\.type), currentInput.displayBands.map(\.type))
+            XCTAssertEqual(
+                try XCTUnwrap(state.preparedImport).result(for: mode.audioEngineMode).gains,
+                Array(repeating: -5, count: mode.audioEngineMode.bandCount)
+            )
+        }
+    }
+
+    func testPlaybackRestoreFromPreviousOutputCannotReplaceCurrentDevice() async throws {
+        for mode in [AutoEQState.BandMode.ten, .thirtyOne] {
+            let harness = Harness()
+            let gate = PreparationGate()
+            let state = owner(harness, prepare: { _, _ in try await gate.prepare() })
+            _ = try restoreEditedPlayback(state, harness: harness, mode: mode)
+            try state.startImport(input(), identity: identity("old A"), autoApply: false, preservePlayback: true)
+            try await waitForGate(gate)
+            let clean = try restoreEditedPlayback(
+                state, harness: harness, mode: mode, uid: "B", revision: 2, name: "B"
+            )
+            let playback = harness.gains
+            let persistedDefaults = NSDictionary(dictionary: defaults.persistentDomain(forName: suiteName) ?? [:])
+            try await gate.complete(Self.prepared(input(), gain: -6))
+            try await Task.sleep(nanoseconds: 10_000_000)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, name: "B",
+                persistedDefaults: persistedDefaults
+            )
+            XCTAssertFalse(state.isImporting)
+            XCTAssertNil(state.preparedImport)
+        }
+    }
+
+    func testCancelledPlaybackRestoreCannotClearNewRequestOrAdoptOldFit() async throws {
+        for mode in [AutoEQState.BandMode.ten, .thirtyOne] {
+            let harness = Harness()
+            let gate = PreparationGate()
+            let state = owner(harness, prepare: { _, _ in try await gate.prepare() })
+            let clean = try restoreEditedPlayback(state, harness: harness, mode: mode)
+            let playback = harness.gains
+            let persistedDefaults = NSDictionary(dictionary: defaults.persistentDomain(forName: suiteName) ?? [:])
+            try state.startImport(input(), identity: identity("cancelled"), autoApply: false, preservePlayback: true)
+            try await waitForGate(gate)
+            state.cancelPending()
+            let current = state.beginRequest()
+            try await gate.complete(Self.prepared(input(), gain: -6))
+            try await Task.sleep(nanoseconds: 10_000_000)
+            XCTAssertTrue(state.isImporting)
+            XCTAssertTrue(state.isCurrent(current))
+            XCTAssertNil(state.preparedImport)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, persistedDefaults: persistedDefaults
+            )
+            state.finishFetch(current)
+            XCTAssertFalse(state.isImporting)
+            assertPlaybackRestore(
+                state, harness: harness, clean: clean, playback: playback, persistedDefaults: persistedDefaults
+            )
+        }
     }
 
     func testSameModeDeviceSwitchAdoptsNewGainsAndIdentity() throws {
