@@ -161,6 +161,75 @@ final class AutoEQFavoritesRepositoryTests: XCTestCase {
         }
     }
 
+    func testMutationsAfterFailedLoadPreserveCorruptData() throws {
+        for data in [Data([0xFF]), Data("null".utf8), Data("[{\"id\":\"broken\"}]".utf8)] {
+            let storage = MemoryFavoritesStorage()
+            storage.data = data
+            let repository = storage.repository()
+            XCTAssertThrowsError(try repository.load())
+            XCTAssertThrowsError(try repository.togglePath(path: "new", name: "New", source: nil, target: nil))
+            XCTAssertThrowsError(try repository.toggleCustom(
+                name: "New", source: nil, target: nil, rawText: "text", preamp: nil
+            ))
+            XCTAssertThrowsError(try repository.remove(id: "old"))
+            XCTAssertEqual(storage.data, data)
+            XCTAssertEqual(storage.writes, 0)
+            XCTAssertTrue(repository.favorites.isEmpty)
+        }
+    }
+
+    func testFirstMutationLoadsExistingDataAndRejectsCorruption() throws {
+        let storage = MemoryFavoritesStorage()
+        let original = favorite()
+        storage.data = try JSONEncoder().encode([original])
+        let repository = storage.repository()
+        try repository.togglePath(path: "new", name: "New", source: nil, target: nil)
+        XCTAssertEqual(repository.favorites.first, original)
+        XCTAssertEqual(repository.favorites.count, 2)
+        XCTAssertEqual(storage.reads, 1)
+
+        let corrupt = Data("{".utf8)
+        storage.data = corrupt
+        let fresh = storage.repository()
+        let writes = storage.writes
+        XCTAssertThrowsError(try fresh.remove(id: "one"))
+        XCTAssertEqual(storage.data, corrupt)
+        XCTAssertEqual(storage.writes, writes)
+    }
+
+    func testReadFailureBlocksMutationsUntilSuccessfulReload() throws {
+        let storage = MemoryFavoritesStorage()
+        let original = favorite()
+        storage.data = try JSONEncoder().encode([original])
+        let previous = storage.data
+        storage.failRead = true
+        let repository = storage.repository()
+        XCTAssertThrowsError(try repository.load())
+        storage.failRead = false
+        XCTAssertThrowsError(try repository.togglePath(path: "new", name: "New", source: nil, target: nil))
+        XCTAssertEqual(storage.data, previous)
+        XCTAssertEqual(storage.writes, 0)
+        try repository.load()
+        try repository.togglePath(path: "new", name: "New", source: nil, target: nil)
+        XCTAssertEqual(repository.favorites.first, original)
+        XCTAssertEqual(repository.favorites.count, 2)
+    }
+
+    func testWrongDefaultsTypeIsPreservedUntilSuccessfulReload() throws {
+        let name = "SystemEQFavoritesTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("preserve", forKey: AutoEQFavoritesRepository.storageKey)
+        let repository = AutoEQFavoritesRepository(defaults: defaults)
+        XCTAssertThrowsError(try repository.load())
+        XCTAssertThrowsError(try repository.remove(id: "one"))
+        XCTAssertEqual(defaults.string(forKey: AutoEQFavoritesRepository.storageKey), "preserve")
+        defaults.removeObject(forKey: AutoEQFavoritesRepository.storageKey)
+        try repository.load()
+        try repository.togglePath(path: "new", name: "New", source: nil, target: nil)
+        XCTAssertEqual(repository.favorites.count, 1)
+    }
+
     func testEncodingFailurePreservesSavedBytesAndPublishedState() throws {
         let storage = MemoryFavoritesStorage()
         storage.data = try JSONEncoder().encode([favorite()])
@@ -200,10 +269,12 @@ private final class MemoryFavoritesStorage {
     var reads = 0
     var writes = 0
     var failWrite = false
+    var failRead = false
 
     func repository() -> AutoEQFavoritesRepository {
         AutoEQFavoritesRepository(readData: { [self] in
             reads += 1
+            if failRead { throw CocoaError(.fileReadNoPermission) }
             return data
         }, writeData: { [self] value in
             if failWrite { throw CocoaError(.fileWriteUnknown) }

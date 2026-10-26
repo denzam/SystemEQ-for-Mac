@@ -67,13 +67,13 @@ final class DevicePresetManager: ObservableObject {
     /// `outputUID: nil` — взяти поточний вибраний вивід.
     func recordApply(_ record: DevicePresetRecord, outputUID: String? = nil) {
         guard let uid = outputUID ?? AudioRouter.shared.selectedOutputDevice?.uid else { return }
-        var map = loadMap()
+        guard var map = loadMap() else { return }
         map[uid] = record
         saveMap(map)
     }
 
     func record(for uid: String) -> DevicePresetRecord? {
-        loadMap()[uid]
+        loadMap()?[uid]
     }
 
     // MARK: - Switching
@@ -87,7 +87,8 @@ final class DevicePresetManager: ObservableObject {
         let context = OutputContext(outputUID: uid, revision: outputRevision)
         outputContext = context
         guard Self.defaults.bool(forKey: Self.autoSwitchKey) else { return }
-        guard let record = loadMap()[uid] else {
+        guard let map = loadMap() else { return }
+        guard let record = map[uid] else {
             applyFlat(to: engine, outputUID: uid)
             appliedPreset = AppliedPreset(context: context, record: nil)
             return
@@ -133,16 +134,23 @@ final class DevicePresetManager: ObservableObject {
 
     // MARK: - Storage
 
-    private func loadMap() -> [String: DevicePresetRecord] {
-        guard let data = Self.defaults.data(forKey: Self.mapKey),
-              let map = try? JSONDecoder().decode([String: DevicePresetRecord].self, from: data)
-        else { return [:] }
-        return map
+    private func loadMap() -> [String: DevicePresetRecord]? {
+        guard let stored = Self.defaults.object(forKey: Self.mapKey) else { return [:] }
+        do {
+            guard let data = stored as? Data else { throw CocoaError(.coderReadCorrupt) }
+            return try JSONDecoder().decode([String: DevicePresetRecord].self, from: data)
+        } catch {
+            dlog("Could not load device presets; preserving stored data: \(error)", level: .error, category: .preset)
+            return nil
+        }
     }
 
     private func saveMap(_ map: [String: DevicePresetRecord]) {
-        if let data = try? JSONEncoder().encode(map) {
+        do {
+            let data = try JSONEncoder().encode(map)
             Self.defaults.set(data, forKey: Self.mapKey)
+        } catch {
+            dlog("Could not save device presets: \(error)", level: .error, category: .preset)
         }
     }
 }

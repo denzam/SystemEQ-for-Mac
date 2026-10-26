@@ -70,6 +70,56 @@ final class DevicePresetManagerTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.data(forKey: "devicePresets.v1"), before)
     }
 
+    func testCorruptMapSurvivesRecordingAndCanBeRestored() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
+        let corruptValues = [Data(), Data("{".utf8), Data("null".utf8), Data(#"{"old":{}}"#.utf8)]
+        for data in corruptValues {
+            defaults.set(data, forKey: "devicePresets.v1")
+            manager.recordApply(makeRecord(name: "new"), outputUID: "new")
+            XCTAssertEqual(defaults.data(forKey: "devicePresets.v1"), data)
+            XCTAssertNil(manager.record(for: "new"))
+        }
+        let original = makeRecord(name: "old")
+        try defaults.set(JSONEncoder().encode(["old": original]), forKey: "devicePresets.v1")
+        manager.recordApply(makeRecord(name: "new"), outputUID: "new")
+        XCTAssertEqual(manager.record(for: "old"), original)
+        XCTAssertNotNil(manager.record(for: "new"))
+    }
+
+    func testWrongStorageTypeSurvivesRecording() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
+        defaults.set("preserve", forKey: "devicePresets.v1")
+        manager.recordApply(makeRecord(name: "new"), outputUID: "new")
+        XCTAssertEqual(defaults.string(forKey: "devicePresets.v1"), "preserve")
+        defaults.removeObject(forKey: "devicePresets.v1")
+        manager.recordApply(makeRecord(name: "new"), outputUID: "new")
+        XCTAssertNotNil(manager.record(for: "new"))
+    }
+
+    func testCorruptMapDoesNotResetPlaybackOnOutputChange() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
+        let core = CoreAudioEngine()
+        let engine = AudioEngine(
+            defaults: defaults, coreAudioEngine: core,
+            enableRouting: { _ in true }, disableRouting: { _ in }
+        )
+        engine.applyEQValues([Float](repeating: 2, count: engine.bands.count))
+        let gains = engine.bands.map(\.gain)
+        let playback = defaults.data(forKey: "lastPlayback.snapshot")
+        defaults.set(true, forKey: DevicePresetManager.autoSwitchKey)
+        defaults.set("preserve", forKey: "lastAppliedPresetJSON")
+        let corrupt = Data("{".utf8)
+        defaults.set(corrupt, forKey: "devicePresets.v1")
+
+        manager.outputChanged(to: "output", engine: engine)
+
+        XCTAssertEqual(engine.bands.map(\.gain), gains)
+        XCTAssertEqual(defaults.data(forKey: "lastPlayback.snapshot"), playback)
+        XCTAssertEqual(defaults.string(forKey: "lastAppliedPresetJSON"), "preserve")
+        XCTAssertEqual(defaults.data(forKey: "devicePresets.v1"), corrupt)
+        XCTAssertNil(manager.appliedPreset)
+    }
+
     func testOutputChanged_unmappedDeviceAppliesFlatEQ() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
         defaults.set(true, forKey: DevicePresetManager.autoSwitchKey)

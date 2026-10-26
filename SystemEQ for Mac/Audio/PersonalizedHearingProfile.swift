@@ -241,8 +241,17 @@ public class PersonalizedProfileManager: ObservableObject {
     @Published public var activeProfile: PersonalizedHearingProfile?
 
     private let unlockKey = "PersonalizedProfileUnlocked"
+    private let defaults: UserDefaults
+    private let storedProfilesURL: URL?
+    private var profilesLoadFailed = false
 
-    private init() {
+    private convenience init() {
+        self.init(defaults: .standard, profilesURL: nil)
+    }
+
+    init(defaults: UserDefaults, profilesURL: URL?) {
+        self.defaults = defaults
+        storedProfilesURL = profilesURL
         loadUnlockStatus()
         loadProfiles()
     }
@@ -252,70 +261,88 @@ public class PersonalizedProfileManager: ObservableObject {
     public func unlockFeature() {
         // Feature is unlocked by default in open-source version
         isUnlocked = true
-        UserDefaults.standard.set(true, forKey: unlockKey)
+        defaults.set(true, forKey: unlockKey)
     }
 
     private func loadUnlockStatus() {
-        isUnlocked = UserDefaults.standard.bool(forKey: unlockKey)
+        isUnlocked = defaults.bool(forKey: unlockKey)
     }
 
     // MARK: - Profile Management
 
     public func saveProfile(_ profile: PersonalizedHearingProfile) {
-        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-            profiles[index] = profile
+        var next = profiles
+        if let index = next.firstIndex(where: { $0.id == profile.id }) {
+            next[index] = profile
         } else {
-            profiles.append(profile)
+            next.append(profile)
         }
 
-        saveProfilesToDisk()
+        guard saveProfilesToDisk(next) else { return }
+        profiles = next
     }
 
     public func deleteProfile(_ profile: PersonalizedHearingProfile) {
-        profiles.removeAll { $0.id == profile.id }
+        let next = profiles.filter { $0.id != profile.id }
+        guard saveProfilesToDisk(next) else { return }
+        profiles = next
         if activeProfile?.id == profile.id {
             activeProfile = nil
         }
-        saveProfilesToDisk()
+    }
+
+    private var profilesURL: URL? {
+        if let storedProfilesURL { return storedProfilesURL }
+        guard let documentsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let appSupportURL = documentsURL.appendingPathComponent("SystemEQ for Mac")
+        return appSupportURL.appendingPathComponent("PersonalizedProfiles.json")
     }
 
     private func loadProfiles() {
-        guard let documentsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        else { return }
-        let appSupportURL = documentsURL.appendingPathComponent("SystemEQ for Mac")
-        let profilesURL = appSupportURL.appendingPathComponent("PersonalizedProfiles.json")
+        guard let profilesURL else {
+            profilesLoadFailed = true
+            dlog("Could not locate personalized profiles", level: .error, category: .preset)
+            return
+        }
 
         do {
             let data = try Data(contentsOf: profilesURL)
             let loadedProfiles = try JSONDecoder().decode([PersonalizedHearingProfile].self, from: data)
             profiles = loadedProfiles
+            profilesLoadFailed = false
             dlog("Loaded \(profiles.count) personalized profiles", category: .preset)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            profilesLoadFailed = false
         } catch {
+            profilesLoadFailed = true
             dlog("Could not load profiles: \(error)", level: .warning, category: .preset)
         }
     }
 
-    private func saveProfilesToDisk() {
-        guard let documentsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        else { return }
-        let appSupportURL = documentsURL.appendingPathComponent("SystemEQ for Mac")
+    private func saveProfilesToDisk(_ profiles: [PersonalizedHearingProfile]) -> Bool {
+        guard !profilesLoadFailed, let profilesURL else {
+            dlog("Refusing to overwrite unreadable personalized profiles", level: .error, category: .preset)
+            return false
+        }
+        let appSupportURL = profilesURL.deletingLastPathComponent()
 
         // Create directory if it doesn't exist
         do {
             try FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
         } catch {
             dlog("Could not create app support directory: \(error)", level: .error, category: .preset)
-            return
+            return false
         }
-
-        let profilesURL = appSupportURL.appendingPathComponent("PersonalizedProfiles.json")
 
         do {
             let data = try JSONEncoder().encode(profiles)
-            try data.write(to: profilesURL)
+            try data.write(to: profilesURL, options: .atomic)
             dlog("Saved \(profiles.count) personalized profiles", category: .preset)
+            return true
         } catch {
             dlog("Could not save profiles: \(error)", level: .error, category: .preset)
+            return false
         }
     }
 

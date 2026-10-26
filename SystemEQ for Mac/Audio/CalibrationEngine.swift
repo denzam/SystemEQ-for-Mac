@@ -197,6 +197,7 @@ public final class CalibrationEngine: ObservableObject {
     private final class ProfilePersistenceState: @unchecked Sendable {
         var profiles: [CalibrationProfile] = []
         var needsWrite = false
+        var loadFailed = false
     }
 
     // MARK: - Calibration Signal Type
@@ -658,7 +659,7 @@ public final class CalibrationEngine: ObservableObject {
         let state = profilePersistenceState
         return await withCheckedContinuation { continuation in
             profilesQueue.async { [weak self] in
-                let saved = !state.needsWrite
+                let saved = !state.needsWrite && !state.loadFailed
                 DispatchQueue.main.async {
                     guard let self else { continuation.resume(returning: false); return }
                     if !saved, let index = self.profiles.firstIndex(where: { $0 == profile }) {
@@ -742,6 +743,11 @@ public final class CalibrationEngine: ObservableObject {
         let url = profilesURL
         let state = profilePersistenceState
         profilesQueue.async {
+            guard !state.loadFailed else {
+                state.needsWrite = true
+                dlog("Refusing to overwrite unreadable calibration profiles", level: .error, category: .calibration)
+                return
+            }
             var profiles = state.profiles
 
             switch mutation {
@@ -775,18 +781,18 @@ public final class CalibrationEngine: ObservableObject {
         profilesQueue.async { [weak self] in
             let result: Result<[CalibrationProfile]?, Error>
             do {
-                guard FileManager.default.fileExists(atPath: url.path) else {
-                    result = .success(nil)
-                    state.profiles = []
-                    DispatchQueue.main.async { self?.finishLoadingProfiles(result, revision: revision) }
-                    return
-                }
                 let data = try Data(contentsOf: url)
                 let profiles = try JSONDecoder().decode([CalibrationProfile].self, from: data)
                 state.profiles = profiles
+                state.loadFailed = false
                 result = .success(profiles)
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                state.profiles = []
+                state.loadFailed = false
+                result = .success(nil)
             } catch {
                 state.profiles = []
+                state.loadFailed = true
                 result = .failure(error)
             }
             DispatchQueue.main.async { self?.finishLoadingProfiles(result, revision: revision) }
@@ -826,6 +832,10 @@ public final class CalibrationEngine: ObservableObject {
         let url = profilesURL
         profilesQueue.sync {
             guard state.needsWrite else { return }
+            guard !state.loadFailed else {
+                dlog("Refusing to flush unreadable calibration profiles", level: .error, category: .calibration)
+                return
+            }
             let profiles = state.profiles
             do {
                 let data = try JSONEncoder().encode(profiles)
