@@ -328,16 +328,19 @@ enum AudioRoutingStartPolicy {
     static func start(
         preference: AudioRoutingBackendPreference,
         persistEnabledStateOnFailure: Bool,
+        prepareNative: () -> Bool = { true },
         native: (Bool) -> Bool,
         blackHole: (Bool) -> Bool,
         onFallback: () -> Void
     ) -> Bool {
         switch preference {
         case .native:
+            guard prepareNative() else { return false }
             return native(persistEnabledStateOnFailure)
         case .blackHole:
             return blackHole(persistEnabledStateOnFailure)
         case .automatic:
+            guard prepareNative() else { return false }
             if native(false) { return true }
             onFallback()
             return blackHole(persistEnabledStateOnFailure)
@@ -943,6 +946,17 @@ public final class AudioRouter: ObservableObject {
         return AudioRoutingStartPolicy.start(
             preference: preservesBlackHoleOutput ? .blackHole : backendPreference,
             persistEnabledStateOnFailure: persistEnabledStateOnFailure,
+            prepareNative: {
+                guard engine.releaseDeviceResources(),
+                      engine.restoreDeviceSampleRates(requiredDeviceUID: physicalOutput.uid) else {
+                    DiagnosticEventStore.shared.record(
+                        "routing.enable.failed", details: ["backend": "native", "reason": "blackHoleCleanup"]
+                    )
+                    self.disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
+                    return false
+                }
+                return true
+            },
             native: { persistFailure in self.startNativeRouting(
                 output: physicalOutput,
                 persistEnabledStateOnFailure: persistFailure
@@ -1317,10 +1331,11 @@ public final class AudioRouter: ObservableObject {
         }
 
         // Stop CoreAudioEngine
-        CoreAudioEngine.shared.stop()
+        if CoreAudioEngine.shared.releaseDeviceResources() {
+            CoreAudioEngine.shared.restoreDeviceSampleRates()
+        }
 
         if previousBackend == .blackHole {
-            CoreAudioEngine.shared.restoreDeviceSampleRates()
             restoreOriginalSystemOutputDevice()
         }
     }

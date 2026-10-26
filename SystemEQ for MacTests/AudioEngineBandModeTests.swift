@@ -48,12 +48,152 @@ final class AudioDiagnosticAgeTests: XCTestCase {
     }
 }
 
+final class BufferSizeNegotiationTests: XCTestCase {
+    private struct Request: Equatable {
+        let device: AudioDeviceID
+        let frames: UInt32
+    }
+
+    private final class Devices {
+        let input: AudioDeviceID = 11
+        let output: AudioDeviceID = 22
+        var frames: [AudioDeviceID: UInt32] = [11: 512, 22: 512]
+        var rejected: [AudioDeviceID: Set<UInt32>] = [:]
+        var clamped: [AudioDeviceID: UInt32] = [:]
+        var unreadableReads: [AudioDeviceID: Set<Int>] = [:]
+        var zeroReads: [AudioDeviceID: Set<Int>] = [:]
+        var readCounts: [AudioDeviceID: Int] = [:]
+        var requests: [Request] = []
+        var afterSet: ((AudioDeviceID, UInt32) -> Void)?
+
+        func resolve() -> AudioBufferSizeNegotiation.Configuration? {
+            AudioBufferSizeNegotiation.resolve(
+                inputDevice: input,
+                outputDevice: output,
+                read: { device in
+                    self.readCounts[device, default: 0] += 1
+                    let count = self.readCounts[device, default: 0]
+                    if self.unreadableReads[device]?.contains(count) == true { return nil }
+                    if self.zeroReads[device]?.contains(count) == true { return 0 }
+                    return self.frames[device]
+                },
+                set: { device, frames in
+                    self.requests.append(Request(device: device, frames: frames))
+                    guard self.rejected[device]?.contains(frames) != true else { return false }
+                    self.frames[device] = self.clamped[device] ?? frames
+                    self.afterSet?(device, frames)
+                    return true
+                }
+            )
+        }
+    }
+
+    func testBothDevicesAcceptPreferredSizeWithoutFallback() throws {
+        let devices = Devices()
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 256)
+        XCTAssertEqual(result.outputFrames, 256)
+        XCTAssertTrue(result.inputRequestConfirmed)
+        XCTAssertTrue(result.outputRequestConfirmed)
+        XCTAssertEqual(devices.requests, [
+            Request(device: devices.input, frames: 256), Request(device: devices.output, frames: 256)
+        ])
+    }
+
+    func testFixedDeviceDoesNotIncreaseOtherDevicesBuffer() throws {
+        for fixedDevice: AudioDeviceID in [11, 22] {
+            let devices = Devices()
+            devices.rejected[fixedDevice] = [256, 512]
+            let result = try XCTUnwrap(devices.resolve())
+            XCTAssertEqual(result.inputFrames, fixedDevice == devices.input ? 512 : 256)
+            XCTAssertEqual(result.outputFrames, fixedDevice == devices.output ? 512 : 256)
+            XCTAssertEqual(result.inputRequestConfirmed, fixedDevice != devices.input)
+            XCTAssertEqual(result.outputRequestConfirmed, fixedDevice != devices.output)
+            XCTAssertEqual(devices.requests, [
+                Request(device: devices.input, frames: 256), Request(device: devices.output, frames: 256),
+                Request(device: fixedDevice, frames: 512)
+            ])
+        }
+    }
+
+    func testSuccessfulSetterWithClampedReadbackFallsBackOnlyThatDevice() throws {
+        let devices = Devices()
+        devices.clamped[devices.output] = 512
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 256)
+        XCTAssertEqual(result.outputFrames, 512)
+        XCTAssertTrue(result.outputRequestConfirmed)
+        XCTAssertEqual(devices.requests.last, Request(device: devices.output, frames: 512))
+        XCTAssertEqual(devices.requests.count, 3)
+    }
+
+    func testUnknownPreferredReadbackCannotConfirmPreferredSize() throws {
+        let devices = Devices()
+        devices.unreadableReads[devices.output] = [1]
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 256)
+        XCTAssertEqual(result.outputFrames, 512)
+        XCTAssertEqual(devices.requests.last, Request(device: devices.output, frames: 512))
+        XCTAssertEqual(devices.requests.count, 3)
+    }
+
+    func testRejectedPreferredRequestStillRequiresFallbackWhenReadbackMatches() throws {
+        let devices = Devices()
+        devices.frames[devices.output] = 256
+        devices.rejected[devices.output] = [256]
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 256)
+        XCTAssertEqual(result.outputFrames, 512)
+        XCTAssertTrue(result.outputRequestConfirmed)
+        XCTAssertEqual(devices.requests.last, Request(device: devices.output, frames: 512))
+    }
+
+    func testBothDevicesCanRejectRequestsAndKeepDifferentSupportedSizes() throws {
+        let devices = Devices()
+        devices.frames[devices.input] = 512
+        devices.frames[devices.output] = 1024
+        devices.rejected = [devices.input: [256, 512], devices.output: [256, 512]]
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 512)
+        XCTAssertEqual(result.outputFrames, 1024)
+        XCTAssertFalse(result.inputRequestConfirmed)
+        XCTAssertFalse(result.outputRequestConfirmed)
+        XCTAssertEqual(devices.requests.count, 4)
+    }
+
+    func testMissingOrZeroFinalReadbackFailsNegotiation() {
+        for invalidDevice: AudioDeviceID in [11, 22] {
+            let unreadable = Devices()
+            unreadable.unreadableReads[invalidDevice] = [2]
+            XCTAssertNil(unreadable.resolve())
+            let zero = Devices()
+            zero.zeroReads[invalidDevice] = [2]
+            XCTAssertNil(zero.resolve())
+        }
+    }
+
+    func testFinalReadbackIncludesCrossDeviceChangesDuringFallback() throws {
+        let devices = Devices()
+        devices.clamped[devices.output] = 512
+        devices.afterSet = { device, frames in
+            if device == 22, frames == 512 { devices.frames[11] = 512 }
+        }
+        defer { devices.afterSet = nil }
+        let result = try XCTUnwrap(devices.resolve())
+        XCTAssertEqual(result.inputFrames, 512)
+        XCTAssertEqual(result.outputFrames, 512)
+        XCTAssertFalse(result.inputRequestConfirmed)
+        XCTAssertTrue(result.outputRequestConfirmed)
+    }
+}
+
 final class SampleRateNegotiationTests: XCTestCase {
     func testAsynchronousHardwareChangeMustSettleBeforeSuccess() {
         var output = 96000.0
         var pending: Double?
         var pauses = 0
         let result = AudioSampleRateNegotiation.resolve(
+            preferredRate: 48000,
             read: { .init(input: 48000, output: output) },
             setInput: { _ in XCTFail("Input already matches"); return false },
             setOutput: { pending = $0; return true },
@@ -187,6 +327,191 @@ final class SampleRateNegotiationTests: XCTestCase {
             read: { 48000 }
         )
         XCTAssertEqual(preserved?.rate, 44100)
+    }
+
+    func testPhysicalOutputRateIsPreservedBeforeTryingFallbackRates() {
+        for rate in [44100.0, 96000.0] {
+            var input = 48000.0
+            var inputWrites: [Double] = []
+            let result = AudioSampleRateNegotiation.resolve(
+                read: { .init(input: input, output: rate) },
+                setInput: { input = $0; inputWrites.append($0); return true },
+                setOutput: { _ in XCTFail("Physical output must retain its current rate"); return false },
+                pause: {}
+            )
+            XCTAssertEqual(try? result.get(), rate)
+            XCTAssertEqual(inputWrites, [rate])
+        }
+    }
+
+    func testExplicitRateRecoveryTakesPriorityOverCurrentOutputRate() {
+        var input = 44100.0
+        var output = 48000.0
+        let result = AudioSampleRateNegotiation.resolve(
+            preferredRate: 96000,
+            read: { .init(input: input, output: output) },
+            setInput: { input = $0; return true },
+            setOutput: { output = $0; return true },
+            pause: {}
+        )
+        XCTAssertEqual(try? result.get(), 96000)
+        XCTAssertEqual(input, 96000)
+        XCTAssertEqual(output, 96000)
+    }
+
+    func testRejectedOutputRateCanFallBackToFixedInputRate() {
+        var output = 44100.0
+        let result = AudioSampleRateNegotiation.resolve(
+            read: { .init(input: 48000, output: output) },
+            setInput: { _ in false },
+            setOutput: { output = $0; return true },
+            pause: {}
+        )
+        XCTAssertEqual(try? result.get(), 48000)
+        XCTAssertEqual(output, 48000)
+    }
+}
+
+final class SampleRateRestorationTests: XCTestCase {
+    func testDeviceQueryFailureIsNotTreatedAsDisconnection() {
+        let result = AudioSampleRateNegotiation.restore(
+            saved: ["output": 44100],
+            resolveDevice: { _ in throw AudioSampleRateNegotiation.Failure.invalidMetadata },
+            read: { _ in XCTFail("Failed device query must stop restoration"); return nil },
+            set: { _, _ in XCTFail("Failed device query must not write"); return false },
+            pause: {}
+        )
+        XCTAssertEqual(result.pending, ["output": 44100])
+        XCTAssertEqual(result.failures, ["output": .invalidMetadata])
+    }
+
+    func testPartialRestorationRetainsRejectedInvalidAndDisconnectedSnapshots() {
+        var rates: [AudioDeviceID: Double] = [1: 48000, 2: 48000]
+        let result = AudioSampleRateNegotiation.restore(
+            saved: ["restored": 44100, "rejected": 44100, "disconnected": 44100, "invalid": .nan],
+            resolveDevice: { ["restored": 1, "rejected": 2][$0] },
+            read: { rates[$0] },
+            set: { device, rate in
+                guard device == 1 else { return false }
+                rates[device] = rate
+                return true
+            },
+            pause: {}
+        )
+        XCTAssertNil(result.pending["restored"])
+        XCTAssertEqual(rates[1], 44100)
+        XCTAssertEqual(result.pending.count, 3)
+        XCTAssertEqual(result.failures, [
+            "rejected": .setterRejected, "disconnected": .deviceUnavailable, "invalid": .invalidMetadata
+        ])
+    }
+
+    func testAcceptedSetterWithStaleReadbackKeepsSnapshot() {
+        let result = AudioSampleRateNegotiation.restore(
+            saved: ["output": 44100],
+            resolveDevice: { _ in 1 },
+            read: { _ in 48000 },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(result.pending, ["output": 44100])
+        XCTAssertEqual(result.failures, ["output": .didNotSettle])
+    }
+
+    func testMissingOrInvalidReadbackCannotMutateDeviceOrClearSnapshot() {
+        for observed: Double? in [nil, .nan, .infinity, 0, -1] {
+            let result = AudioSampleRateNegotiation.restore(
+                saved: ["output": 44100],
+                resolveDevice: { _ in 1 },
+                read: { _ in observed },
+                set: { _, _ in XCTFail("Invalid metadata must not write"); return true },
+                pause: { XCTFail("Invalid metadata must fail immediately") }
+            )
+            XCTAssertEqual(result.pending, ["output": 44100])
+            XCTAssertEqual(result.failures, ["output": .invalidMetadata])
+        }
+    }
+
+    func testMatchingRateNeedsStableReadbackWithoutSetter() {
+        var reads = 0
+        let result = AudioSampleRateNegotiation.restore(
+            saved: ["output": 44100],
+            resolveDevice: { _ in 1 },
+            read: { _ in reads += 1; return 44100 },
+            set: { _, _ in XCTFail("Matching rate must not be written again"); return false },
+            pause: {}
+        )
+        XCTAssertTrue(result.pending.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertEqual(reads, 4)
+    }
+
+    func testReadFailureAfterSetterRetainsOriginalRate() {
+        var readable = true
+        let result = AudioSampleRateNegotiation.restore(
+            saved: ["output": 44100],
+            resolveDevice: { _ in 1 },
+            read: { _ in readable ? 48000 : nil },
+            set: { _, _ in readable = false; return true },
+            pause: {}
+        )
+        XCTAssertEqual(result.pending, ["output": 44100])
+        XCTAssertEqual(result.failures, ["output": .invalidMetadata])
+    }
+
+    func testDisconnectedDeviceCanBeRestoredAfterReturningWithNewID() {
+        let deferred = AudioSampleRateNegotiation.restore(
+            saved: ["output": 44100], resolveDevice: { _ in nil },
+            read: { _ in XCTFail("Disconnected device must not be read"); return nil },
+            set: { _, _ in XCTFail("Disconnected device must not be written"); return false }, pause: {}
+        )
+        XCTAssertEqual(deferred.pending, ["output": 44100])
+        var rate = 48000.0
+        let restored = AudioSampleRateNegotiation.restore(
+            saved: deferred.pending, resolveDevice: { _ in 99 },
+            read: { device in XCTAssertEqual(device, 99); return rate },
+            set: { device, value in XCTAssertEqual(device, 99); rate = value; return true }, pause: {}
+        )
+        XCTAssertTrue(restored.pending.isEmpty)
+        XCTAssertTrue(restored.failures.isEmpty)
+        XCTAssertEqual(rate, 44100)
+    }
+}
+
+final class NativeRoutingPreparationTests: XCTestCase {
+    func testFailedPreparationBlocksNativeAndAutomaticFallback() {
+        for preference in [AudioRoutingBackendPreference.native, .automatic] {
+            var preparations = 0
+            XCTAssertFalse(AudioRoutingStartPolicy.start(
+                preference: preference, persistEnabledStateOnFailure: true,
+                prepareNative: { preparations += 1; return false },
+                native: { _ in XCTFail("Native cannot start after failed cleanup or restoration"); return true },
+                blackHole: { _ in XCTFail("Failed handoff must not force BlackHole again"); return true },
+                onFallback: { XCTFail("Preparation failure must remain observable") }
+            ))
+            XCTAssertEqual(preparations, 1)
+        }
+    }
+
+    func testBlackHoleRecoveryDoesNotRunNativePreparation() {
+        XCTAssertTrue(AudioRoutingStartPolicy.start(
+            preference: .blackHole, persistEnabledStateOnFailure: false,
+            prepareNative: { XCTFail("BlackHole recovery must retain the requested sample rate"); return false },
+            native: { _ in XCTFail("Native must not start"); return false },
+            blackHole: { _ in true }, onFallback: { XCTFail("No fallback requested") }
+        ))
+    }
+
+    func testPreparationPrecedesNativeAndOrdinaryStartupFailureStillFallsBack() {
+        var events: [String] = []
+        XCTAssertTrue(AudioRoutingStartPolicy.start(
+            preference: .automatic, persistEnabledStateOnFailure: true,
+            prepareNative: { events.append("prepare"); return true },
+            native: { persist in XCTAssertFalse(persist); events.append("native"); return false },
+            blackHole: { persist in XCTAssertTrue(persist); events.append("blackHole"); return true },
+            onFallback: { events.append("fallback") }
+        ))
+        XCTAssertEqual(events, ["prepare", "native", "fallback", "blackHole"])
     }
 }
 

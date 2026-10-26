@@ -33,8 +33,10 @@ class CoreAudioSetupTests(unittest.TestCase):
         source = (root / "SystemEQ for Mac/Audio/CoreAudioEngine.swift").read_text()
         fixture = cls.fixture()
         for marker, signature in (
+            ("__BUFFER_NEGOTIATION__", "enum AudioBufferSizeNegotiation {"),
             ("__SETUP_METHOD__", "    public func setup("),
-            ("__CLEANUP_METHOD__", "    private func cleanup() {"),
+            ("__CLEANUP_METHOD__", "    private func cleanup() -> Bool {"),
+            ("__DISPOSE_UNIT_METHOD__", "    private func disposeAudioUnit(_ unit: AudioUnit) -> Bool {"),
         ):
             start = source.index(signature)
             cursor = source.index("{", start)
@@ -103,6 +105,7 @@ class CoreAudioSetupTests(unittest.TestCase):
         return r'''import Foundation
 
 typealias AudioDeviceID = UInt32
+__BUFFER_NEGOTIATION__
 typealias AudioUnit = Int
 let noErr: Int32 = 0
 let kAudioFormatLinearPCM: UInt32 = 1
@@ -277,6 +280,7 @@ class Engine {
     func releaseFixture() { cleanup() }
 __SETUP_METHOD__
 __CLEANUP_METHOD__
+__DISPOSE_UNIT_METHOD__
 }
 let status = Int32(CommandLine.arguments[1])!
 injectedStatus = status
@@ -709,6 +713,9 @@ class RoutingWakeLifecycleTests(unittest.TestCase):
     def test_actual_wake_start_failure_preserves_intent_without_false_running(self):
         self.run_scenario("wake-failure")
 
+    def test_failed_resource_release_does_not_restore_device_rates(self):
+        self.run_scenario("release-failure")
+
     TEMPLATE = r'''import Foundation
 
 typealias AudioDeviceID = UInt32
@@ -739,7 +746,9 @@ final class CoreAudioEngine {
     var currentInputDeviceID: AudioDeviceID = 1
     var currentOutputDeviceID: AudioDeviceID = 2
     var rateRestores = 0
+    var resourceReleaseSucceeds = true
     func stop() { isRunning = false }
+    func releaseDeviceResources() -> Bool { stop(); return resourceReleaseSucceeds }
     func setEnabled(_ enabled: Bool) { isEnabled = enabled }
     func restoreDeviceSampleRates() { rateRestores += 1 }
 }
@@ -902,6 +911,11 @@ __DECLARATIONS__
             router.topology()
             expect(router.starts.isEmpty && !router.wakeRecovery.isSuspended, "Inactive sleep created restart intent")
             expect(core.rateRestores >= baselineRestores, "Unexpected sample-rate state")
+        case "release-failure":
+            core.resourceReleaseSucceeds = false
+            router.disableEQRouting()
+            expect(core.rateRestores == 0, "Failed resource release restored sample rates")
+            expect(!core.isRunning && !core.isEnabled, "Disable retained active processing")
         case "wake-failure":
             router.handleSystemEvent(.willSleep)
             router.hardwareReady = false

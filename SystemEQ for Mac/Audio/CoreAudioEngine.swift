@@ -38,6 +38,7 @@ enum AudioSampleRateNegotiation {
         case invalidMetadata
         case setterRejected
         case didNotSettle
+        case deviceUnavailable
     }
 
     static func originalRate(
@@ -74,7 +75,7 @@ enum AudioSampleRateNegotiation {
         pause: () -> Void
     ) -> Result<Double, Failure> {
         guard let initial = read(), initial.isValid else { return .failure(.invalidMetadata) }
-        let candidates = [preferredRate, 48000, 44100, initial.output, initial.input].compactMap(\.self)
+        let candidates = [preferredRate, initial.output, initial.input, 48000, 44100].compactMap(\.self)
         var tried: Set<Double> = []
         var failure = Failure.setterRejected
         for rate in candidates where rate.isFinite && rate > 0 && tried.insert(rate).inserted {
@@ -92,6 +93,92 @@ enum AudioSampleRateNegotiation {
             }
         }
         return .failure(failure)
+    }
+
+    static func restore(
+        saved: [String: Double],
+        resolveDevice: (String) throws -> AudioDeviceID?,
+        read: (AudioDeviceID) -> Double?,
+        set: (AudioDeviceID, Double) -> Bool,
+        pause: () -> Void
+    ) -> (pending: [String: Double], failures: [String: Failure]) {
+        var pending = saved
+        var failures: [String: Failure] = [:]
+        for uid in saved.keys.sorted() {
+            guard let rate = saved[uid], rate.isFinite, rate > 0 else {
+                failures[uid] = .invalidMetadata
+                continue
+            }
+            let device: AudioDeviceID
+            do {
+                guard let resolved = try resolveDevice(uid) else {
+                    failures[uid] = .deviceUnavailable
+                    continue
+                }
+                device = resolved
+            } catch {
+                failures[uid] = .invalidMetadata
+                continue
+            }
+            guard let observed = read(device), observed.isFinite, observed > 0 else {
+                failures[uid] = .invalidMetadata
+                continue
+            }
+            guard abs(observed - rate) < 1 || set(device, rate) else {
+                failures[uid] = .setterRejected
+                continue
+            }
+            switch waitForRate(rate, read: {
+                read(device).map { Rates(input: $0, output: $0) }
+            }, pause: pause) {
+            case .success:
+                pending.removeValue(forKey: uid)
+            case let .failure(reason):
+                failures[uid] = reason
+            }
+        }
+        return (pending, failures)
+    }
+}
+
+enum AudioBufferSizeNegotiation {
+    struct Configuration: Equatable {
+        let inputFrames: UInt32
+        let outputFrames: UInt32
+        let inputRequestConfirmed: Bool
+        let outputRequestConfirmed: Bool
+    }
+
+    static func resolve(
+        inputDevice: AudioDeviceID,
+        outputDevice: AudioDeviceID,
+        read: (AudioDeviceID) -> UInt32?,
+        set: (AudioDeviceID, UInt32) -> Bool
+    ) -> Configuration? {
+        var inputRequest: UInt32 = 256
+        var outputRequest: UInt32 = 256
+        var inputAccepted = set(inputDevice, inputRequest)
+        var outputAccepted = set(outputDevice, outputRequest)
+        let preferredInputFrames = read(inputDevice)
+        let preferredOutputFrames = read(outputDevice)
+
+        if !inputAccepted || preferredInputFrames != inputRequest {
+            inputRequest = 512
+            inputAccepted = set(inputDevice, inputRequest)
+        }
+        if !outputAccepted || preferredOutputFrames != outputRequest {
+            outputRequest = 512
+            outputAccepted = set(outputDevice, outputRequest)
+        }
+
+        guard let inputFrames = read(inputDevice), inputFrames > 0,
+              let outputFrames = read(outputDevice), outputFrames > 0 else { return nil }
+        return Configuration(
+            inputFrames: inputFrames,
+            outputFrames: outputFrames,
+            inputRequestConfirmed: inputAccepted && inputFrames == inputRequest,
+            outputRequestConfirmed: outputAccepted && outputFrames == outputRequest
+        )
     }
 }
 
@@ -552,7 +639,7 @@ public final class CoreAudioEngine: ObservableObject {
         return uid.takeRetainedValue() as String
     }
 
-    private func findDeviceID(uid: String) -> AudioDeviceID? {
+    private func findDeviceID(uid: String) throws -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -565,8 +652,11 @@ public final class CoreAudioEngine: ObservableObject {
             0,
             nil,
             &size
-        ) == noErr else { return nil }
+        ) == noErr, size > 0, Int(size) % MemoryLayout<AudioDeviceID>.size == 0 else {
+            throw AudioSampleRateNegotiation.Failure.invalidMetadata
+        }
 
+        let expectedSize = size
         var deviceIDs = [AudioDeviceID](
             repeating: 0,
             count: Int(size) / MemoryLayout<AudioDeviceID>.size
@@ -578,8 +668,16 @@ public final class CoreAudioEngine: ObservableObject {
             nil,
             &size,
             &deviceIDs
-        ) == noErr else { return nil }
-        return deviceIDs.first { getDeviceUID($0) == uid }
+        ) == noErr, size == expectedSize else {
+            throw AudioSampleRateNegotiation.Failure.invalidMetadata
+        }
+        for deviceID in deviceIDs {
+            guard let observedUID = getDeviceUID(deviceID), !observedUID.isEmpty else {
+                throw AudioSampleRateNegotiation.Failure.invalidMetadata
+            }
+            if observedUID == uid { return deviceID }
+        }
+        return nil
     }
 
     /// One-shot log of buffer frame size + allowed range at setup.
@@ -613,9 +711,6 @@ public final class CoreAudioEngine: ObservableObject {
         )
     }
 
-    /// Set I/O buffer frame size on a device. Mismatched sizes between input
-    /// and output units are a common cause of HALC overload warnings in dual-I/O
-    /// AUHAL setups because the scheduler can't align their deadlines.
     private func deviceBufferFrameSize(_ deviceID: AudioDeviceID) -> UInt32? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyBufferFrameSize,
@@ -624,7 +719,8 @@ public final class CoreAudioEngine: ObservableObject {
         )
         var frames: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &frames) == noErr else { return nil }
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &frames) == noErr,
+              size == MemoryLayout<UInt32>.size, frames > 0 else { return nil }
         return frames
     }
 
@@ -675,37 +771,35 @@ public final class CoreAudioEngine: ObservableObject {
         return true
     }
 
-    /// Restores every device we changed back to its captured nominal rate. Call
-    /// when EQ routing is disabled so devices aren't left permanently forced to 48k.
-    /// Safe to call when the engine is stopped (no active stream to glitch).
-    ///
-    /// Main-thread only: `originalDeviceSampleRates` is an unsynchronized dictionary
-    /// shared with `setup()`/`captureOriginalSampleRate`, which also run on main.
-    /// Limitation: a crash/force-quit skips this, leaving devices at 48k; the next
-    /// launch would then capture 48k as the "original". Acceptable — no persisted state.
-    public func restoreDeviceSampleRates() {
-        var restoredUIDs: [String] = []
-        for (uid, rate) in originalDeviceSampleRates {
-            guard rate.isFinite, rate > 0 else {
-                DiagnosticEventStore.shared.record("engine.restoreRate.failed", details: ["reason": "invalidMetadata"])
-                continue
-            }
-            guard let deviceID = findDeviceID(uid: uid),
-                  setDeviceSampleRate(deviceID, rate: rate) else { continue }
-            let result = AudioSampleRateNegotiation.waitForRate(rate, read: {
-                guard let observed = self.getDeviceSampleRate(deviceID) else { return nil }
-                return AudioSampleRateNegotiation.Rates(input: observed, output: observed)
-            }, pause: { Thread.sleep(forTimeInterval: 0.01) })
-            if case .success = result {
-                restoredUIDs.append(uid)
-            } else {
-                DiagnosticEventStore.shared.record("engine.restoreRate.failed")
-            }
+    @discardableResult
+    public func restoreDeviceSampleRates(requiredDeviceUID: String? = nil) -> Bool {
+        guard !isRunning, inputUnit == nil, outputUnit == nil else {
+            DiagnosticEventStore.shared.record("engine.restoreRate.failed", details: ["reason": "activeUnits"])
+            return false
         }
-        for uid in restoredUIDs {
-            originalDeviceSampleRates.removeValue(forKey: uid)
+        let result = AudioSampleRateNegotiation.restore(
+            saved: originalDeviceSampleRates,
+            resolveDevice: { try self.findDeviceID(uid: $0) },
+            read: { self.getDeviceSampleRate($0) },
+            set: { self.setDeviceSampleRate($0, rate: $1) },
+            pause: { Thread.sleep(forTimeInterval: 0.01) }
+        )
+        originalDeviceSampleRates = result.pending
+        for reason in result.failures.values {
+            DiagnosticEventStore.shared.record(
+                reason == .deviceUnavailable ? "engine.restoreRate.deferred" : "engine.restoreRate.failed",
+                details: ["reason": String(describing: reason)]
+            )
         }
         persistOriginalDeviceSampleRates()
+        return result.failures.allSatisfy { uid, reason in
+            reason == .deviceUnavailable && uid != requiredDeviceUID
+        }
+    }
+
+    func releaseDeviceResources() -> Bool {
+        stop()
+        return cleanup()
     }
 
     private func persistOriginalDeviceSampleRates() {
@@ -767,18 +861,20 @@ public final class CoreAudioEngine: ObservableObject {
         }
 
         // Cleanup any existing units/buffers
-        cleanup()
+        guard cleanup() else {
+            recordSetupFailure("cleanup")
+            return
+        }
         var setupSucceeded = false
         defer {
             if !setupSucceeded {
                 DiagnosticEventStore.shared.record("engine.setup.failed")
-                cleanup()
-                restoreDeviceSampleRates()
+                if cleanup() {
+                    restoreDeviceSampleRates()
+                }
             }
         }
 
-        // Remember each device's nominal rate the first time we touch it, so we can
-        // put it back when EQ is turned off (we force 48k below).
         guard captureOriginalSampleRate(outputDevice), captureOriginalSampleRate(inputDevice) else {
             recordSetupFailure("originalSampleRates")
             return
@@ -810,25 +906,31 @@ public final class CoreAudioEngine: ObservableObject {
         )
         dlog("📡 Final sample rates: input=\(finalInRate)Hz, output=\(finalOutRate)Hz", category: .engine)
 
-        // Force identical buffer sizes on both devices so their I/O deadlines
-        // align. Without this, HALC can report "skipping cycle due to overload"
-        // during startup until the two IOProcs converge on matching sizes.
-        let inputBufferSet = setDeviceBufferFrameSize(inputDevice, frames: 256)
-        let outputBufferSet = setDeviceBufferFrameSize(outputDevice, frames: 256)
-        if !inputBufferSet || !outputBufferSet ||
-            deviceBufferFrameSize(inputDevice) != 256 || deviceBufferFrameSize(outputDevice) != 256 {
-            setDeviceBufferFrameSize(inputDevice, frames: 512)
-            setDeviceBufferFrameSize(outputDevice, frames: 512)
+        guard let bufferConfiguration = AudioBufferSizeNegotiation.resolve(
+            inputDevice: inputDevice,
+            outputDevice: outputDevice,
+            read: { self.deviceBufferFrameSize($0) },
+            set: { self.setDeviceBufferFrameSize($0, frames: $1) }
+        ) else {
+            recordSetupFailure("bufferFrameSizes")
+            dlog("Could not confirm device buffer frame sizes", level: .error, category: .engine)
+            return
         }
-        let actualInputBufferFrames = deviceBufferFrameSize(inputDevice)
-        let actualOutputBufferFrames = deviceBufferFrameSize(outputDevice)
-        if let inFrames = actualInputBufferFrames, let outFrames = actualOutputBufferFrames, inFrames != outFrames {
+        let actualInputBufferFrames = bufferConfiguration.inputFrames
+        let actualOutputBufferFrames = bufferConfiguration.outputFrames
+        DiagnosticEventStore.shared.record("engine.setup.buffers", details: [
+            "inputFrames": "\(actualInputBufferFrames)",
+            "outputFrames": "\(actualOutputBufferFrames)",
+            "inputRequestConfirmed": "\(bufferConfiguration.inputRequestConfirmed)",
+            "outputRequestConfirmed": "\(bufferConfiguration.outputRequestConfirmed)"
+        ])
+        if actualInputBufferFrames != actualOutputBufferFrames {
             DiagnosticEventStore.shared.record("engine.setup.bufferMismatch", details: [
-                "inputFrames": "\(inFrames)",
-                "outputFrames": "\(outFrames)"
+                "inputFrames": "\(actualInputBufferFrames)",
+                "outputFrames": "\(actualOutputBufferFrames)"
             ])
             dlog(
-                "ℹ️ Buffer size mismatch: input=\(inFrames), output=\(outFrames). SPSCRingBuffer adapts.",
+                "ℹ️ Buffer size mismatch: input=\(actualInputBufferFrames), output=\(actualOutputBufferFrames). SPSCRingBuffer adapts.",
                 category: .engine
             )
         }
@@ -1633,21 +1735,18 @@ public final class CoreAudioEngine: ObservableObject {
     /// safe to call again on every device re-setup.
     private let cleanupLock = NSLock()
 
-    private func cleanup() {
+    @discardableResult
+    private func cleanup() -> Bool {
         cleanupLock.lock()
         defer { cleanupLock.unlock() }
         isSetupComplete = false
 
         if let iu = inputUnit {
-            AudioOutputUnitStop(iu)
-            AudioUnitUninitialize(iu)
-            AudioComponentInstanceDispose(iu)
+            guard disposeAudioUnit(iu) else { return false }
             inputUnit = nil
         }
         if let ou = outputUnit {
-            AudioOutputUnitStop(ou)
-            AudioUnitUninitialize(ou)
-            AudioComponentInstanceDispose(ou)
+            guard disposeAudioUnit(ou) else { return false }
             outputUnit = nil
         }
         if let abl = inputABL, let ablPtr = inputBufferList {
@@ -1678,6 +1777,25 @@ public final class CoreAudioEngine: ObservableObject {
         ringBuffer.deallocate()
 
         dlog("✅ CoreAudioEngine: Cleanup complete (including ring buffers)", category: .engine)
+        return true
+    }
+
+    private func disposeAudioUnit(_ unit: AudioUnit) -> Bool {
+        for (step, operation) in [
+            ("stop", { AudioOutputUnitStop(unit) }),
+            ("uninitialize", { AudioUnitUninitialize(unit) }),
+            ("dispose", { AudioComponentInstanceDispose(unit) })
+        ] {
+            let status = operation()
+            guard status == noErr else {
+                DiagnosticEventStore.shared.record(
+                    "engine.cleanup.failed", details: ["step": step, "status": "\(status)"]
+                )
+                dlog("Audio unit cleanup failed at \(step): \(status)", level: .error, category: .engine)
+                return false
+            }
+        }
+        return true
     }
 
     // MARK: - Buffer Management
