@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "total": 2481,
+  "dmg": 2380,
+  "zip": 101,
+  "package_assets": 42,
+  "releases": 21,
+  "updated_at": "2026-10-31T13:20:05+00:00",
+  "source": "https://github.com/denzam/SystemEQ-for-Mac/releases",
+  "definition": "Official SystemEQ DMG and ZIP downloads, including updates and repeat downloads; not unique users or installations."
+}
