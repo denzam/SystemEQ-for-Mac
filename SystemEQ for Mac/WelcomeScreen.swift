@@ -243,7 +243,7 @@ public struct WelcomeScreen: View {
                             Text(localization.localized(.audioBackendNative))
                                 .fontWeight(.medium)
                         }
-                        Text(localization.localized(.nativeDriverDesc))
+                        Text(localization.localized(.blackHoleOptionalDesc))
                             .font(AppTypography.label)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -258,11 +258,6 @@ public struct WelcomeScreen: View {
                                 .foregroundColor(.orange)
                             Text(localization.localized(.driverNotFound))
                         }
-
-                        Button(localization.localized(.downloadDriver)) {
-                            BlackHoleInstaller.openDirectDownload()
-                        }
-                        .buttonStyle(.borderedProminent)
 
                         Text(localization.localized(.driverInstructions))
                             .font(AppTypography.label)
@@ -279,6 +274,11 @@ public struct WelcomeScreen: View {
                     .padding()
                     .background(Color.orange.opacity(0.1))
                     .cornerRadius(8)
+                }
+
+                if let url = URL(string: AppConstants.URLs.blackHoleWebsite) {
+                    Link(localization.localized(.downloadDriver), destination: url)
+                        .buttonStyle(.bordered)
                 }
             }
 

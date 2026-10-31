@@ -626,6 +626,7 @@ public enum LocalizedString: String, CaseIterable {
     case equalizerCurve
     case equalizerFlat
     case nativeDriverDesc
+    case blackHoleOptionalDesc
     case nativePermissionDesc
     case nativePermissionInstructions
     case nativeUnavailable
