@@ -183,7 +183,7 @@ jobs:
         run: |
           mkdir -p build/dmg_content
           ditto "$NOTARIZED_APP" "build/dmg_content/SystemEQ for Mac.app"
-          cp "dmg-assets/README - HOW TO OPEN.txt" build/dmg_content/
+          cp "dmg-assets/README - HOW TO OPEN.txt" build/dmg_content/Installation.txt
 
           create-dmg \
             --volname "SystemEQ for Mac" \
@@ -191,9 +191,9 @@ jobs:
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 96 \
-            --icon "SystemEQ for Mac.app" 160 230 \
-            --icon "README - HOW TO OPEN.txt" 300 320 \
-            --app-drop-link 440 230 \
+            --icon "SystemEQ for Mac.app" 150 190 \
+            --icon "Installation.txt" 300 295 \
+            --app-drop-link 450 190 \
             --hide-extension "SystemEQ for Mac.app" \
             --no-internet-enable \
             "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \

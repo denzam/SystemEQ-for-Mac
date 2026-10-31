@@ -35,12 +35,11 @@ func draw(
 let white = NSColor.white
 let dim = NSColor(white: 0.75, alpha: 1.0)
 let accent = NSColor(calibratedRed: 0.40, green: 0.70, blue: 1.0, alpha: 1.0)
-let warn = NSColor(calibratedRed: 1.0, green: 0.75, blue: 0.30, alpha: 1.0)
 
 draw("SystemEQ for Mac", at: NSPoint(x: 30, y: 360), size: 22, color: white, bold: true)
 draw("Drag the app to Applications -->", at: NSPoint(x: 30, y: 330), size: 13, color: dim)
 
-let arrowY: CGFloat = 250
+let arrowY: CGFloat = 210
 let arrow = NSBezierPath()
 arrow.move(to: NSPoint(x: 235, y: arrowY))
 arrow.line(to: NSPoint(x: 380, y: arrowY))
@@ -50,21 +49,6 @@ arrow.line(to: NSPoint(x: 365, y: arrowY - 12))
 accent.setStroke()
 arrow.lineWidth = 3
 arrow.stroke()
-
-draw("AFTER INSTALL — first launch:", at: NSPoint(x: 30, y: 130), size: 12, color: warn, bold: true)
-draw("Open the app from Applications", at: NSPoint(x: 30, y: 108), size: 11, color: white)
-draw(
-    "Allow the requested Microphone or System Audio Recording permission",
-    at: NSPoint(x: 30, y: 90),
-    size: 11,
-    color: white
-)
-draw(
-    "Read \"README - HOW TO OPEN.txt\" inside this window for details (EN/IT/UK)",
-    at: NSPoint(x: 30, y: 65),
-    size: 10,
-    color: dim
-)
 
 draw(
     "Developer ID signed and notarized. github.com/denzam/SystemEQ-for-Mac",
