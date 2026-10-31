@@ -41,8 +41,6 @@ struct SettingsView: View {
                 // EQ Startup Behavior Section
                 eqStartupSection
 
-                if nativeVolume.isAvailable { nativeVolumeSection }
-
                 // General Section
                 generalSection
 
@@ -343,25 +341,6 @@ struct SettingsView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
-    }
-
-    private var nativeVolumeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(localization.localized(.nativeVolumeTitle))
-                .font(AppTypography.heading2)
-            if nativeVolume.keyboardEnabled {
-                Text(localization.localized(.nativeVolumeKeysActive))
-                    .font(AppTypography.bodySmall)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Button(localization.localized(.nativeVolumeAllowKeys)) {
-                    nativeVolume.requestKeyboardAccess()
-                }
-            }
-        }
-        .padding(AppSpacing.xl)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var appUpdateSection: some View {

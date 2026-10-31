@@ -8,6 +8,7 @@ struct RoutingView: View {
     @StateObject private var audioRouter = AudioRouter.shared
     @ObservedObject private var audioEngine = AudioEngine.shared
     @ObservedObject private var core = CoreAudioEngine.shared
+    @ObservedObject private var nativeVolume = NativeVolumeControl.shared
     @StateObject private var localization = LocalizationManager.shared
 
     @State private var selectedTab: RoutingTab = .devices
@@ -87,6 +88,8 @@ struct RoutingView: View {
 
             audioBackendSection
 
+            if nativeVolume.isAvailable { nativeVolumeSection }
+
             // Output Device Selection
             deviceSelectionCard(
                 title: localization.localized(.outputDevice),
@@ -101,6 +104,25 @@ struct RoutingView: View {
             audioCaptureSection
         }
         .padding(AppSpacing.xl)
+    }
+
+    private var nativeVolumeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(localization.localized(.nativeVolumeTitle))
+                .font(AppTypography.heading2)
+            if nativeVolume.keyboardEnabled {
+                Text(localization.localized(.nativeVolumeKeysActive))
+                    .font(AppTypography.bodySmall)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Button(localization.localized(.nativeVolumeAllowKeys)) {
+                    nativeVolume.requestKeyboardAccess()
+                }
+            }
+        }
+        .padding(AppSpacing.xl)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var audioBackendSection: some View {
