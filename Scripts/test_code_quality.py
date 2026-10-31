@@ -302,5 +302,76 @@ class QualityGateTests(unittest.TestCase):
                 self.assertNotIn("All checks passed", result.stdout)
 
 
+class PinnedSwiftFormatTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="systemeq formatter fixture ")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.paths = self.root / "github-path"
+        self.calls = self.root / "calls"
+        workflow = (Path(__file__).resolve().parent.parent / ".github/workflows/code-quality.yml").read_text()
+        section = workflow.split("      - name: Install SwiftFormat\n", 1)[1].split("\n      - name:", 1)[0]
+        lines = section.split("        run: |\n", 1)[1].splitlines()
+        self.command = "\n".join(line[10:] for line in lines) + "\n"
+        stub = r'''import os,sys
+from pathlib import Path
+name=Path(sys.argv[0]).name
+with Path(os.environ['CALLS']).open('a') as stream: stream.write(name+'\n')
+mode=os.environ['MODE']
+if mode==name: sys.exit(17)
+if name=='curl':
+    Path(sys.argv[sys.argv.index('--output')+1]).write_bytes(b'fixture')
+elif name=='shasum':
+    sys.stdin.read()
+elif name=='unzip':
+    folder=Path(sys.argv[sys.argv.index('-d')+1])
+    folder.mkdir()
+    binary=folder/'swiftformat'
+    value='0.64.3' if mode=='version' else '0.63.1'
+    ending='exit 17\n' if mode=='version-error' else ''
+    binary.write_text('#!/bin/sh\necho '+value+'\n'+ending)
+    binary.chmod(0o755)
+'''
+        for name in ("curl", "shasum", "unzip"):
+            tool = self.bin / name
+            tool.write_text(f"#!{sys.executable}\n" + stub)
+            tool.chmod(0o755)
+
+    def invoke(self, mode="healthy"):
+        env = dict(os.environ, PATH=str(self.bin) + ":/usr/bin:/bin", RUNNER_TEMP=str(self.root),
+                   GITHUB_PATH=str(self.paths), CALLS=str(self.calls), MODE=mode)
+        return subprocess.run(["/bin/bash", "-c", self.command], env=env, capture_output=True, text=True, timeout=20)
+
+    def test_verified_formatter_is_published_to_job_path(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.paths.read_text(), str(self.root / "systemeq-swiftformat-0.63.1/bin") + "\n")
+        self.assertEqual(self.calls.read_text().splitlines(), ["curl", "shasum", "unzip"])
+
+    def test_download_failure_never_reaches_checksum_or_path(self):
+        self.assertNotEqual(self.invoke("curl").returncode, 0)
+        self.assertEqual(self.calls.read_text().splitlines(), ["curl"])
+        self.assertFalse(self.paths.exists())
+
+    def test_checksum_failure_never_extracts_or_publishes(self):
+        self.assertNotEqual(self.invoke("shasum").returncode, 0)
+        self.assertEqual(self.calls.read_text().splitlines(), ["curl", "shasum"])
+        self.assertFalse(self.paths.exists())
+
+    def test_extraction_failure_never_publishes(self):
+        self.assertNotEqual(self.invoke("unzip").returncode, 0)
+        self.assertFalse(self.paths.exists())
+
+    def test_unexpected_binary_version_never_publishes(self):
+        self.assertNotEqual(self.invoke("version").returncode, 0)
+        self.assertFalse(self.paths.exists())
+
+    def test_failed_version_command_with_valid_output_never_publishes(self):
+        self.assertNotEqual(self.invoke("version-error").returncode, 0)
+        self.assertFalse(self.paths.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

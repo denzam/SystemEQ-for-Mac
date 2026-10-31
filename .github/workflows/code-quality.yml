@@ -72,7 +72,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       
       - name: Install SwiftFormat
-        run: brew install swiftformat
+        run: |
+          set -euo pipefail
+          SWIFTFORMAT_DIR="$RUNNER_TEMP/systemeq-swiftformat-0.63.1"
+          mkdir -p "$SWIFTFORMAT_DIR"
+          curl --fail --location --retry 3 \
+            --output "$SWIFTFORMAT_DIR/swiftformat.zip" \
+            https://github.com/nicklockwood/SwiftFormat/releases/download/0.63.1/swiftformat.zip
+          printf '%s  %s\n' '385ef1a263ba28685157b98c5536b9c9105e124518f28b7ef8a2bee4b167eaeb' "$SWIFTFORMAT_DIR/swiftformat.zip" | shasum -a 256 -c -
+          unzip -q "$SWIFTFORMAT_DIR/swiftformat.zip" -d "$SWIFTFORMAT_DIR/bin"
+          SWIFTFORMAT_VERSION="$("$SWIFTFORMAT_DIR/bin/swiftformat" --version)"
+          test "$SWIFTFORMAT_VERSION" = "0.63.1"
+          echo "$SWIFTFORMAT_DIR/bin" >> "$GITHUB_PATH"
       
       - name: Check formatting
         run: |
