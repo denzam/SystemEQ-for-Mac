@@ -137,7 +137,7 @@ enum ItalianTranslations {
         .blackHoleOptionalDesc: "Su macOS 14.4 o successivo non serve alcun driver aggiuntivo. Puoi installare facoltativamente BlackHole 2ch per il motore audio di riserva.",
         .nativePermissionDesc: "La prima volta che attivi l’EQ, macOS richiede il permesso di registrare l’audio di sistema. Il permesso per il microfono è separato.",
         .nativePermissionInstructions: "Se l’accesso è stato negato, consenti a SystemEQ di registrare l’audio di sistema in Impostazioni di Sistema → Privacy e Sicurezza.",
-        .nativeUnavailable: "L’acquisizione nativa richiede macOS 14.4 o successivo. Seleziona BlackHole nelle Impostazioni per usare questo Mac.",
+        .nativeUnavailable: "L’acquisizione nativa richiede macOS 14.4 o successivo. Seleziona BlackHole in Routing audio per usare questo Mac.",
         .privacyPoint1: "Ci connettiamo al driver virtuale BlackHole.",
         .privacyPoint2: "Elaboriamo musica/audio di sistema.",
         .privacyPoint3: "NON registriamo il tuo microfono fisico.",
