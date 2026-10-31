@@ -36,6 +36,9 @@ struct CalibrationView: View {
 
     @State private var selectedTab: CalibrationTab = .equalLoudness
     @State private var currentProfile: CalibrationProfile?
+    @State private var recalibratingProfile: CalibrationProfile?
+    @State private var isSavingProfile = false
+    @State private var profileSaveFailed = false
     @State private var showNewProfileSheet = false
     @State private var showDeleteAlert = false
     @State private var profileToDelete: CalibrationProfile?
@@ -169,6 +172,23 @@ struct CalibrationView: View {
 
     private var equalLoudnessSection: some View {
         VStack(spacing: 24) {
+            if let profile = recalibratingProfile {
+                HStack {
+                    Label(localization.localized(.recalibrateProfile), systemImage: "arrow.clockwise")
+                    Text(profile.name).fontWeight(.semibold)
+                    Spacer()
+                    Button(localization.localized(.cancel)) {
+                        finishCalibration()
+                        recalibratingProfile = nil
+                        profileName = ""
+                        profileNotes = ""
+                        testBands = Array(repeating: 0, count: 31)
+                        currentTestBandIndex = 0
+                        isReferenceStep = true
+                        selectedTab = .profiles
+                    }
+                }
+            }
             // Info card
             infoCard
 
@@ -1142,6 +1162,13 @@ struct CalibrationView: View {
                 Button(localization.localized(.editProfile)) { currentProfile = profile }
                     .buttonStyle(BorderedButtonStyle())
 
+                if profile.type == .equalLoudness {
+                    Button(localization.localized(.recalibrateProfile)) {
+                        resumeCalibration(profile)
+                    }
+                    .buttonStyle(BorderedButtonStyle())
+                }
+
                 Button(action: {
                     profileToDelete = profile
                     showDeleteAlert = true
@@ -1342,18 +1369,23 @@ struct CalibrationView: View {
             HStack(spacing: 12) {
                 Button(localization.localized(.cancel)) {
                     showNewProfileSheet = false
-                    profileName = ""
-                    profileNotes = ""
                 }
                 .buttonStyle(BorderedButtonStyle())
 
                 Button(localization.localized(.save)) {
-                    saveProfile()
+                    Task { await saveProfile() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            if profileSaveFailed {
+                Text(localization.localized(.profileSaveFailed))
+                    .foregroundColor(.red)
+            }
+            if isSavingProfile { ProgressView().controlSize(.small) }
         }
+        .disabled(isSavingProfile)
+        .interactiveDismissDisabled(isSavingProfile)
         .padding(24)
         .frame(width: 400)
     }
@@ -1363,7 +1395,24 @@ struct CalibrationView: View {
     private func startCalibration() {
         // Don't change isReferenceStep - let user complete reference setup first
         currentTestBandIndex = 0
-        testBands = Array(repeating: 0.0, count: 31)
+        if recalibratingProfile == nil {
+            testBands = Array(repeating: 0.0, count: 31)
+        }
+    }
+
+    private func resumeCalibration(_ profile: CalibrationProfile) {
+        guard profile.isValid else { return }
+        finishCalibration()
+        recalibratingProfile = profile
+        selectedBandCount = profile.sourceBandMode == .tenBand ? .bands10 : .bands31
+        testBands = profile.bands
+        profileName = profile.name
+        profileNotes = profile.notes
+        currentTestBandIndex = 0
+        isReferenceStep = true
+        calibration.isReferenceSet = false
+        profileSaveFailed = false
+        selectedTab = .equalLoudness
     }
 
     private var calibrationStepIndices: [Int] {
@@ -1380,18 +1429,33 @@ struct CalibrationView: View {
         calibration.endCalibration(mode: selectedCalibrationMode)
     }
 
-    private func saveProfile() {
-        guard let profile = calibration.equalLoudnessProfile(name: profileName, bands: testBands, notes: profileNotes)
+    @MainActor
+    private func saveProfile() async {
+        guard !isSavingProfile else { return }
+        guard let profile = calibration.equalLoudnessProfile(
+            name: profileName, bands: testBands, notes: profileNotes,
+            sourceBandMode: selectedBandCount == .bands10 ? .tenBand : .thirtyOneBand,
+            replacing: recalibratingProfile
+        )
         else {
+            profileSaveFailed = true
             return
         }
-        calibration.profiles.append(profile)
-        calibration.updateProfile(profile)
+        isSavingProfile = true
+        defer { isSavingProfile = false }
+        if recalibratingProfile == nil { calibration.profiles.append(profile) }
+        guard await calibration.saveEditedProfile(profile) else {
+            if recalibratingProfile == nil { calibration.deleteProfile(profile) }
+            profileSaveFailed = true
+            return
+        }
         finishCalibration()
 
         showNewProfileSheet = false
         profileName = ""
         profileNotes = ""
+        recalibratingProfile = nil
+        profileSaveFailed = false
         selectedTab = .profiles
 
         // Reset for next calibration

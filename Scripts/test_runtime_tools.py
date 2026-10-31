@@ -1248,7 +1248,7 @@ class CalibrationSessionTests(unittest.TestCase):
             ("__ROOM_SAVE__", block(room, "    private func saveProfile() {")[0]),
             ("__ENGINE_METHODS__", "\n".join(block(engine, signature)[0] for signature in (
                 "    public func startCalibration(mode:", "    public func endCalibration(mode:",
-                "    func equalLoudnessProfile(name:",
+                "    func equalLoudnessProfile(",
             ))),
             ("__VIEW_METHODS__", "\n".join(block(view, signature)[0] for signature in (
                 "    private func finishCalibration()", "    private func saveProfile()",
@@ -1301,6 +1301,12 @@ class CalibrationSessionTests(unittest.TestCase):
     def test_invalid_profile_keeps_progress_until_close(self):
         self.check_session("invalid")
 
+    def test_failed_profile_write_keeps_progress_and_existing_data(self):
+        self.check_session("writeFailure")
+
+    def test_recalibration_updates_existing_identity_without_duplicate(self):
+        self.check_session("recalibrate")
+
     def test_repeated_close_is_idle_and_new_session_can_start(self):
         self.check_session("restart")
 
@@ -1316,6 +1322,8 @@ enum LogCategory { case calibration }
 func dlog(_ text: String, category: LogCategory) {}
 public enum CalibrationType: String, Codable { case equalLoudness, roomCorrection }
 public enum CalibrationMode { case clean, combined }
+public enum EQBandMode: String, Codable { case tenBand, thirtyOneBand }
+enum BandCount { case bands10, bands31 }
 __PROFILE__
 final class Core {
     var isEnabled = false
@@ -1335,9 +1343,20 @@ final class CalibrationEngine {
     var tonePlaying = false
     var comparisonMode = false
     var updates = 0
+    var saveSucceeds = true
     func stopTestTone() { tonePlaying = false }
     func stopComparisonMode() { comparisonMode = false }
-    @discardableResult func updateProfile(_ profile: CalibrationProfile) -> Bool { updates += 1; return true }
+    @discardableResult func updateProfile(_ profile: CalibrationProfile) -> Bool {
+        guard profile.isValid, let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return false }
+        updates += 1
+        profiles[index] = profile
+        return true
+    }
+    func saveEditedProfile(_ profile: CalibrationProfile) async -> Bool {
+        guard saveSucceeds else { return false }
+        return updateProfile(profile)
+    }
+    func deleteProfile(_ profile: CalibrationProfile) { profiles.removeAll { $0.id == profile.id } }
     __ENGINE_METHODS__
 }
 enum Tab { case equalLoudness, profiles }
@@ -1355,6 +1374,10 @@ final class RoomWizard {
 final class Wizard {
     let calibration = CalibrationEngine()
     var selectedCalibrationMode = CalibrationMode.clean
+    var selectedBandCount = BandCount.bands10
+    var recalibratingProfile: CalibrationProfile?
+    var isSavingProfile = false
+    var profileSaveFailed = false
     var profileName = "  Saved  "
     var profileNotes = "Notes"
     var testBands = [Float](repeating: 2, count: 31)
@@ -1362,7 +1385,7 @@ final class Wizard {
     var currentTestBandIndex = 0
     var showNewProfileSheet = false
     var selectedTab = Tab.equalLoudness
-    func save() { saveProfile() }
+    func save() async { await saveProfile() }
     func disappear() { __DISAPPEAR__ }
     func previous() { __PREVIOUS__ }
     func begin() { __CONTINUE__ }
@@ -1389,7 +1412,7 @@ for mode in [CalibrationMode.clean, .combined] {
         switch scenario {
         case "save", "restart":
             wizard.showNewProfileSheet = true
-            wizard.save()
+            await wizard.save()
             require(!engine.isCalibrating && core.isEnabled == enabled, "save did not restore session")
             require(!engine.tonePlaying && !engine.comparisonMode, "save left playback active")
             require(wizard.isReferenceStep && wizard.currentTestBandIndex == 0, "save did not reset step")
@@ -1441,12 +1464,44 @@ for mode in [CalibrationMode.clean, .combined] {
                 wizard.profileName = invalid == 0 ? " " : "Saved"
                 wizard.testBands = [Float](repeating: 2, count: invalid == 1 ? 30 : 31)
                 if invalid == 2 { wizard.testBands[0] = .nan }
-                wizard.save()
+                await wizard.save()
                 require(engine.isCalibrating && !wizard.isReferenceStep && wizard.showNewProfileSheet, "invalid save discarded progress")
                 require(engine.profiles.isEmpty && engine.updates == 0, "invalid profile saved")
             }
             wizard.disappear()
             require(!engine.isCalibrating && core.isEnabled == enabled, "invalid save close did not restore")
+        case "writeFailure":
+            let original = CalibrationProfile(name: "Original", type: .equalLoudness)
+            engine.profiles = [original]
+            engine.saveSucceeds = false
+            wizard.showNewProfileSheet = true
+            await wizard.save()
+            require(engine.profiles == [original], "failed new save changed original profiles")
+            require(wizard.profileSaveFailed && !wizard.isSavingProfile, "failed new save was not reported")
+            require(engine.isCalibrating && wizard.showNewProfileSheet, "failed new save discarded progress")
+            wizard.recalibratingProfile = original
+            await wizard.save()
+            require(engine.profiles == [original], "failed recalibration changed original profiles")
+            require(engine.isCalibrating && wizard.profileSaveFailed, "failed recalibration was not reported")
+            wizard.disappear()
+            require(core.isEnabled == enabled, "failed save close did not restore")
+        case "recalibrate":
+            let original = CalibrationProfile(name: "Original", type: .equalLoudness, overallGainDB: -5)
+            engine.profiles = [original]
+            wizard.recalibratingProfile = original
+            await wizard.save()
+            require(engine.profiles.count == 1 && engine.updates == 1, "recalibration duplicated profile")
+            require(engine.profiles.first?.id == original.id, "recalibration replaced identity")
+            require(engine.profiles.first?.createdAt == original.createdAt, "recalibration replaced date")
+            require(engine.profiles.first?.overallGainDB == -5, "recalibration lost overall level")
+            require(engine.profiles.first?.name == "Saved", "recalibration did not update name")
+            require(engine.profiles.first?.notes == "Notes", "recalibration did not update notes")
+            require(engine.profiles.first?.bands[0] == 2, "recalibration did not update bands")
+            require(engine.profiles.first?.bands[17] == 0, "recalibration changed reference")
+            require(engine.profiles.first?.sourceBandMode == .tenBand, "recalibration did not update mode")
+            require(!wizard.profileSaveFailed, "recalibration reported failure")
+            require(!engine.isCalibrating && core.isEnabled == enabled, "recalibration did not restore session")
+            require(wizard.recalibratingProfile == nil, "recalibration identity not cleared")
         case "close":
             for reference in [false, true] {
                 wizard.isReferenceStep = reference

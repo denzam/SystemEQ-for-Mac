@@ -269,6 +269,8 @@ enum UkrainianTranslations {
         .saveProfile: "Зберегти профіль",
         .profileName: "Назва профілю",
         .editProfile: "Переглянути / змінити профіль",
+        .recalibrateProfile: "Повторити калібрування",
+        .profileOverallLevel: "Рівень профілю",
         .profileNotes: "Нотатки (необов’язково)",
         .profileSaveFailed: "Не вдалося зберегти профіль. Перевірте значення й доступ до файлів; профіль міг бути видалений.",
         .showVisualizerWindow: "Показати вікно візуалізатора",

@@ -365,6 +365,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     fileprivate var preampGain: Float = 0.0
     fileprivate var outputBoostGain: Float = 0.0
+    private var calibrationPreampGain: Float = 0
 
     // Reusable buffer to avoid allocation in render callback
     fileprivate var inputBufferList: UnsafeMutablePointer<AudioBufferList>?
@@ -1365,12 +1366,18 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     /// Apply fixed-band EQ (10 bands)
-    public func applyFixedBandEQ(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
+    public func applyFixedBandEQ(
+        _ gains: [Float],
+        preamp: Float = 0.0,
+        outputBoost: Float = 0.0,
+        calibrationPreamp: Float = 0
+    ) {
         activeEQMode = .tenBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
         let outputBoost = Self.sanitizedOutputBoost(outputBoost)
         self.preampGain = preamp
+        calibrationPreampGain = calibrationPreamp.isFinite ? min(0, max(-20, calibrationPreamp)) : 0
         self.outputBoostGain = outputBoost
         self.eqGains = gains
 
@@ -1380,7 +1387,7 @@ public final class CoreAudioEngine: ObservableObject {
         let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
         filter.configure(
             bands: bands,
-            preamp: preamp,
+            preamp: preamp + calibrationPreampGain,
             outputBoost: outputBoost,
             sampleRate: Float(currentSampleRate)
         )
@@ -1388,12 +1395,18 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     /// Apply 31-band graphic EQ using parametric peaks
-    public func applyGraphicEQ31(_ gains: [Float], preamp: Float = 0.0, outputBoost: Float = 0.0) {
+    public func applyGraphicEQ31(
+        _ gains: [Float],
+        preamp: Float = 0.0,
+        outputBoost: Float = 0.0,
+        calibrationPreamp: Float = 0
+    ) {
         activeEQMode = .thirtyOneBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
         let outputBoost = Self.sanitizedOutputBoost(outputBoost)
         self.preampGain = preamp
+        calibrationPreampGain = calibrationPreamp.isFinite ? min(0, max(-20, calibrationPreamp)) : 0
         self.outputBoostGain = outputBoost
         self.eqGains = gains
 
@@ -1403,7 +1416,7 @@ public final class CoreAudioEngine: ObservableObject {
         let filter = BiquadFilterVDSP(sampleRate: Float(currentSampleRate))
         filter.configure(
             bands: bands,
-            preamp: preamp,
+            preamp: preamp + calibrationPreampGain,
             outputBoost: outputBoost,
             sampleRate: Float(currentSampleRate)
         )
@@ -1415,9 +1428,19 @@ public final class CoreAudioEngine: ObservableObject {
         currentSampleRate = sampleRate
         guard vdspFilter != nil else { return }
         if activeEQMode == .thirtyOneBand {
-            applyGraphicEQ31(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+            applyGraphicEQ31(
+                eqGains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationPreampGain
+            )
         } else {
-            applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+            applyFixedBandEQ(
+                eqGains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationPreampGain
+            )
         }
     }
 
@@ -1426,6 +1449,7 @@ public final class CoreAudioEngine: ObservableObject {
         activeEQMode = .tenBand
         self.vdspFilter = nil
         self.preampGain = 0.0
+        calibrationPreampGain = 0
         self.eqGains = Array(repeating: 0.0, count: 10)
         dlog("🎛️ EQ cleared", category: .engine)
     }
@@ -1970,9 +1994,19 @@ public final class CoreAudioEngine: ObservableObject {
     private func applyCurrentEQGains() {
         switch activeEQMode {
         case .tenBand:
-            applyFixedBandEQ(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+            applyFixedBandEQ(
+                eqGains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationPreampGain
+            )
         case .thirtyOneBand:
-            applyGraphicEQ31(eqGains, preamp: preampGain, outputBoost: outputBoostGain)
+            applyGraphicEQ31(
+                eqGains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationPreampGain
+            )
         }
     }
 

@@ -33,6 +33,8 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
     /// Metadata
     public var notes: String
     public var notchFilters: [NotchFilter]
+    public var sourceBandMode: EQBandMode?
+    public var overallGainDB: Float
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -42,11 +44,14 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         case bands
         case notes
         case notchFilters
+        case sourceBandMode
+        case overallGainDB
     }
 
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            bands.count == 31 && bands.allSatisfy(\.isFinite) && notchFilters.allSatisfy(\.isValid)
+            bands.count == 31 && bands.allSatisfy(\.isFinite) && notchFilters.allSatisfy(\.isValid) &&
+            overallGainDB.isFinite && (-20...0).contains(overallGainDB)
     }
 
     public init(
@@ -55,7 +60,9 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         type: CalibrationType,
         bands: [Float] = Array(repeating: 0.0, count: 31),
         notes: String = "",
-        notchFilters: [NotchFilter] = []
+        notchFilters: [NotchFilter] = [],
+        sourceBandMode: EQBandMode? = nil,
+        overallGainDB: Float = 0
     ) {
         self.id = id
         self.name = name
@@ -64,6 +71,8 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         self.bands = bands
         self.notes = notes
         self.notchFilters = notchFilters
+        self.sourceBandMode = sourceBandMode
+        self.overallGainDB = overallGainDB
     }
 
     public init(from decoder: Decoder) throws {
@@ -76,7 +85,11 @@ public struct CalibrationProfile: Codable, Identifiable, Hashable {
         notes = try container.decode(String.self, forKey: .notes)
         notchFilters = try container.contains(.notchFilters)
             ? container.decode([NotchFilter].self, forKey: .notchFilters) : []
-        guard notchFilters.allSatisfy(\.isValid) else {
+        sourceBandMode = try container.decodeIfPresent(EQBandMode.self, forKey: .sourceBandMode)
+        overallGainDB = try container.contains(.overallGainDB)
+            ? container.decode(Float.self, forKey: .overallGainDB) : 0
+        guard notchFilters.allSatisfy(\.isValid), overallGainDB.isFinite,
+              (-20...0).contains(overallGainDB) else {
             throw DecodingError.dataCorruptedError(
                 forKey: .notchFilters, in: container, debugDescription: "Invalid room notch filter parameters"
             )
@@ -91,11 +104,18 @@ struct CalibrationProfileDraft {
     var name: String
     var notes: String
     var bandInputs: [String]
+    var overallGainDB: Float
+
+    var visibleBandIndices: [Int] {
+        let frequencies = EQBandMode.thirtyOneBand.frequencies
+        return (original.sourceBandMode ?? .thirtyOneBand).frequencies.compactMap { frequencies.firstIndex(of: $0) }
+    }
 
     init(_ profile: CalibrationProfile, locale: Locale = .current) {
         original = profile
         name = profile.name
         notes = profile.notes
+        overallGainDB = profile.overallGainDB
         decimalSeparator = locale.decimalSeparator ?? "."
         originalBandInputs = profile.bands.map { $0.formatted(.number.locale(locale)) }
         bandInputs = originalBandInputs
@@ -108,6 +128,7 @@ struct CalibrationProfileDraft {
         var profile = original
         profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.notes = notes
+        profile.overallGainDB = overallGainDB
         for index in bandInputs.indices where bandInputs[index] != originalBandInputs[index] {
             let input = bandInputs[index].trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: decimalSeparator, with: ".")
@@ -173,6 +194,9 @@ public final class CalibrationEngine: ObservableObject {
     private var savedEQEnabled: Bool = false
     private var isCalibrating: Bool = false
     private var comparisonWorkItem: DispatchWorkItem?
+    private var comparisonSessionID: UInt64 = 0
+    private var playbackGeneration: UInt64 = 0
+    private var comparisonTestIsPlaying = false
 
     // MARK: - Test Tone Generator
 
@@ -297,7 +321,8 @@ public final class CalibrationEngine: ObservableObject {
         frequency: Double,
         duration: TimeInterval = 2.0,
         amplitude: Float = 0.3,
-        isReference: Bool = false
+        isReference: Bool = false,
+        volumeControlled: Bool = false
     ) {
         ensureAudioEngineSetup()
         guard let player = playerNode else { return }
@@ -323,7 +348,7 @@ public final class CalibrationEngine: ObservableObject {
         let angularFrequency = 2.0 * .pi * frequency / sampleRate
 
         for frame in 0..<Int(frameCount) {
-            let sample = Float(sin(angularFrequency * Double(frame))) * amplitude
+            let sample = Float(sin(angularFrequency * Double(frame))) * (volumeControlled ? 1 : amplitude)
 
             // Stereo
             buffer.floatChannelData?[0][frame] = sample
@@ -335,14 +360,17 @@ public final class CalibrationEngine: ObservableObject {
 
         testToneBuffer = buffer
 
+        playbackGeneration &+= 1
+        let generation = playbackGeneration
         player.stop()
-        player.volume = 1
+        player.volume = volumeControlled ? Self.normalizedAmplitude(amplitude) : 1
         isPlayingLoop = false
         player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: { [weak self] in
             DispatchQueue.main.async {
-                self?.isTestTonePlaying = false
+                guard let self, self.playbackGeneration == generation else { return }
+                self.isTestTonePlaying = false
                 if isReference {
-                    self?.isPlayingReference = false
+                    self.isPlayingReference = false
                 }
             }
         })
@@ -392,6 +420,8 @@ public final class CalibrationEngine: ObservableObject {
 
         testToneBuffer = buffer
 
+        playbackGeneration &+= 1
+        comparisonTestIsPlaying = false
         player.stop()
         player.volume = Self.normalizedAmplitude(amplitude)
 
@@ -424,7 +454,8 @@ public final class CalibrationEngine: ObservableObject {
         frequency: Double,
         duration: TimeInterval = 2.0,
         amplitude: Float = 0.3,
-        isReference: Bool = false
+        isReference: Bool = false,
+        volumeControlled: Bool = false
     ) {
         ensureAudioEngineSetup()
         guard let player = playerNode else { return }
@@ -442,18 +473,21 @@ public final class CalibrationEngine: ObservableObject {
         ) else { return }
 
         // Scale amplitude
-        scaleBufferAmplitude(filtered, amplitude: amplitude)
+        scaleBufferAmplitude(filtered, amplitude: volumeControlled ? 1 : amplitude)
 
         testToneBuffer = filtered
 
+        playbackGeneration &+= 1
+        let generation = playbackGeneration
         player.stop()
-        player.volume = 1
+        player.volume = volumeControlled ? Self.normalizedAmplitude(amplitude) : 1
         isPlayingLoop = false
         player.scheduleBuffer(filtered, at: nil, options: [], completionHandler: { [weak self] in
             DispatchQueue.main.async {
-                self?.isTestTonePlaying = false
+                guard let self, self.playbackGeneration == generation else { return }
+                self.isTestTonePlaying = false
                 if isReference {
-                    self?.isPlayingReference = false
+                    self.isPlayingReference = false
                 }
             }
         })
@@ -590,6 +624,8 @@ public final class CalibrationEngine: ObservableObject {
             "🔇 stopTestTone() called - isPlayingLoop: \(isPlayingLoop), isPlayingReference: \(isPlayingReference)",
             category: .calibration
         )
+        playbackGeneration &+= 1
+        comparisonTestIsPlaying = false
         playerNode?.stop()
         isTestTonePlaying = false
         isPlayingReference = false
@@ -716,7 +752,9 @@ public final class CalibrationEngine: ObservableObject {
     }
 
     private func applyProfile(_ profile: CalibrationProfile) -> Bool {
-        guard profile.isValid, eqEngine.setCalibrationAdjustments(profile.bands) else { return false }
+        guard profile.isValid,
+              eqEngine.setCalibrationAdjustments(profile.bands, overallGainDB: profile.overallGainDB)
+        else { return false }
         eqEngine.coreAudioEngine.applyRoomNotchFilters(profile.notchFilters.map {
             (frequency: $0.frequency, gain: $0.gain, q: $0.q)
         })
@@ -906,6 +944,8 @@ public final class CalibrationEngine: ObservableObject {
 
         currentTestFrequency = frequency
         testToneBuffer = filtered
+        playbackGeneration &+= 1
+        comparisonTestIsPlaying = false
         player.stop()
         player.volume = Self.normalizedAmplitude(amplitude)
 
@@ -954,6 +994,8 @@ public final class CalibrationEngine: ObservableObject {
         // Apply fade in/out to avoid clicks
         applyFadeInOut(buffer: buffer, fadeDuration: 0.05)
 
+        playbackGeneration &+= 1
+        comparisonTestIsPlaying = false
         player.stop()
         player.volume = Self.normalizedAmplitude(amplitude)
 
@@ -975,6 +1017,7 @@ public final class CalibrationEngine: ObservableObject {
 
     /// Start comparison mode (alternating reference and test)
     public func startComparisonMode(testFrequency: Double, testLevel: Float) {
+        stopComparisonMode()
         dlog(
             "🔄 Starting comparison mode: reference=\(referenceFrequency)Hz, test=\(testFrequency)Hz",
             category: .calibration
@@ -988,6 +1031,9 @@ public final class CalibrationEngine: ObservableObject {
     public func stopComparisonMode() {
         dlog("🔇 stopComparisonMode() called - comparisonMode: \(comparisonMode)", category: .calibration)
         comparisonMode = false
+        comparisonSessionID &+= 1
+        playbackGeneration &+= 1
+        comparisonTestIsPlaying = false
         comparisonWorkItem?.cancel()
         comparisonWorkItem = nil
 
@@ -1011,42 +1057,25 @@ public final class CalibrationEngine: ObservableObject {
     /// Play alternating reference and test tones
     private func playComparisonSequence(testFrequency: Double) {
         guard comparisonMode else { return }
+        let sessionID = comparisonSessionID
 
         dlog("🔄 Playing comparison sequence: reference → test (level: \(currentTestLevel) dB)", category: .calibration)
 
         // Play reference for 2s
-        if useFilteredNoise {
-            playFilteredPinkNoise(
-                frequency: referenceFrequency,
-                duration: 2.0,
-                amplitude: dbToLinear(referenceLevel),
-                isReference: true
-            )
-        } else {
-            playReferenceTone(duration: 2.0)
-        }
+        playComparisonSignal(frequency: referenceFrequency, level: referenceLevel, isReference: true)
 
         // Create work item for next signal
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self, self.comparisonMode else { return }
+            guard let self, self.comparisonMode, self.comparisonSessionID == sessionID else { return }
 
             dlog("🔄 Playing test signal...", category: .calibration)
             // Play test for 2s using currentTestLevel
-            if self.useFilteredNoise {
-                self.playFilteredPinkNoise(
-                    frequency: testFrequency,
-                    duration: 2.0,
-                    amplitude: self.dbToLinear(self.currentTestLevel),
-                    isReference: false
-                )
-            } else {
-                self.playTestToneAtLevel(frequency: testFrequency, level: self.currentTestLevel, duration: 2.0)
-            }
+            self.playComparisonSignal(frequency: testFrequency, level: self.currentTestLevel, isReference: false)
 
             // ⚡ FIX: Check comparisonMode before scheduling next iteration to prevent infinite loop
             if self.comparisonMode {
                 self.comparisonWorkItem = DispatchWorkItem { [weak self] in
-                    guard let self, self.comparisonMode else {
+                    guard let self, self.comparisonMode, self.comparisonSessionID == sessionID else {
                         dlog("🔇 Comparison sequence cancelled - mode disabled", category: .calibration)
                         return
                     }
@@ -1068,8 +1097,27 @@ public final class CalibrationEngine: ObservableObject {
     public func updateComparisonTestLevel(_ newLevel: Float) {
         guard comparisonMode else { return }
 
-        // Update the current test level - will be used in next cycle
         currentTestLevel = newLevel
+        if comparisonTestIsPlaying {
+            playerNode?.volume = Self.normalizedAmplitude(dbToLinear(newLevel))
+        }
+    }
+
+    func playComparisonSignal(frequency: Double, level: Float, isReference: Bool) {
+        comparisonTestIsPlaying = false
+        let amplitude = Self.normalizedAmplitude(dbToLinear(level))
+        if useFilteredNoise {
+            playFilteredPinkNoise(
+                frequency: frequency,
+                amplitude: amplitude,
+                isReference: isReference,
+                volumeControlled: true
+            )
+        } else {
+            playTestTone(frequency: frequency, amplitude: amplitude, isReference: isReference, volumeControlled: true)
+        }
+        isPlayingReference = isReference && isTestTonePlaying
+        comparisonTestIsPlaying = !isReference && isTestTonePlaying
     }
 
     /// Convert dB to linear amplitude
@@ -1093,12 +1141,19 @@ public final class CalibrationEngine: ObservableObject {
         return indices.filter { standardFrequencies[$0] != 1000 }
     }
 
-    func equalLoudnessProfile(name: String, bands: [Float], notes: String) -> CalibrationProfile? {
-        var profile = CalibrationProfile(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines), type: .equalLoudness, bands: bands, notes: notes
-        )
+    func equalLoudnessProfile(
+        name: String, bands: [Float], notes: String, sourceBandMode: EQBandMode? = nil,
+        replacing original: CalibrationProfile? = nil
+    ) -> CalibrationProfile? {
+        if let original, !original.isValid { return nil }
+        var profile = original ?? CalibrationProfile(name: name, type: .equalLoudness)
+        guard profile.type == .equalLoudness else { return nil }
+        profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.bands = bands
+        profile.notes = notes
+        profile.sourceBandMode = sourceBandMode
         guard profile.isValid, let referenceIndex = standardFrequencies.firstIndex(of: 1000) else { return nil }
-        profile.bands[referenceIndex] = 0
+        profile.bands[referenceIndex] = original?.bands[referenceIndex] ?? 0
         return profile
     }
 

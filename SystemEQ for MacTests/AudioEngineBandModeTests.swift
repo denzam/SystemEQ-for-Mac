@@ -3069,9 +3069,9 @@ final class CalibrationProfileTests: XCTestCase {
         return 10 * log10(outputEnergy / inputEnergy)
     }
 
-    private func renderedEnergy(_ audio: AVAudioEngine) throws -> Double {
+    private func renderedEnergy(_ audio: AVAudioEngine, frames: Int = 96000) throws -> Double {
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: audio.manualRenderingFormat, frameCapacity: 1024))
-        var remaining = 96000
+        var remaining = frames
         var energy = 0.0
         while remaining > 0 {
             let count = AVAudioFrameCount(min(remaining, 1024))
@@ -3249,6 +3249,173 @@ final class CalibrationProfileTests: XCTestCase {
         }
         calibration.updateLoopAmplitude(2)
         XCTAssertEqual(player.volume, 1)
+    }
+
+    func testProfileModeLevelAndRecalibrationPreserveIdentityAndHiddenBands() throws {
+        var original = CalibrationProfile(
+            name: "Ten", type: .equalLoudness, notes: "Original", sourceBandMode: .tenBand, overallGainDB: -5
+        )
+        original.bands[0] = 3
+        original.bands[17] = 2
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode(CalibrationProfile.self, from: data), original)
+        var draft = CalibrationProfileDraft(original)
+        XCTAssertEqual(draft.visibleBandIndices.count, 10)
+        XCTAssertFalse(draft.visibleBandIndices.contains(0))
+        draft.bandInputs[2] = "6"
+        draft.overallGainDB = -7
+        let edited = try XCTUnwrap(draft.updatedProfile)
+        XCTAssertEqual(edited.bands[0], 3)
+        XCTAssertEqual(edited.overallGainDB, -7)
+        let calibration = CalibrationEngine(loadStoredProfiles: false)
+        let resumed = try XCTUnwrap(calibration.equalLoudnessProfile(
+            name: "Revised", bands: edited.bands, notes: "Revised notes", sourceBandMode: .tenBand, replacing: edited
+        ))
+        XCTAssertEqual(resumed.id, original.id)
+        XCTAssertEqual(resumed.createdAt, original.createdAt)
+        XCTAssertEqual(resumed.overallGainDB, -7)
+        XCTAssertEqual(resumed.bands[17], 2)
+        XCTAssertEqual(resumed.bands[2], 6)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "sourceBandMode")
+        legacy.removeValue(forKey: "overallGainDB")
+        let decoded = try JSONDecoder().decode(
+            CalibrationProfile.self,
+            from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        XCTAssertNil(decoded.sourceBandMode)
+        XCTAssertEqual(decoded.overallGainDB, 0)
+        XCTAssertEqual(CalibrationProfileDraft(decoded).visibleBandIndices.count, 31)
+        for invalid: Any in [NSNull(), "bad", 1, -21] {
+            legacy["overallGainDB"] = invalid
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                CalibrationProfile.self,
+                from: JSONSerialization.data(withJSONObject: legacy)
+            ))
+        }
+        legacy["overallGainDB"] = 0
+        legacy["sourceBandMode"] = "unknown"
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            CalibrationProfile.self,
+            from: JSONSerialization.data(withJSONObject: legacy)
+        ))
+        for invalid: Float in [.nan, .infinity, 1, -21] {
+            draft.overallGainDB = invalid
+            XCTAssertNil(draft.updatedProfile)
+        }
+    }
+
+    func testAutoPreampUsesEffectiveCalibrationGainsAndProfileLevel() throws {
+        for mode in EQBandMode.allCases {
+            try withProfile(mode: mode) { engine, calibration, core, _ in
+                engine.applyEQValues(Array(repeating: 0, count: mode.bandCount))
+                XCTAssertEqual(engine.recommendedPreampGain(), 0, accuracy: 0.001)
+                var gains = [Float](repeating: 0, count: 31)
+                gains[2] = 10
+                let profile = CalibrationProfile(name: "Bass", type: .equalLoudness, bands: gains, overallGainDB: -5)
+                calibration.activateProfile(profile)
+                let effective = mode.frequencies.map { $0 == 31.5 ? Float(10) : 0 }
+                let expected = min(0, FixedBandAutoPreamp.recommendedGain(
+                    mode: mode, gains: effective, sampleRate: Float(core.processingSampleRate)
+                ) + 5)
+                XCTAssertEqual(engine.recommendedPreampGain(), expected, accuracy: 0.001)
+                XCTAssertLessThan(expected, -4)
+                engine.applyAutoPreamp()
+                XCTAssertEqual(engine.preampGain, expected, accuracy: 0.001)
+                calibration.deactivateProfile()
+                XCTAssertEqual(engine.recommendedPreampGain(), 0, accuracy: 0.001)
+            }
+        }
+    }
+
+    func testCalibrationChangesInvalidateObservedHeadroom() throws {
+        try withProfile { engine, _, _, _ in
+            var changes = 0
+            let observation = engine.objectWillChange.sink { changes += 1 }
+            defer { observation.cancel() }
+            var gains = [Float](repeating: 0, count: 31)
+            gains[2] = 10
+            let before = engine.recommendedPreampGain()
+            XCTAssertTrue(engine.setCalibrationAdjustments(gains, overallGainDB: -5))
+            XCTAssertGreaterThan(changes, 0)
+            XCTAssertLessThan(engine.recommendedPreampGain(), before)
+            let accepted = changes
+            XCTAssertFalse(engine.setCalibrationAdjustments(gains, overallGainDB: .nan))
+            XCTAssertEqual(changes, accepted)
+            XCTAssertTrue(engine.setCalibrationAdjustments(nil))
+            XCTAssertGreaterThan(changes, accepted)
+            XCTAssertEqual(engine.recommendedPreampGain(), before, accuracy: 0.001)
+        }
+    }
+
+    func testProfileOverallLevelIsScalarAndSurvivesRebuildAndDeactivation() throws {
+        for mode in EQBandMode.allCases {
+            try withProfile(mode: mode) { engine, calibration, core, _ in
+                engine.applyEQValues(Array(repeating: 0, count: mode.bandCount))
+                engine.setPreampGain(-20)
+                let profile = CalibrationProfile(name: "Quiet", type: .equalLoudness, overallGainDB: -5)
+                calibration.activateProfile(profile)
+                for frequency: Double in [63, 1000, 8000] {
+                    XCTAssertEqual(try measuredGain(core, frequency: frequency), -25, accuracy: 0.05)
+                }
+                core.rebuildActiveEQFilter(sampleRate: 96000)
+                XCTAssertEqual(try measuredGain(core, frequency: 1000), -25, accuracy: 0.05)
+                engine.reapplyCurrentFilters()
+                XCTAssertEqual(try measuredGain(core, frequency: 1000), -25, accuracy: 0.05)
+                for invalid: Float in [.nan, .infinity, 1, -21] {
+                    XCTAssertFalse(engine.setCalibrationAdjustments(profile.bands, overallGainDB: invalid))
+                    XCTAssertEqual(try measuredGain(core, frequency: 1000), -25, accuracy: 0.05)
+                }
+                calibration.deactivateProfile()
+                XCTAssertEqual(engine.preampGain, -20)
+                XCTAssertEqual(try measuredGain(core, frequency: 1000), -20, accuracy: 0.05)
+            }
+        }
+    }
+
+    func testComparisonVolumeChangesCurrentBufferWithoutChangingReference() async throws {
+        for noise in [false, true] {
+            let audio = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
+            audio.attach(player)
+            try audio.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
+            audio.connect(player, to: audio.mainMixerNode, format: format)
+            try audio.start()
+            defer { player.stop(); audio.stop() }
+            let calibration = CalibrationEngine(audioEngine: audio, playerNode: player, loadStoredProfiles: false)
+            calibration.useFilteredNoise = noise
+            calibration.comparisonMode = true
+            calibration.playComparisonSignal(frequency: 1000, level: -20, isReference: true)
+            let referenceVolume = player.volume
+            calibration.updateComparisonTestLevel(-10)
+            XCTAssertEqual(player.volume, referenceVolume)
+            calibration.playComparisonSignal(frequency: 500, level: -20, isReference: false)
+            _ = try renderedEnergy(audio, frames: 4800)
+            let initial = try renderedEnergy(audio, frames: 4800)
+            XCTAssertGreaterThan(initial, 0)
+            calibration.updateComparisonTestLevel(-13.9794)
+            let louder = try renderedEnergy(audio, frames: 4800)
+            XCTAssertEqual(sqrt(louder / initial), 2, accuracy: noise ? 0.35 : 0.05)
+            for invalid: Float in [.nan, .infinity, -.infinity] {
+                calibration.updateComparisonTestLevel(invalid)
+                XCTAssertEqual(player.volume, 0)
+            }
+            calibration.updateComparisonTestLevel(-20)
+            XCTAssertEqual(player.volume, referenceVolume, accuracy: 0.00001)
+            calibration.updateComparisonTestLevel(100)
+            XCTAssertEqual(player.volume, 1)
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            XCTAssertTrue(calibration.isTestTonePlaying)
+            XCTAssertFalse(calibration.isPlayingReference)
+            calibration.stopComparisonMode()
+            let stopped = player.volume
+            calibration.updateComparisonTestLevel(-20)
+            XCTAssertEqual(player.volume, stopped)
+            XCTAssertFalse(player.isPlaying)
+        }
     }
 
     func testReferenceLoopsExposeLiveVolumeAndOneShotResetsGain() throws {

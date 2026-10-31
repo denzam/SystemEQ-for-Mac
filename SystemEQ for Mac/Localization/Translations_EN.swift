@@ -269,6 +269,8 @@ enum EnglishTranslations {
         .saveProfile: "Save Profile",
         .profileName: "Profile Name",
         .editProfile: "View / Edit Profile",
+        .recalibrateProfile: "Recalibrate",
+        .profileOverallLevel: "Profile level",
         .profileNotes: "Notes (optional)",
         .profileSaveFailed: "Unable to save this profile. Check its values and storage access; it may have been deleted.",
         .showVisualizerWindow: "Show Visualizer Window",

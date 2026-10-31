@@ -176,6 +176,7 @@ public final class AudioEngine: ObservableObject {
     private let defaults: UserDefaults
     let coreAudioEngine: CoreAudioEngine
     private var calibrationAdjustments: [Float]?
+    private var calibrationOverallGainDB: Float = 0
     private let enableRouting: (Bool) -> Bool
     private let disableRouting: (Bool) -> Void
     private static let outputBoostGainKey = "outputBoostGain"
@@ -285,29 +286,35 @@ public final class AudioEngine: ObservableObject {
         syncDebounceWorkItem?.cancel()
         syncDebounceWorkItem = nil
         syncBandsToMode()
-        let frequencies = EQBandMode.thirtyOneBand.frequencies
-        let gains = bands.map { band -> Float in
-            let correction = calibrationAdjustments.flatMap { adjustments in
-                frequencies.firstIndex(of: band.frequency).map { adjustments[$0] }
-            } ?? 0
-            let gain = band.gain + correction
-            return gain.isFinite ? min(max(gain, -20), 20) : 0
-        }
+        let gains = effectiveGains(mode: bandMode, gains: bands.map(\.gain))
         switch bandMode {
         case .tenBand:
-            coreAudioEngine.applyFixedBandEQ(gains, preamp: preampGain, outputBoost: outputBoostGain)
+            coreAudioEngine.applyFixedBandEQ(
+                gains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationOverallGainDB
+            )
         case .thirtyOneBand:
-            coreAudioEngine.applyGraphicEQ31(gains, preamp: preampGain, outputBoost: outputBoostGain)
+            coreAudioEngine.applyGraphicEQ31(
+                gains,
+                preamp: preampGain,
+                outputBoost: outputBoostGain,
+                calibrationPreamp: calibrationOverallGainDB
+            )
         }
     }
 
     @discardableResult
-    func setCalibrationAdjustments(_ adjustments: [Float]?) -> Bool {
+    func setCalibrationAdjustments(_ adjustments: [Float]?, overallGainDB: Float = 0) -> Bool {
+        guard overallGainDB.isFinite, (-20...0).contains(overallGainDB) else { return false }
         if let adjustments {
             guard adjustments.count == EQBandMode.thirtyOneBand.bandCount,
                   adjustments.allSatisfy(\.isFinite) else { return false }
         }
+        objectWillChange.send()
         calibrationAdjustments = adjustments
+        calibrationOverallGainDB = adjustments == nil ? 0 : overallGainDB
         syncToCoreAudioEngineImmediate()
         return true
     }
@@ -451,24 +458,35 @@ public final class AudioEngine: ObservableObject {
     }
 
     func recommendedPreampGain() -> Float {
-        FixedBandAutoPreamp.recommendedGain(mode: bandMode, gains: bands.map(\.gain))
+        let gains = bandMode.frequencies.map { Self.interpolatedGain(at: $0, from: bands) }
+        let gain = FixedBandAutoPreamp.recommendedGain(
+            mode: bandMode, gains: effectiveGains(mode: bandMode, gains: gains),
+            sampleRate: Float(coreAudioEngine.processingSampleRate)
+        )
+        return min(0, gain - calibrationOverallGainDB)
+    }
+
+    private func effectiveGains(mode: EQBandMode, gains: [Float]) -> [Float] {
+        let frequencies = EQBandMode.thirtyOneBand.frequencies
+        return zip(mode.frequencies, gains).map { frequency, gain in
+            let correction = calibrationAdjustments.flatMap { adjustments in
+                frequencies.firstIndex(of: frequency).map { adjustments[$0] }
+            } ?? 0
+            let effective = gain + correction
+            return effective.isFinite ? min(20, max(-20, effective)) : 0
+        }
     }
 
     func importPreampLimit(mode: EQBandMode, gains: [Float]) -> Float? {
         guard gains.count == mode.bandCount, gains.allSatisfy(\.isFinite) else { return nil }
-        let frequencies = EQBandMode.thirtyOneBand.frequencies
-        let effective = zip(mode.frequencies, gains).map { frequency, gain in
-            let correction = calibrationAdjustments.flatMap { adjustments in
-                frequencies.firstIndex(of: frequency).map { adjustments[$0] }
-            } ?? 0
-            return min(20, max(-20, gain + correction))
-        }
+        let effective = effectiveGains(mode: mode, gains: gains)
         do {
-            return try EQConverter.preampLimit(
+            let limit = try EQConverter.preampLimit(
                 mode: mode,
                 gains: effective,
                 sampleRate: coreAudioEngine.processingSampleRate
             )
+            return min(0, limit - calibrationOverallGainDB)
         } catch {
             eqLog("Cannot compute imported EQ headroom", level: .error)
             return nil

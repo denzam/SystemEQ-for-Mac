@@ -27,9 +27,18 @@ struct CalibrationProfileEditor: View {
                 .textFieldStyle(.roundedBorder)
             TextField(localization.localized(.profileNotes), text: $draft.notes)
                 .textFieldStyle(.roundedBorder)
+            HStack {
+                Text(localization.localized(.profileOverallLevel))
+                Slider(value: $draft.overallGainDB, in: -20...0, step: 0.5)
+                Text(
+                    "\(draft.overallGainDB.formatted(.number.precision(.fractionLength(1)))) \(localization.localized(.dB))"
+                )
+                .monospacedDigit()
+                .frame(width: 80, alignment: .trailing)
+            }
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    ForEach(Array(draft.bandInputs.indices), id: \.self) { index in
+                    ForEach(draft.visibleBandIndices, id: \.self) { index in
                         HStack {
                             if frequencies.indices.contains(index) {
                                 Text("\(frequencies[index].formatted(.number)) \(localization.localized(.frequencyHz))")
