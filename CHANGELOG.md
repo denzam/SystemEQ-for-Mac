@@ -4,6 +4,31 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] — 2026-10-31
+
+Live calibration comparison controls, profile-level attenuation, safer saved data and Native volume keys.
+
+### Added
+- Saved equal-loudness profiles can be reopened in the calibration wizard with their existing values, identity and notes; profiles have a separate overall level control that attenuates the entire response, including 1000 Hz, without reshaping the EQ
+- Native outputs without available hardware volume controls support software volume and mute through the media keys, with per-output saved levels and a passive on-screen indicator; media-key capture requires Accessibility permission
+- Optional daily background update checks while the app is running, including login launch; checks are disabled initially and downloading and installing remain manual
+- Official package download statistics and badges count DMG/ZIP downloads, including repeat downloads and updates, rather than unique users or installations
+
+### Fixed
+- Calibration comparison volume changes affect the current test signal immediately while the reference stays unchanged, for both sine tones and filtered noise
+- Auto Preamp and the headroom warning include calibration band boosts and profile-level attenuation at the current processing sample rate
+- Newly saved 10-band calibration profiles show their original ten bands in the editor; older profiles without recorded band-mode metadata retain the full editor to preserve their values
+- Calibration and personalized profiles, AutoEQ favorites and device-preset assignments are protected against overwriting existing data after loading or decoding errors; personalized profile writes are atomic, and failed writes preserve the previous state
+- Switching capture backends releases BlackHole audio units before restoring physical-device sample rates; negotiation preserves the current output rate where possible and handles unequal input/output buffer sizes
+- DMG icons and file labels no longer overlap the installation instructions; the included multilingual guide is named Installation.txt
+
+### Changed
+- Routing now contains the capture-backend selector and shows the active backend and processing sample rate
+- Updated bundled ProjectM from 4.1.6 to 4.1.8 and refreshed pinned build dependencies; expanded regression coverage for asynchronous AutoEQ restoration
+
+### Thanks
+- Thanks to @JsyTheDev for testing updates and reporting the calibration, profile and installer issues in #34
+
 ## [1.4.7] — 2026-10-24
 
 Manual problem reports and response-based gain matching for room A/B comparison.
