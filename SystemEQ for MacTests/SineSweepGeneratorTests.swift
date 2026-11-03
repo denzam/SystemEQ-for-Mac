@@ -24,7 +24,12 @@ final class SineSweepGeneratorTests: XCTestCase {
                 sampleRate: 48000,
                 frameCount: frames
             )),
-            XCTUnwrap(generator.generateFixedTone(frequency: 1000, duration: 0.1, sampleRate: 48000, frameCount: frames)),
+            XCTUnwrap(generator.generateFixedTone(
+                frequency: 1000,
+                duration: 0.1,
+                sampleRate: 48000,
+                frameCount: frames
+            )),
             XCTUnwrap(generator.generateContinuousTone(frequency: 1000, sampleRate: 48000, frameCount: frames)),
         ]
         for buffer in buffers {
