@@ -4,6 +4,11 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Resonance Finder sweep and test tones no longer crash the app when the output device has more than two channels (e.g. multichannel USB interfaces); tones are generated in stereo and mapped to the device by the mixer
+
 ## [1.4.8] — 2026-10-31
 
 Live calibration comparison controls, profile-level attenuation, safer saved data and Native volume keys.
