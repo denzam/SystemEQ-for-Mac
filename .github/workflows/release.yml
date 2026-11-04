@@ -251,6 +251,25 @@ jobs:
             "build/SystemEQ-v${{ steps.version.outputs.version }}.dmg" \
             "${{ steps.version.outputs.version }}"
 
+      - name: Prepare Homebrew distribution package
+        id: homebrew
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          SOURCE="build/SystemEQ-v${VERSION}.dmg"
+          HOMEBREW="build/SystemEQ-v${VERSION}-homebrew.dmg"
+          test -s "$SOURCE"
+          cp "$SOURCE" "$HOMEBREW"
+          cmp "$SOURCE" "$HOMEBREW"
+          SHA256=$(shasum -a 256 "$HOMEBREW" | awk '{print $1}')
+          SOURCE_SHA256=$(shasum -a 256 "$SOURCE" | awk '{print $1}')
+          if ! [[ "$SHA256" =~ ^[0-9a-f]{64}$ && "$SHA256" == "$SOURCE_SHA256" ]]; then
+            echo "Homebrew distribution package checksum mismatch" >&2
+            exit 1
+          fi
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
       - name: Generate and verify signed update feed
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
@@ -361,8 +380,10 @@ jobs:
             *Also available via Homebrew — see step 5 above.*
           files: |
             build/SystemEQ-v${{ steps.version.outputs.version }}.dmg
+            build/SystemEQ-v${{ steps.version.outputs.version }}-homebrew.dmg
             build/SystemEQ-v${{ steps.version.outputs.version }}.zip
             build/appcast.xml
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -370,24 +391,54 @@ jobs:
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          HOMEBREW_SHA256: ${{ steps.homebrew.outputs.sha256 }}
         run: |
-          SHA256=$(shasum -a 256 "build/SystemEQ-v${VERSION}.dmg" | awk '{print $1}')
-          echo "DMG SHA256: $SHA256"
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, re
+          from pathlib import Path
+          version = os.environ['VERSION']
+          expected = os.environ['HOMEBREW_SHA256']
+          source = Path(f'build/SystemEQ-v{version}.dmg')
+          homebrew = Path(f'build/SystemEQ-v{version}-homebrew.dmg')
+          if not re.fullmatch(r'[0-9a-f]{64}', expected) or not homebrew.is_file() or homebrew.stat().st_size == 0:
+              raise SystemExit('Missing or invalid Homebrew distribution package')
+          if hashlib.sha256(homebrew.read_bytes()).hexdigest() != expected or source.read_bytes() != homebrew.read_bytes():
+              raise SystemExit('Homebrew distribution package changed after verification')
+          PY
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/denzam/homebrew-systemeq.git" tap
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          version = os.environ['VERSION']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Invalid Homebrew version')
+          cask = Path('Casks/systemeq.rb').read_text()
+          replacements = {
+              'version': version,
+              'sha256': os.environ['HOMEBREW_SHA256'],
+              'url': 'https://github.com/denzam/SystemEQ-for-Mac/releases/download/v#{version}/SystemEQ-v#{version}-homebrew.dmg',
+          }
+          for field, value in replacements.items():
+              cask, count = re.subn(r'^  ' + field + r' ".*"$', '  ' + field + ' "' + value + '"', cask, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one Homebrew {field} field')
+          Path('tap/Casks/systemeq.rb').write_text(cask)
+          PY
+          ruby -c tap/Casks/systemeq.rb
+
           cd tap
-
-          cp ../Casks/systemeq.rb Casks/systemeq.rb
-          sed -i '' -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/systemeq.rb
-          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/systemeq.rb
-
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet; then
-            echo "Cask already at v${VERSION}, nothing to do."
-            exit 0
-          fi
+          STATUS=0
+          git diff --quiet || STATUS=$?
+          case "$STATUS" in
+            0) echo "Cask already at v${VERSION}, nothing to do."; exit 0 ;;
+            1) ;;
+            *) exit "$STATUS" ;;
+          esac
 
           git add Casks/systemeq.rb
           git commit -m "cask: bump to v${VERSION}"

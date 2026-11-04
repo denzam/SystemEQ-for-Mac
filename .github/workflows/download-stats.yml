@@ -45,7 +45,7 @@ jobs:
         working-directory: site
         run: |
           set -euo pipefail
-          git add -- app-downloads.json app-downloads.svg
+          git add -- app-downloads.json app-downloads.svg app-downloads-history.json
           if git diff --cached --quiet; then
             exit 0
           else
