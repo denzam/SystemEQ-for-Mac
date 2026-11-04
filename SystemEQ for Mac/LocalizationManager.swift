@@ -370,6 +370,8 @@ public enum LocalizedString: String, CaseIterable {
     case editProfile
     case recalibrateProfile
     case profileOverallLevel
+    case autoNormalizeCalibrationProfiles
+    case autoNormalizeCalibrationProfilesHelp
     case profileNotes
     case profileSaveFailed
     case showVisualizerWindow

@@ -33,6 +33,7 @@ struct BorderedButtonStyle: ButtonStyle {
 struct CalibrationView: View {
     @ObservedObject private var localization = LocalizationManager.shared
     @ObservedObject private var calibration = CalibrationEngine.shared
+    @ObservedObject private var audioEngine = AudioEngine.shared
 
     @State private var selectedTab: CalibrationTab = .equalLoudness
     @State private var currentProfile: CalibrationProfile?
@@ -990,6 +991,12 @@ struct CalibrationView: View {
 
     private var profilesSection: some View {
         VStack(spacing: 16) {
+            Toggle(
+                localization.localized(.autoNormalizeCalibrationProfiles),
+                isOn: $audioEngine.autoNormalizeCalibrationProfiles
+            )
+            .help(localization.localized(.autoNormalizeCalibrationProfilesHelp))
+
             // Instructions card
             instructionsCard
 

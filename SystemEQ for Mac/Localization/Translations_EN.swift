@@ -272,6 +272,8 @@ enum EnglishTranslations {
         .editProfile: "View / Edit Profile",
         .recalibrateProfile: "Recalibrate",
         .profileOverallLevel: "Profile level",
+        .autoNormalizeCalibrationProfiles: "Automatically normalize when changing profiles",
+        .autoNormalizeCalibrationProfilesHelp: "Adjusts preamp now and whenever a calibration profile is activated, changed or deactivated. Turning this off keeps the current preamp level.",
         .profileNotes: "Notes (optional)",
         .profileSaveFailed: "Unable to save this profile. Check its values and storage access; it may have been deleted.",
         .showVisualizerWindow: "Show Visualizer Window",

@@ -162,6 +162,13 @@ public final class AudioEngine: ObservableObject {
 
     @Published var bands: [EQBand] = []
     @Published var preampGain: Float = 0.0
+    @Published var autoNormalizeCalibrationProfiles: Bool {
+        didSet {
+            guard autoNormalizeCalibrationProfiles != oldValue else { return }
+            defaults.set(autoNormalizeCalibrationProfiles, forKey: "autoNormalizeCalibrationProfiles")
+            if autoNormalizeCalibrationProfiles { applyAutoPreamp() }
+        }
+    }
     @Published var outputBoostGain: Float
 
     private var cancellables = Set<AnyCancellable>()
@@ -203,6 +210,7 @@ public final class AudioEngine: ObservableObject {
         self.coreAudioEngine = coreAudioEngine
         self.enableRouting = enableRouting
         self.disableRouting = disableRouting
+        autoNormalizeCalibrationProfiles = defaults.bool(forKey: "autoNormalizeCalibrationProfiles")
         outputBoostGain = Self.sanitizedOutputBoost(defaults.float(forKey: Self.outputBoostGainKey))
         setupEQBands()
         setupBindings()
@@ -315,7 +323,11 @@ public final class AudioEngine: ObservableObject {
         objectWillChange.send()
         calibrationAdjustments = adjustments
         calibrationOverallGainDB = adjustments == nil ? 0 : overallGainDB
+        if autoNormalizeCalibrationProfiles {
+            preampGain = Self.sanitizedPreamp(recommendedPreampGain())
+        }
         syncToCoreAudioEngineImmediate()
+        if autoNormalizeCalibrationProfiles { persistCurrentPlaybackState() }
         return true
     }
 

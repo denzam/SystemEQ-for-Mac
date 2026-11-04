@@ -272,6 +272,8 @@ enum ItalianTranslations {
         .editProfile: "Visualizza / modifica profilo",
         .recalibrateProfile: "Ricalibra",
         .profileOverallLevel: "Livello del profilo",
+        .autoNormalizeCalibrationProfiles: "Normalizza automaticamente quando cambi profilo",
+        .autoNormalizeCalibrationProfilesHelp: "Regola il preamplificatore ora e quando un profilo di calibrazione viene attivato, modificato o disattivato. Disattivare questa opzione mantiene il livello attuale del preamplificatore.",
         .profileNotes: "Note (facoltative)",
         .profileSaveFailed: "Impossibile salvare il profilo. Controlla i valori e l’accesso ai file; potrebbe essere stato eliminato.",
         .showVisualizerWindow: "Mostra finestra del visualizzatore",

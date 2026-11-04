@@ -272,6 +272,8 @@ enum UkrainianTranslations {
         .editProfile: "Переглянути / змінити профіль",
         .recalibrateProfile: "Повторити калібрування",
         .profileOverallLevel: "Рівень профілю",
+        .autoNormalizeCalibrationProfiles: "Автоматично нормалізувати при зміні профілю",
+        .autoNormalizeCalibrationProfilesHelp: "Регулює передпідсилення зараз і при ввімкненні, зміні або вимкненні калібрувального профілю. Вимкнення цієї опції зберігає поточний рівень передпідсилення.",
         .profileNotes: "Нотатки (необов’язково)",
         .profileSaveFailed: "Не вдалося зберегти профіль. Перевірте значення й доступ до файлів; профіль міг бути видалений.",
         .showVisualizerWindow: "Показати вікно візуалізатора",

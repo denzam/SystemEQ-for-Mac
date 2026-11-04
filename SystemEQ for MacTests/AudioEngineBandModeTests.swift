@@ -3373,6 +3373,111 @@ final class CalibrationProfileTests: XCTestCase {
         }
     }
 
+    func testAutoNormalizeOffPreservesManualPreampAcrossProfileLifecycle() throws {
+        try withProfile { engine, calibration, core, _ in
+            XCTAssertFalse(engine.autoNormalizeCalibrationProfiles)
+            engine.setPreampGain(-7)
+            let profile = CalibrationProfile(
+                name: "Manual",
+                type: .equalLoudness,
+                bands: [Float](repeating: 8, count: 31)
+            )
+            calibration.activateProfile(profile)
+            XCTAssertEqual(engine.preampGain, -7)
+            XCTAssertTrue(engine.setCalibrationAdjustments([Float](repeating: 4, count: 31), overallGainDB: -2))
+            XCTAssertEqual(engine.preampGain, -7)
+            calibration.deactivateProfile()
+            XCTAssertEqual(engine.preampGain, -7)
+            XCTAssertEqual(core.getBandGain(index: 5), 2)
+        }
+    }
+
+    func testAutoNormalizeInvalidCalibrationLeavesStateUnchanged() throws {
+        try withProfile { engine, calibration, core, defaults in
+            engine.autoNormalizeCalibrationProfiles = true
+            engine.applyEQValues([Float](repeating: 0, count: 10))
+            calibration.activateProfile(CalibrationProfile(
+                name: "Valid", type: .equalLoudness, bands: [Float](repeating: 5, count: 31), overallGainDB: -2
+            ))
+            let beforePreamp = engine.preampGain
+            let beforeBand = core.getBandGain(index: 5)
+            let beforePlayback = PresetPersistence.loadPlaybackState(in: defaults)
+            let invalidInputs: [([Float], Float)] = [
+                ([Float](repeating: .nan, count: 31), -8),
+                ([Float](repeating: 1, count: 10), -8),
+                ([Float](repeating: 1, count: 31), .infinity)
+            ]
+            for (bands, level) in invalidInputs {
+                XCTAssertFalse(engine.setCalibrationAdjustments(bands, overallGainDB: level))
+                XCTAssertEqual(engine.preampGain, beforePreamp)
+                XCTAssertEqual(core.getBandGain(index: 5), beforeBand)
+                XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults), beforePlayback)
+            }
+        }
+    }
+
+    func testAutoNormalizeDisableKeepsManualPreampAndSettingReloads() throws {
+        try withProfile { engine, _, core, defaults in
+            engine.applyEQValues([Float](repeating: 0, count: 10))
+            XCTAssertTrue(engine.setCalibrationAdjustments([Float](repeating: 10, count: 31), overallGainDB: -3))
+            engine.autoNormalizeCalibrationProfiles = true
+            XCTAssertEqual(engine.preampGain, engine.recommendedPreampGain(), accuracy: 0.001)
+            XCTAssertLessThan(engine.preampGain, 0)
+            engine.setPreampGain(-9)
+            engine.autoNormalizeCalibrationProfiles = false
+            XCTAssertEqual(engine.preampGain, -9)
+
+            let reloaded = AudioEngine(
+                defaults: defaults,
+                coreAudioEngine: core,
+                enableRouting: { _ in core.clearEQ(); return true },
+                disableRouting: { _ in }
+            )
+            XCTAssertFalse(reloaded.autoNormalizeCalibrationProfiles)
+            reloaded.autoNormalizeCalibrationProfiles = true
+            XCTAssertTrue(reloaded.autoNormalizeCalibrationProfiles)
+            let restored = AudioEngine(
+                defaults: defaults,
+                coreAudioEngine: core,
+                enableRouting: { _ in core.clearEQ(); return true },
+                disableRouting: { _ in }
+            )
+            XCTAssertTrue(restored.autoNormalizeCalibrationProfiles)
+        }
+    }
+
+    func testAutoNormalizeTracksCalibrationAndPersistsForBothBandModes() throws {
+        for mode in EQBandMode.allCases {
+            try withProfile(mode: mode) { engine, calibration, core, defaults in
+                engine.applyEQValues([Float](repeating: 0, count: mode.bandCount))
+                engine.autoNormalizeCalibrationProfiles = true
+                var firstBands = [Float](repeating: 0, count: 31)
+                firstBands[2] = 8
+                let first = CalibrationProfile(
+                    name: "First", type: .equalLoudness, bands: firstBands
+                )
+                calibration.activateProfile(first)
+                XCTAssertEqual(engine.preampGain, engine.recommendedPreampGain(), accuracy: 0.001)
+                XCTAssertLessThan(engine.preampGain, 0)
+                XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.preamp, engine.preampGain)
+
+                var secondBands = [Float](repeating: 0, count: 31)
+                secondBands[2] = 4
+                calibration.activateProfile(CalibrationProfile(
+                    name: "Second", type: .equalLoudness, bands: secondBands, overallGainDB: -1
+                ))
+                XCTAssertEqual(engine.preampGain, engine.recommendedPreampGain(), accuracy: 0.001)
+                XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.preamp, engine.preampGain)
+
+                calibration.deactivateProfile()
+                XCTAssertEqual(engine.preampGain, engine.recommendedPreampGain(), accuracy: 0.001)
+                XCTAssertEqual(engine.preampGain, 0, accuracy: 0.001)
+                XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.preamp, engine.preampGain)
+                XCTAssertEqual(core.getBandGain(index: 2), 0)
+            }
+        }
+    }
+
     func testComparisonVolumeChangesCurrentBufferWithoutChangingReference() async throws {
         for noise in [false, true] {
             let audio = AVAudioEngine()
