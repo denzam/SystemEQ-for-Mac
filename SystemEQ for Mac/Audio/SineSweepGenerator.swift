@@ -61,13 +61,16 @@ public class SineSweepGenerator: ObservableObject {
         let frameCount = AVAudioFrameCount(duration * sampleRate)
 
         // Generate sine sweep buffer
-        let buffer = generateSineSweep(
+        guard let buffer = generateSineSweep(
             startFreq: startFreq,
             endFreq: endFreq,
             duration: duration,
             sampleRate: sampleRate,
             frameCount: frameCount
-        )
+        ) else {
+            dlog("❌ SineSweepGenerator: failed to create sweep buffer", category: .calibration)
+            return
+        }
 
         playerNode.scheduleBuffer(buffer, at: nil, options: .loops) {
             DispatchQueue.main.async {
@@ -103,12 +106,15 @@ public class SineSweepGenerator: ObservableObject {
         let sampleRate = 48000.0
         let frameCount = AVAudioFrameCount(duration * sampleRate)
 
-        let buffer = generateFixedTone(
+        guard let buffer = generateFixedTone(
             frequency: frequency,
             duration: duration,
             sampleRate: sampleRate,
             frameCount: frameCount
-        )
+        ) else {
+            dlog("❌ SineSweepGenerator: failed to create tone buffer", category: .calibration)
+            return
+        }
 
         playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
 
@@ -135,11 +141,14 @@ public class SineSweepGenerator: ObservableObject {
         let duration: TimeInterval = 2.0 // Buffer length (will loop)
         let frameCount = AVAudioFrameCount(duration * sampleRate)
 
-        let buffer = generateContinuousTone(
+        guard let buffer = generateContinuousTone(
             frequency: frequency,
             sampleRate: sampleRate,
             frameCount: frameCount
-        )
+        ) else {
+            dlog("❌ SineSweepGenerator: failed to create tone buffer", category: .calibration)
+            return
+        }
 
         // Schedule with looping
         playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
@@ -166,7 +175,10 @@ public class SineSweepGenerator: ObservableObject {
 
     // MARK: - Private Methods
 
-    private var outputFormat: AVAudioFormat?
+    /// Generated buffers are always stereo 48 kHz; the main mixer maps them to the
+    /// hardware channel count and rate. Building buffers in the hardware format
+    /// fails for >2 channels (no channel layout) and crashed `scheduleBuffer`.
+    static let playbackChannelCount: AVAudioChannelCount = 2
 
     private func setupAudioEngine() {
         audioEngine = AVAudioEngine()
@@ -175,32 +187,23 @@ public class SineSweepGenerator: ObservableObject {
         guard let audioEngine,
               let playerNode else { return }
 
-        // Get the output format from the output node
-        let outputNode = audioEngine.outputNode
-        outputFormat = outputNode.outputFormat(forBus: 0)
-
         audioEngine.attach(playerNode)
 
-        // Connect with the correct format
-        if let format = outputFormat {
-            audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
-        } else {
-            audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: nil)
-        }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: Self.playbackChannelCount)
+        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
     }
 
-    private func generateSineSweep(
+    func generateSineSweep(
         startFreq: Double,
         endFreq: Double,
         duration: TimeInterval,
         sampleRate: Double,
         frameCount: AVAudioFrameCount
-    ) -> AVAudioPCMBuffer {
-        // Use the output format's channel count (typically stereo)
-        let channelCount = outputFormat?.channelCount ?? 2
+    ) -> AVAudioPCMBuffer? {
+        let channelCount = Self.playbackChannelCount
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            return AVAudioPCMBuffer()
+            return nil
         }
         buffer.frameLength = frameCount
 
@@ -235,17 +238,16 @@ public class SineSweepGenerator: ObservableObject {
         return buffer
     }
 
-    private func generateFixedTone(
+    func generateFixedTone(
         frequency: Double,
         duration: TimeInterval,
         sampleRate: Double,
         frameCount: AVAudioFrameCount
-    ) -> AVAudioPCMBuffer {
-        // Use the output format's channel count (typically stereo)
-        let channelCount = outputFormat?.channelCount ?? 2
+    ) -> AVAudioPCMBuffer? {
+        let channelCount = Self.playbackChannelCount
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            return AVAudioPCMBuffer()
+            return nil
         }
         buffer.frameLength = frameCount
 
@@ -276,16 +278,15 @@ public class SineSweepGenerator: ObservableObject {
         return buffer
     }
 
-    private func generateContinuousTone(
+    func generateContinuousTone(
         frequency: Double,
         sampleRate: Double,
         frameCount: AVAudioFrameCount
-    ) -> AVAudioPCMBuffer {
-        // Use the output format's channel count (typically stereo)
-        let channelCount = outputFormat?.channelCount ?? 2
+    ) -> AVAudioPCMBuffer? {
+        let channelCount = Self.playbackChannelCount
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            return AVAudioPCMBuffer()
+            return nil
         }
         buffer.frameLength = frameCount
 
