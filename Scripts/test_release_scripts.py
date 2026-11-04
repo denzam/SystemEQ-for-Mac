@@ -84,6 +84,176 @@ output.write_bytes(b'PNG fixture')
         self.assertEqual((int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")), (600, 400))
 
 
+class HomebrewDistributionWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="systemeq-homebrew-tests-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo with spaces"
+        (self.repo / "build").mkdir(parents=True)
+        (self.repo / "Casks").mkdir()
+        source = Path(__file__).resolve().parent.parent
+        shutil.copy2(source / "Casks/systemeq.rb", self.repo / "Casks/systemeq.rb")
+        self.workflow = (source / ".github/workflows/release.yml").read_text()
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        git = self.bin / "git"
+        git.write_text(f"#!{sys.executable}\n" + '''import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+with Path(os.environ['GIT_CALLS']).open('a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if args[0] == 'clone':
+    if os.environ.get('GIT_MODE') == 'clone-fail': sys.exit(12)
+    (Path(args[-1]) / 'Casks').mkdir(parents=True)
+elif args[0] == 'diff':
+    sys.exit({'unchanged': 0, 'diff-fail': 7}.get(os.environ.get('GIT_MODE'), 1))
+elif args[0] == 'commit' and os.environ.get('GIT_MODE') == 'commit-fail':
+    sys.exit(13)
+''')
+        git.chmod(0o755)
+        self.calls = self.root / "git-calls.jsonl"
+        self.output = self.root / "output"
+        self.output.write_text("")
+        self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", VERSION="1.4.9",
+                        TAP_TOKEN="fixture", GIT_CALLS=str(self.calls), GITHUB_OUTPUT=str(self.output))
+        self.source = self.repo / "build/SystemEQ-v1.4.9.dmg"
+        self.homebrew = self.repo / "build/SystemEQ-v1.4.9-homebrew.dmg"
+        self.source.write_bytes(b"fixture signed and stapled DMG")
+
+    def command(self, step):
+        section = self.workflow.split(f"      - name: {step}\n", 1)[1].split("\n      - name:", 1)[0]
+        return textwrap.dedent(section.split("        run: |\n", 1)[1])
+
+    def invoke(self, step, **values):
+        return subprocess.run(["bash", "-e", "-o", "pipefail", "-c", self.command(step)],
+                              cwd=self.repo, env=dict(self.env, **values), capture_output=True, text=True, timeout=30)
+
+    def prepare(self):
+        result = self.invoke("Prepare Homebrew distribution package")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.output.read_text().strip().split("=", 1)[1]
+
+    def git_calls(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+
+    def evaluate_cask(self, path):
+        ruby = '''require 'json'
+def cask(value); yield; end
+def version(value = nil); @version = value if value; @version; end
+def sha256(value); @sha256 = value; end
+def url(value); @url = value; end
+def method_missing(*args); end
+load ARGV.fetch(0)
+puts JSON.generate({version: @version, sha256: @sha256, url: @url})
+'''
+        result = subprocess.run(["ruby", "-e", ruby, str(path)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_identical_copy_and_generated_cask_select_uploaded_homebrew_asset(self):
+        import hashlib
+        original = self.source.read_bytes()
+        digest = self.prepare()
+        self.assertEqual(self.homebrew.read_bytes(), original)
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual(digest, hashlib.sha256(original).hexdigest())
+        result = self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=digest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cask = self.evaluate_cask(self.repo / "tap/Casks/systemeq.rb")
+        self.assertEqual(cask, dict(version="1.4.9", sha256=digest,
+                                   url="https://github.com/denzam/SystemEQ-for-Mac/releases/download/v1.4.9/SystemEQ-v1.4.9-homebrew.dmg"))
+        self.assertIn(["push", "origin", "main"], self.git_calls())
+        files = self.workflow.split("          files: |\n", 1)[1].split("        env:", 1)[0]
+        self.assertIn("build/SystemEQ-v${{ steps.version.outputs.version }}-homebrew.dmg\n", files)
+        self.assertIn("          fail_on_unmatched_files: true\n", files)
+        self.assertLess(self.workflow.index("      - name: Verify finished distribution packages\n"),
+                        self.workflow.index("      - name: Prepare Homebrew distribution package\n"))
+
+    def test_historical_template_retains_matching_standard_asset(self):
+        cask = self.evaluate_cask(self.repo / "Casks/systemeq.rb")
+        self.assertEqual(cask['version'], "1.4.6")
+        self.assertEqual(cask['sha256'], "378b490354e5746a8cafc20a631d786274f856b96ae994ae19287a491962eb55")
+        self.assertEqual(cask['url'], "https://github.com/denzam/SystemEQ-for-Mac/releases/download/v1.4.6/SystemEQ-v1.4.6.dmg")
+
+    def test_missing_or_empty_source_never_produces_digest(self):
+        self.source.unlink()
+        for present in (False, True):
+            with self.subTest(empty_file=present):
+                if present:
+                    self.source.write_bytes(b"")
+                result = self.invoke("Prepare Homebrew distribution package")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.output.read_text(), "")
+                self.assertFalse(self.homebrew.exists())
+
+    def test_failed_or_corrupted_copy_never_produces_digest(self):
+        cp = self.bin / "cp"
+        cp.write_text(f"#!{sys.executable}\n" + '''import os, sys
+from pathlib import Path
+if os.environ.get('COPY_MODE') == 'fail': sys.exit(11)
+Path(sys.argv[-1]).write_bytes(b'corrupted DMG')
+''')
+        cp.chmod(0o755)
+        before = self.source.read_bytes()
+        for mode in ("fail", "corrupt"):
+            with self.subTest(mode=mode):
+                result = self.invoke("Prepare Homebrew distribution package", COPY_MODE=mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.output.read_text(), "")
+                self.assertEqual(self.source.read_bytes(), before)
+
+    def test_hash_command_failure_or_invalid_output_never_produces_digest(self):
+        shasum = self.bin / "shasum"
+        shasum.write_text(f"#!{sys.executable}\n" + '''import os, sys
+if os.environ.get('HASH_MODE') == 'fail': sys.exit(17)
+print('invalid digest')
+''')
+        shasum.chmod(0o755)
+        for mode in ("fail", "invalid"):
+            with self.subTest(mode=mode):
+                self.assertNotEqual(self.invoke("Prepare Homebrew distribution package", HASH_MODE=mode).returncode, 0)
+                self.assertEqual(self.output.read_text(), "")
+
+    def test_tap_sync_rejects_missing_changed_or_unverified_asset_before_git(self):
+        digest = self.prepare()
+        for expected in ("", "invalid", "0" * 64):
+            with self.subTest(expected=expected):
+                self.assertNotEqual(self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=expected).returncode, 0)
+                self.assertEqual(self.git_calls(), [])
+        self.homebrew.write_bytes(b"changed")
+        self.assertNotEqual(self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=digest).returncode, 0)
+        self.assertEqual(self.git_calls(), [])
+        self.homebrew.unlink()
+        self.assertNotEqual(self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=digest).returncode, 0)
+        self.assertEqual(self.git_calls(), [])
+        self.homebrew.write_bytes(self.source.read_bytes())
+        self.source.write_bytes(b"changed source")
+        self.assertNotEqual(self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=digest).returncode, 0)
+        self.assertEqual(self.git_calls(), [])
+
+    def test_malformed_template_or_git_failure_never_pushes(self):
+        digest = self.prepare()
+        template = self.repo / "Casks/systemeq.rb"
+        original = template.read_text()
+        for mode in ("template", "duplicate-field", "invalid-ruby", "clone-fail", "diff-fail", "commit-fail", "unchanged"):
+            with self.subTest(mode=mode):
+                changed = original
+                if mode == "template":
+                    changed = original.replace('  sha256 ', '  missing_sha256 ')
+                elif mode == "duplicate-field":
+                    changed += '  sha256 "duplicate"\n'
+                elif mode == "invalid-ruby":
+                    changed += 'end\n'
+                template.write_text(changed)
+                result = self.invoke("Bump Homebrew tap", HOMEBREW_SHA256=digest, GIT_MODE=mode)
+                self.assertEqual(result.returncode == 0, mode == "unchanged", result.stderr)
+                self.assertFalse(any(call[0] == "push" for call in self.git_calls()))
+                self.calls.unlink()
+                if (self.repo / "tap").exists():
+                    shutil.rmtree(self.repo / "tap")
+
+
 class ReleaseScriptTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="systemeq-script-tests-")
