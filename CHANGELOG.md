@@ -4,10 +4,24 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.9] — 2026-11-04
+
+Optional automatic profile headroom adjustment and safer test tones on multichannel audio interfaces.
+
+### Added
+- Optional automatic Auto Preamp adjustment when calibration profiles are enabled, changed or disabled, including switching between profiles on the same audio interface; disabled by default and available in calibration settings (#36)
 
 ### Fixed
-- Resonance Finder sweep and test tones no longer crash the app when the output device has more than two channels (e.g. multichannel USB interfaces); tones are generated in stereo and mapped to the device by the mixer
+- Resonance Finder sweep and test tones no longer crash the app when the output device has more than two channels; tones and the player use stereo 48 kHz, with the mixer handling output channel and sample-rate conversion (#37)
+- Welcome setup now explains that BlackHole is optional with Native capture and links to official installation resources
+
+### Changed
+- Native media-key access controls are available in Audio Routing
+- Download statistics show package and release-file totals, including separate Homebrew package downloads
+
+### Thanks
+- Thanks to @thebigshock for suggesting automatic profile headroom adjustment (#36)
+- Thanks to @mstcgalis for reporting, investigating and fixing the multichannel test-tone crash (#37)
 
 ## [1.4.8] — 2026-10-31
 
