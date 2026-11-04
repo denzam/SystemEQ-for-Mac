@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "days": [
+    {
+      "date": "2026-11-04",
+      "total": 2758,
+      "dmg": 2614,
+      "zip": 144,
+      "homebrew": 0,
+      "other": 223,
+      "total_all_assets": 2981
+    }
+  ]
+}

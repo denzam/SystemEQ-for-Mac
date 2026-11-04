@@ -1,11 +1,424 @@
 {
-  "schema_version": 1,
-  "total": 2730,
-  "dmg": 2588,
-  "zip": 142,
+  "schema_version": 2,
+  "total": 2758,
+  "dmg": 2614,
+  "zip": 144,
+  "homebrew": 0,
+  "other": 223,
+  "total_all_assets": 2981,
   "package_assets": 42,
   "releases": 21,
-  "updated_at": "2026-11-03T12:48:14+00:00",
+  "homebrew_available": false,
+  "assets": [
+    {
+      "id": 421811254,
+      "release_id": 323671552,
+      "version": "v1.0.0",
+      "name": "SystemEQ-v1.0.0.zip",
+      "category": "zip",
+      "downloads": 2,
+      "size": 10104259
+    },
+    {
+      "id": 421811255,
+      "release_id": 323671552,
+      "version": "v1.0.0",
+      "name": "SystemEQ-v1.0.0.dmg",
+      "category": "dmg",
+      "downloads": 8,
+      "size": 10123738
+    },
+    {
+      "id": 421833490,
+      "release_id": 323679122,
+      "version": "v1.0.1",
+      "name": "SystemEQ-v1.0.1.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10102679
+    },
+    {
+      "id": 421833491,
+      "release_id": 323679122,
+      "version": "v1.0.1",
+      "name": "SystemEQ-v1.0.1.dmg",
+      "category": "dmg",
+      "downloads": 2,
+      "size": 10189221
+    },
+    {
+      "id": 421850210,
+      "release_id": 323684095,
+      "version": "v1.0.2",
+      "name": "SystemEQ-v1.0.2.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10109242
+    },
+    {
+      "id": 421850211,
+      "release_id": 323684095,
+      "version": "v1.0.2",
+      "name": "SystemEQ-v1.0.2.dmg",
+      "category": "dmg",
+      "downloads": 3,
+      "size": 10192791
+    },
+    {
+      "id": 421854508,
+      "release_id": 323685336,
+      "version": "v1.0.3",
+      "name": "SystemEQ-v1.0.3.dmg",
+      "category": "dmg",
+      "downloads": 2,
+      "size": 10194195
+    },
+    {
+      "id": 421854509,
+      "release_id": 323685336,
+      "version": "v1.0.3",
+      "name": "SystemEQ-v1.0.3.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10110060
+    },
+    {
+      "id": 421866920,
+      "release_id": 323688690,
+      "version": "v1.0.4",
+      "name": "SystemEQ-v1.0.4.dmg",
+      "category": "dmg",
+      "downloads": 4,
+      "size": 10195263
+    },
+    {
+      "id": 421866921,
+      "release_id": 323688690,
+      "version": "v1.0.4",
+      "name": "SystemEQ-v1.0.4.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10110823
+    },
+    {
+      "id": 421903673,
+      "release_id": 323707650,
+      "version": "v1.0.5",
+      "name": "SystemEQ-v1.0.5.dmg",
+      "category": "dmg",
+      "downloads": 2,
+      "size": 10183696
+    },
+    {
+      "id": 421903674,
+      "release_id": 323707650,
+      "version": "v1.0.5",
+      "name": "SystemEQ-v1.0.5.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10097427
+    },
+    {
+      "id": 421910604,
+      "release_id": 323718375,
+      "version": "v1.0.6",
+      "name": "SystemEQ-v1.0.6.dmg",
+      "category": "dmg",
+      "downloads": 2,
+      "size": 10184231
+    },
+    {
+      "id": 421910605,
+      "release_id": 323718375,
+      "version": "v1.0.6",
+      "name": "SystemEQ-v1.0.6.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 10097887
+    },
+    {
+      "id": 434031066,
+      "release_id": 332015503,
+      "version": "v1.0.7",
+      "name": "SystemEQ-v1.0.7.dmg",
+      "category": "dmg",
+      "downloads": 28,
+      "size": 10190056
+    },
+    {
+      "id": 434031068,
+      "release_id": 332015503,
+      "version": "v1.0.7",
+      "name": "SystemEQ-v1.0.7.zip",
+      "category": "zip",
+      "downloads": 4,
+      "size": 10105458
+    },
+    {
+      "id": 446734533,
+      "release_id": 339028078,
+      "version": "v1.1.0",
+      "name": "SystemEQ-v1.1.0.zip",
+      "category": "zip",
+      "downloads": 16,
+      "size": 10143428
+    },
+    {
+      "id": 446734534,
+      "release_id": 339028078,
+      "version": "v1.1.0",
+      "name": "SystemEQ-v1.1.0.dmg",
+      "category": "dmg",
+      "downloads": 248,
+      "size": 10227524
+    },
+    {
+      "id": 489776732,
+      "release_id": 359866677,
+      "version": "v1.1.1",
+      "name": "SystemEQ-v1.1.1.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 11423662
+    },
+    {
+      "id": 489776733,
+      "release_id": 359866677,
+      "version": "v1.1.1",
+      "name": "SystemEQ-v1.1.1.dmg",
+      "category": "dmg",
+      "downloads": 8,
+      "size": 11511796
+    },
+    {
+      "id": 490515287,
+      "release_id": 360068500,
+      "version": "v1.1.2",
+      "name": "SystemEQ-v1.1.2.zip",
+      "category": "zip",
+      "downloads": 4,
+      "size": 11429108
+    },
+    {
+      "id": 490515288,
+      "release_id": 360068500,
+      "version": "v1.1.2",
+      "name": "SystemEQ-v1.1.2.dmg",
+      "category": "dmg",
+      "downloads": 135,
+      "size": 11517110
+    },
+    {
+      "id": 507544871,
+      "release_id": 367487512,
+      "version": "v1.2.0",
+      "name": "SystemEQ-v1.2.0.zip",
+      "category": "zip",
+      "downloads": 3,
+      "size": 11467372
+    },
+    {
+      "id": 507544872,
+      "release_id": 367487512,
+      "version": "v1.2.0",
+      "name": "SystemEQ-v1.2.0.dmg",
+      "category": "dmg",
+      "downloads": 93,
+      "size": 11550275
+    },
+    {
+      "id": 516865467,
+      "release_id": 371337553,
+      "version": "v1.3.0",
+      "name": "SystemEQ-v1.3.0.dmg",
+      "category": "dmg",
+      "downloads": 175,
+      "size": 11620550
+    },
+    {
+      "id": 516865468,
+      "release_id": 371337553,
+      "version": "v1.3.0",
+      "name": "SystemEQ-v1.3.0.zip",
+      "category": "zip",
+      "downloads": 6,
+      "size": 11532530
+    },
+    {
+      "id": 531254979,
+      "release_id": 377380136,
+      "version": "v1.4.0",
+      "name": "SystemEQ-v1.4.0.zip",
+      "category": "zip",
+      "downloads": 1,
+      "size": 11669064
+    },
+    {
+      "id": 531254980,
+      "release_id": 377380136,
+      "version": "v1.4.0",
+      "name": "SystemEQ-v1.4.0.dmg",
+      "category": "dmg",
+      "downloads": 28,
+      "size": 11751394
+    },
+    {
+      "id": 534047376,
+      "release_id": 378611597,
+      "version": "v1.4.1",
+      "name": "SystemEQ-v1.4.1.dmg",
+      "category": "dmg",
+      "downloads": 454,
+      "size": 11751562
+    },
+    {
+      "id": 534047378,
+      "release_id": 378611597,
+      "version": "v1.4.1",
+      "name": "SystemEQ-v1.4.1.zip",
+      "category": "zip",
+      "downloads": 24,
+      "size": 11669179
+    },
+    {
+      "id": 575008708,
+      "release_id": 392120427,
+      "version": "v1.4.2",
+      "name": "SystemEQ-v1.4.2.dmg",
+      "category": "dmg",
+      "downloads": 198,
+      "size": 11825353
+    },
+    {
+      "id": 575008710,
+      "release_id": 392120427,
+      "version": "v1.4.2",
+      "name": "SystemEQ-v1.4.2.zip",
+      "category": "zip",
+      "downloads": 9,
+      "size": 11735192
+    },
+    {
+      "id": 593205860,
+      "release_id": 397704460,
+      "version": "v1.4.3",
+      "name": "SystemEQ-v1.4.3.zip",
+      "category": "zip",
+      "downloads": 10,
+      "size": 11785619
+    },
+    {
+      "id": 593205862,
+      "release_id": 397704460,
+      "version": "v1.4.3",
+      "name": "SystemEQ-v1.4.3.dmg",
+      "category": "dmg",
+      "downloads": 286,
+      "size": 11870335
+    },
+    {
+      "id": 627832791,
+      "release_id": 408914347,
+      "version": "v1.4.4",
+      "name": "SystemEQ-v1.4.4.dmg",
+      "category": "dmg",
+      "downloads": 373,
+      "size": 16845318
+    },
+    {
+      "id": 627832793,
+      "release_id": 408914347,
+      "version": "v1.4.4",
+      "name": "SystemEQ-v1.4.4.zip",
+      "category": "zip",
+      "downloads": 19,
+      "size": 16718941
+    },
+    {
+      "id": 669011119,
+      "release_id": 421797752,
+      "version": "v1.4.6",
+      "name": "SystemEQ-v1.4.6.dmg",
+      "category": "dmg",
+      "downloads": 44,
+      "size": 17926672
+    },
+    {
+      "id": 669011127,
+      "release_id": 421797752,
+      "version": "v1.4.6",
+      "name": "SystemEQ-v1.4.6.zip",
+      "category": "zip",
+      "downloads": 5,
+      "size": 17897680
+    },
+    {
+      "id": 669011128,
+      "release_id": 421797752,
+      "version": "v1.4.6",
+      "name": "appcast.xml",
+      "category": "other",
+      "downloads": 8,
+      "size": 3900
+    },
+    {
+      "id": 672389509,
+      "release_id": 422760006,
+      "version": "v1.4.7",
+      "name": "SystemEQ-v1.4.7.zip",
+      "category": "zip",
+      "downloads": 12,
+      "size": 17942481
+    },
+    {
+      "id": 672389510,
+      "release_id": 422760006,
+      "version": "v1.4.7",
+      "name": "SystemEQ-v1.4.7.dmg",
+      "category": "dmg",
+      "downloads": 309,
+      "size": 17959912
+    },
+    {
+      "id": 672389511,
+      "release_id": 422760006,
+      "version": "v1.4.7",
+      "name": "appcast.xml",
+      "category": "other",
+      "downloads": 81,
+      "size": 2304
+    },
+    {
+      "id": 695443833,
+      "release_id": 429950271,
+      "version": "v1.4.8",
+      "name": "appcast.xml",
+      "category": "other",
+      "downloads": 134,
+      "size": 3740
+    },
+    {
+      "id": 695443835,
+      "release_id": 429950271,
+      "version": "v1.4.8",
+      "name": "SystemEQ-v1.4.8.dmg",
+      "category": "dmg",
+      "downloads": 212,
+      "size": 18059011
+    },
+    {
+      "id": 695443838,
+      "release_id": 429950271,
+      "version": "v1.4.8",
+      "name": "SystemEQ-v1.4.8.zip",
+      "category": "zip",
+      "downloads": 22,
+      "size": 18060074
+    }
+  ],
+  "updated_at": "2026-11-04T12:07:39+00:00",
+  "history_since": "2026-11-04",
+  "daily_change": null,
   "source": "https://github.com/denzam/SystemEQ-for-Mac/releases",
-  "definition": "Official SystemEQ DMG and ZIP downloads, including updates and repeat downloads; not unique users or installations."
+  "definition": "Official SystemEQ DMG, ZIP and dedicated Homebrew-file downloads, including updates and repeat downloads; not unique users or installations. Historical Homebrew downloads remain in DMG. ZIP includes app updates. Other release attachments are counted separately. GitHub-generated source archives have no exposed download count."
 }

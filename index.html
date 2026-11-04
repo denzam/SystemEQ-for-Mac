@@ -787,6 +787,16 @@
   }
   .hero-version[hidden] { display: none; }
   .hero-version strong { color: var(--text-dim); font-weight: 600; }
+  .download-stats { max-width: 780px; margin: 14px auto 0; line-height: 1.6; }
+  .download-stats p { margin: 6px 0; }
+  .download-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 20px; }
+  .download-stats details { margin-top: 10px; text-align: left; }
+  .download-stats summary { cursor: pointer; text-align: center; }
+  .download-table-wrap { overflow-x: auto; margin-top: 8px; }
+  .download-stats table { width: 100%; border-collapse: collapse; text-align: left; }
+  .download-stats th, .download-stats td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  .download-stats td:first-child { overflow-wrap: anywhere; }
+  .download-stats th:last-child, .download-stats td:last-child { text-align: right; white-space: nowrap; }
 
   /* === FAQ === */
   .faq { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
@@ -1106,6 +1116,19 @@
       <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac" data-i18n="hero.ctaGithub">View on GitHub</a>
     </div>
     <p class="hero-version reveal reveal-delay-3" id="heroVersion" hidden><span data-i18n="hero.latest">Latest:</span> <strong id="heroVersionTag"></strong> · <span data-i18n="hero.free">free</span></p>
+    <div class="hero-version download-stats reveal reveal-delay-3" id="appDownloads" aria-live="polite">
+      <p><span data-i18n="hero.downloads">App downloads:</span> <strong id="appDownloadCount">—</strong></p>
+      <div id="appDownloadBreakdown" class="download-breakdown"></div>
+      <p data-i18n="hero.downloadsDesc">Downloads include repeats and updates; they are not unique users or installations.</p>
+      <p id="appDownloadDefinition"></p>
+      <p><span data-i18n="hero.downloadsUpdated">Updated:</span> <time id="appDownloadsUpdated">—</time></p>
+      <p id="appDownloadStatus" role="status"></p>
+      <p id="appDownloadGrowth"></p>
+      <details id="appDownloadFiles" hidden>
+        <summary id="appDownloadFilesLabel"></summary>
+        <div class="download-table-wrap"><table><thead><tr><th scope="col" id="appDownloadFileHeading"></th><th scope="col" id="appDownloadVersionHeading"></th><th scope="col" id="appDownloadCountHeading"></th></tr></thead><tbody id="appDownloadAssets"></tbody></table></div>
+      </details>
+    </div>
     <div class="badges reveal reveal-delay-3">
       <span class="badge">GPLv3</span>
       <span class="badge" data-i18n="hero.badgeTelemetry">No app telemetry</span>
@@ -1471,6 +1494,9 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "nav.faq": "FAQ",
       "hero.latest": "Latest:",
       "hero.free": "free",
+      "hero.downloads": "App downloads:",
+      "hero.downloadsDesc": "Downloads include repeats and updates; they are not unique users or installations.",
+      "hero.downloadsUpdated": "Updated:",
       "copy.btn": "Copy",
       "copy.done": "Copied!",
       "faq.label": "FAQ",
@@ -1632,6 +1658,9 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "nav.faq": "FAQ",
       "hero.latest": "Ultima:",
       "hero.free": "gratis",
+      "hero.downloads": "Download dell’app:",
+      "hero.downloadsDesc": "I download includono ripetizioni e aggiornamenti; non sono utenti unici né installazioni.",
+      "hero.downloadsUpdated": "Aggiornato:",
       "copy.btn": "Copia",
       "copy.done": "Copiato!",
       "faq.label": "FAQ",
@@ -1793,6 +1822,9 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "nav.faq": "FAQ",
       "hero.latest": "Остання:",
       "hero.free": "безкоштовно",
+      "hero.downloads": "Завантаження програми:",
+      "hero.downloadsDesc": "Завантаження включають повтори й оновлення; це не унікальні користувачі чи встановлення.",
+      "hero.downloadsUpdated": "Оновлено:",
       "copy.btn": "Копіювати",
       "copy.done": "Скопійовано!",
       "faq.label": "FAQ",
@@ -2242,6 +2274,8 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
     })
     .catch(() => {});
 </script>
+
+<script defer src="download-stats.js"></script>
 
 <script data-goatcounter="https://systemeqformac.goatcounter.com/count"
         defer src="https://gc.zgo.at/count.js"></script>
