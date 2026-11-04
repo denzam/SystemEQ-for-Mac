@@ -787,9 +787,10 @@
   }
   .hero-version[hidden] { display: none; }
   .hero-version strong { color: var(--text-dim); font-weight: 600; }
-  .download-stats { max-width: 780px; margin: 14px auto 0; line-height: 1.6; }
+  .download-stats { max-width: 780px; margin: 14px auto 0; line-height: 1.6; color: var(--text-dim); scroll-margin-top: calc(90px + var(--safe-top)); }
+  .download-stats strong { color: var(--text); font-size: 20px; font-weight: 700; }
   .download-stats p { margin: 6px 0; }
-  .download-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 20px; }
+  .download-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 20px; color: var(--text-dim); font-size: 14px; }
   .download-stats details { margin-top: 10px; text-align: left; }
   .download-stats summary { cursor: pointer; text-align: center; }
   .download-table-wrap { overflow-x: auto; margin-top: 8px; }
@@ -1116,7 +1117,7 @@
       <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac" data-i18n="hero.ctaGithub">View on GitHub</a>
     </div>
     <p class="hero-version reveal reveal-delay-3" id="heroVersion" hidden><span data-i18n="hero.latest">Latest:</span> <strong id="heroVersionTag"></strong> · <span data-i18n="hero.free">free</span></p>
-    <div class="hero-version download-stats reveal reveal-delay-3" id="appDownloads" aria-live="polite">
+    <div class="hero-version download-stats" id="appDownloads" aria-live="polite">
       <p><span data-i18n="hero.downloads">App downloads:</span> <strong id="appDownloadCount">—</strong></p>
       <div id="appDownloadBreakdown" class="download-breakdown"></div>
       <p data-i18n="hero.downloadsDesc">Includes updates and repeat downloads: one person can account for several downloads. This is not a user count. Data comes from GitHub; the app sends no usage statistics.</p>
