@@ -12,12 +12,12 @@
     },
     {
       "date": "2026-11-05",
-      "total": 2785,
-      "dmg": 2641,
-      "zip": 144,
-      "homebrew": 0,
-      "other": 267,
-      "total_all_assets": 3052
+      "total": 2807,
+      "dmg": 2650,
+      "zip": 149,
+      "homebrew": 8,
+      "other": 293,
+      "total_all_assets": 3100
     }
   ]
 }
