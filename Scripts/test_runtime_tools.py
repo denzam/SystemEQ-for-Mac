@@ -3113,5 +3113,527 @@ final class Controller {
         self.assertIn("Preset archive validation: tests passed", result.stdout)
 
 
+class LocalBuildAndSigningWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="systemeq-build-run-test-")
+        self.test_dir = Path(self.temp.name)
+        self.root = Path(__file__).resolve().parent.parent
+        self.script_path = self.root / "Scripts/build_and_run.sh"
+
+        self.bin_dir = self.test_dir / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+        self.invocations_file = self.test_dir / "invocations.jsonl"
+
+        self.app_name = "SystemEQ for Mac"
+        self.apps_dir = self.test_dir / "Applications"
+        self.apps_dir.mkdir(parents=True, exist_ok=True)
+        self.installed_app = self.apps_dir / f"{self.app_name}.app"
+        self._create_mock_bundle(self.installed_app)
+
+        self.derived_data = self.test_dir / "DerivedData"
+        self.products_dir = self.derived_data / "Build/Products/Release"
+        self.products_dir.mkdir(parents=True, exist_ok=True)
+        self.app_bundle = self.products_dir / f"{self.app_name}.app"
+
+        self.log_dir = self.test_dir / "LocalArtifacts/LocalRun"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        self.synthetic_hash = "A" * 40
+        self.synthetic_team = "TESTTEAM01"
+        self.synthetic_name = f"Developer ID Application: Test ({self.synthetic_team})"
+
+        self.sec_config = self.test_dir / "security_config.json"
+        self.codesign_config = self.test_dir / "codesign_config.json"
+        self.xcodebuild_config = self.test_dir / "xcodebuild_config.json"
+        self.mv_config = self.test_dir / "mv_config.json"
+
+        self._set_security_config(0, identities=[
+            {"hash": self.synthetic_hash, "name": self.synthetic_name}
+        ])
+        self._set_codesign_config(installed_team=self.synthetic_team, signed_team=self.synthetic_team)
+        self._set_xcodebuild_config(0)
+        self._set_mv_config()
+        self._create_stubs()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _create_mock_bundle(self, bundle_path):
+        bundle_path.mkdir(parents=True, exist_ok=True)
+        macos = bundle_path / "Contents/MacOS"
+        macos.mkdir(parents=True, exist_ok=True)
+        (macos / self.app_name).write_text("binary")
+        info_plist = bundle_path / "Contents/Info.plist"
+        info_plist.write_text("<plist><dict></dict></plist>")
+        fw = bundle_path / "Contents/Frameworks"
+        fw.mkdir(parents=True, exist_ok=True)
+        (fw / "libprojectM-4.4.dylib").write_text("dylib")
+        (fw / "libprojectM-4-playlist.4.dylib").write_text("dylib")
+        sparkle = fw / "Sparkle.framework/Versions/B"
+        sparkle.mkdir(parents=True, exist_ok=True)
+        (sparkle / "Sparkle").write_text("sparkle")
+        (sparkle / "Autoupdate").write_text("autoupdate")
+        (sparkle / "XPCServices/Installer.xpc").mkdir(parents=True, exist_ok=True)
+        (sparkle / "XPCServices/Downloader.xpc").mkdir(parents=True, exist_ok=True)
+        (sparkle / "Updater.app").mkdir(parents=True, exist_ok=True)
+        helper = bundle_path / "Contents/Helpers/ProjectMHelper.app"
+        helper.mkdir(parents=True, exist_ok=True)
+        helper_fw = helper / "Contents/Frameworks"
+        helper_fw.mkdir(parents=True, exist_ok=True)
+        (helper_fw / "libprojectM-4.4.dylib").write_text("dylib")
+        (helper_fw / "libprojectM-4-playlist.4.dylib").write_text("dylib")
+
+    def _set_security_config(self, code=0, identities=None, raw_output=None):
+        payload = {"code": code, "identities": identities, "raw_output": raw_output}
+        self.sec_config.write_text(json.dumps(payload))
+
+    def _set_codesign_config(self, installed_team="TESTTEAM01", signed_team="TESTTEAM01",
+                             verify_fails=False, sign_fails_target=None,
+                             installed_metadata_error=False, installed_metadata_exit_code=71,
+                             candidate_metadata_error=False, candidate_metadata_exit_code=71):
+        payload = {
+            "installed_team": installed_team,
+            "signed_team": signed_team,
+            "verify_fails": verify_fails,
+            "sign_fails_target": sign_fails_target,
+            "installed_metadata_error": installed_metadata_error,
+            "installed_metadata_exit_code": installed_metadata_exit_code,
+            "candidate_metadata_error": candidate_metadata_error,
+            "candidate_metadata_exit_code": candidate_metadata_exit_code
+        }
+        self.codesign_config.write_text(json.dumps(payload))
+
+    def _set_mv_config(self, fail_all=False, fail_target=None, fail_update_only=False):
+        payload = {
+            "fail_all": fail_all,
+            "fail_target": fail_target,
+            "fail_update_only": fail_update_only
+        }
+        self.mv_config.write_text(json.dumps(payload))
+
+    def _set_xcodebuild_config(self, code=0):
+        self.xcodebuild_config.write_text(json.dumps({"code": code}))
+
+    def _create_stubs(self):
+        sec = self.bin_dir / "security"
+        sec.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "security", "argv": sys.argv[1:]}) + "\\n")
+config = json.loads((Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "security_config.json").read_text())
+if config["code"] != 0:
+    sys.stderr.write("security: command failed\\n")
+    sys.exit(config["code"])
+if config.get("raw_output") is not None:
+    sys.stdout.write(config["raw_output"])
+    sys.exit(0)
+identities = config.get("identities") or []
+lines = []
+for i, ident in enumerate(identities, 1):
+    lines.append(f'  {i}) {ident["hash"]} "{ident["name"]}"')
+lines.append(f"     {len(identities)} valid identities found\\n")
+sys.stdout.write("\\n".join(lines))
+sys.exit(0)
+""")
+        sec.chmod(0o755)
+
+        cs = self.bin_dir / "codesign"
+        cs.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "codesign", "argv": sys.argv[1:]}) + "\\n")
+config = json.loads((Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "codesign_config.json").read_text())
+if "-dvvv" in sys.argv:
+    target = sys.argv[-1]
+    installed_app = os.environ.get("SYSTEMEQ_INSTALLED_APP", "")
+    is_installed = (target == installed_app or "Applications/SystemEQ for Mac.app" in target)
+    if is_installed and config.get("installed_metadata_error"):
+        sys.stderr.write("simulated installed metadata failure\\n")
+        sys.exit(config.get("installed_metadata_exit_code", 71))
+    if not is_installed and config.get("candidate_metadata_error"):
+        team = config.get("signed_team", "TESTTEAM01")
+        sys.stderr.write(f"Executable={target}/Contents/MacOS/SystemEQ for Mac\\nIdentifier=com.denzam.SystemEQ\\nTeamIdentifier={team}\\nAuthority=Developer ID Application: Test ({team})\\n")
+        sys.exit(config.get("candidate_metadata_exit_code", 71))
+    if is_installed:
+        team = config.get("installed_team")
+    else:
+        team = config.get("signed_team")
+    if team:
+        sys.stderr.write(f"Executable={target}/Contents/MacOS/SystemEQ for Mac\\nIdentifier=com.denzam.SystemEQ\\nTeamIdentifier={team}\\nAuthority=Developer ID Application: Test ({team})\\n")
+    else:
+        sys.stderr.write(f"Executable={target}/Contents/MacOS/SystemEQ for Mac\\nIdentifier=com.denzam.SystemEQ\\nTeamIdentifier=not set\\nSignature=adhoc\\n")
+    sys.exit(0)
+if "--verify" in sys.argv:
+    if config.get("verify_fails"):
+        sys.stderr.write("codesign: verification failed\\n")
+        sys.exit(1)
+    sys.exit(0)
+if "--sign" in sys.argv:
+    fail_target = config.get("sign_fails_target")
+    target = sys.argv[-1]
+    if fail_target and fail_target in target:
+        sys.stderr.write(f"codesign: signing failed on {target}\\n")
+        sys.exit(1)
+    sys.exit(0)
+sys.exit(0)
+""")
+        cs.chmod(0o755)
+
+        mv = self.bin_dir / "mv"
+        mv.write_text("""#!/usr/bin/env python3
+import sys, json, os, shutil
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "mv", "argv": sys.argv[1:]}) + "\\n")
+config_file = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "mv_config.json"
+config = json.loads(config_file.read_text()) if config_file.exists() else {}
+if config.get("fail_all"):
+    sys.stderr.write("mv: simulated failure\\n")
+    sys.exit(1)
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+if config.get("fail_update_only") and "previous.app" not in str(src) and str(dst).endswith("SystemEQ for Mac.app"):
+    sys.stderr.write(f"mv: update failure for {dst}\\n")
+    sys.exit(1)
+if config.get("fail_target") and config["fail_target"] in str(dst):
+    sys.stderr.write(f"mv: simulated failure for {dst}\\n")
+    sys.exit(1)
+shutil.move(src, dst)
+sys.exit(0)
+""")
+        mv.chmod(0o755)
+
+        xb = self.bin_dir / "xcodebuild"
+        xb.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "xcodebuild", "argv": sys.argv[1:]}) + "\\n")
+config = json.loads((Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "xcodebuild_config.json").read_text())
+if config["code"] != 0:
+    sys.stderr.write("xcodebuild: build failed\\n")
+    sys.exit(config["code"])
+derived_data = Path(os.environ["SYSTEMEQ_DERIVED_DATA"])
+bundle = derived_data / "Build/Products/Release/SystemEQ for Mac.app"
+bundle.mkdir(parents=True, exist_ok=True)
+macos = bundle / "Contents/MacOS"
+macos.mkdir(parents=True, exist_ok=True)
+(macos / "SystemEQ for Mac").write_text("binary")
+(bundle / "Contents/Info.plist").write_text("<plist></plist>")
+fw = bundle / "Contents/Frameworks"
+fw.mkdir(parents=True, exist_ok=True)
+(fw / "libprojectM-4.4.dylib").write_text("dylib")
+(fw / "libprojectM-4-playlist.4.dylib").write_text("dylib")
+sparkle = fw / "Sparkle.framework/Versions/B"
+sparkle.mkdir(parents=True, exist_ok=True)
+(sparkle / "Sparkle").write_text("sparkle")
+(sparkle / "Autoupdate").write_text("autoupdate")
+(sparkle / "XPCServices/Installer.xpc").mkdir(parents=True, exist_ok=True)
+(sparkle / "XPCServices/Downloader.xpc").mkdir(parents=True, exist_ok=True)
+(sparkle / "Updater.app").mkdir(parents=True, exist_ok=True)
+(bundle / "Contents/Helpers/ProjectMHelper.app/Contents/Frameworks").mkdir(parents=True, exist_ok=True)
+(bundle / "Contents/Helpers/ProjectMHelper.app/Contents/Frameworks/libprojectM-4.4.dylib").write_text("dylib")
+(bundle / "Contents/Helpers/ProjectMHelper.app/Contents/Frameworks/libprojectM-4-playlist.4.dylib").write_text("dylib")
+sys.exit(0)
+""")
+        xb.chmod(0o755)
+
+        osa = self.bin_dir / "osascript"
+        osa.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "osascript", "argv": sys.argv[1:]}) + "\\n")
+sys.exit(0)
+""")
+        osa.chmod(0o755)
+
+        op = self.bin_dir / "open"
+        op.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "open", "argv": sys.argv[1:]}) + "\\n")
+sys.exit(0)
+""")
+        op.chmod(0o755)
+
+        pg = self.bin_dir / "pgrep"
+        pg.write_text("""#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+lines = inv.read_text().splitlines() if inv.exists() else []
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "pgrep", "argv": sys.argv[1:]}) + "\\n")
+has_open = any(json.loads(line).get("bin") == "open" for line in lines)
+has_osascript = any(json.loads(line).get("bin") == "osascript" for line in lines)
+if has_open:
+    sys.exit(0)
+elif has_osascript:
+    sys.exit(1)
+sys.exit(0)
+""")
+        pg.chmod(0o755)
+
+        dt = self.bin_dir / "ditto"
+        dt.write_text("""#!/usr/bin/env python3
+import sys, json, os, shutil
+from pathlib import Path
+inv = Path(os.environ["SYSTEMEQ_TEST_DIR"]) / "invocations.jsonl"
+with inv.open("a") as f:
+    f.write(json.dumps({"bin": "ditto", "argv": sys.argv[1:]}) + "\\n")
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+if dst.exists():
+    shutil.rmtree(dst)
+if src.is_dir():
+    shutil.copytree(src, dst)
+else:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+sys.exit(0)
+""")
+        dt.chmod(0o755)
+
+    def run_script(self, args, extra_env=None):
+        env = dict(
+            os.environ,
+            SYSTEMEQ_TEST_DIR=str(self.test_dir),
+            SYSTEMEQ_INSTALLED_APP=str(self.installed_app),
+            SYSTEMEQ_DERIVED_DATA=str(self.derived_data),
+            SYSTEMEQ_LOG_DIR=str(self.log_dir),
+            SYSTEMEQ_SECURITY_BIN=str(self.bin_dir / "security"),
+            SYSTEMEQ_CODESIGN_BIN=str(self.bin_dir / "codesign"),
+            SYSTEMEQ_XCODEBUILD_BIN=str(self.bin_dir / "xcodebuild"),
+            SYSTEMEQ_OSASCRIPT_BIN=str(self.bin_dir / "osascript"),
+            SYSTEMEQ_OPEN_BIN=str(self.bin_dir / "open"),
+            SYSTEMEQ_PGREP_BIN=str(self.bin_dir / "pgrep"),
+            SYSTEMEQ_DITTO_BIN=str(self.bin_dir / "ditto"),
+            PATH=str(self.bin_dir) + ":" + os.environ["PATH"]
+        )
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run([str(self.script_path), *args], env=env, capture_output=True, text=True)
+
+    def read_invocations(self):
+        if not self.invocations_file.exists():
+            return []
+        return [json.loads(line) for line in self.invocations_file.read_text().splitlines()]
+
+    def test_argument_parsing_and_help(self):
+        res = self.run_script(["--help"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Usage:", res.stdout)
+        self.assertIn("--ad-hoc", res.stdout)
+        self.assertEqual(len(self.read_invocations()), 0)
+
+        for bad_args in (
+            ["--invalid-flag"],
+            ["--identity"],
+            ["--team-id"],
+            ["--build-only", "--install"],
+            ["--install", "--ad-hoc"],
+            ["run", "--ad-hoc"],
+            ["--verify", "--ad-hoc"],
+        ):
+            with self.subTest(bad_args=bad_args):
+                r = self.run_script(bad_args)
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(len(self.read_invocations()), 0)
+
+    def test_negative_identity_discovery(self):
+        self._set_security_config(code=1)
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Failed to query signing identities", res.stderr)
+
+        self._set_security_config(code=0, raw_output="")
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("empty response", res.stderr)
+
+        self._set_security_config(code=0, raw_output="0 valid identities found\\n")
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("No valid code signing identities found", res.stderr)
+
+        self._set_security_config(code=0, identities=[
+            {"hash": "1111111111111111111111111111111111111111", "name": "Mac Developer: Dev (XYZ1234567)"}
+        ])
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("No valid Developer ID Application identities found", res.stderr)
+
+        self._set_codesign_config(installed_team=None)
+        self._set_security_config(code=0, identities=[
+            {"hash": "1111111111111111111111111111111111111111", "name": "Developer ID Application: Dev A (TEAM111111)"},
+            {"hash": "2222222222222222222222222222222222222222", "name": "Developer ID Application: Dev B (TEAM222222)"}
+        ])
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Multiple Developer ID Application identities found", res.stderr)
+
+    def test_negative_team_and_metadata_mismatches(self):
+        self._set_codesign_config(installed_team=self.synthetic_team)
+        self._set_security_config(code=0, identities=[
+            {"hash": "3333333333333333333333333333333333333333", "name": "Developer ID Application: Other (WRONGTEAM1)"}
+        ])
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(f"No Developer ID Application identity found matching Team ID {self.synthetic_team}", res.stderr)
+
+        res = self.run_script(["--build-only", "--team-id", "DIFFTEAM12"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Team ID mismatch", res.stderr)
+
+        self._set_codesign_config(installed_team=None)
+        self._set_security_config(code=0, identities=[
+            {"hash": "4444444444444444444444444444444444444444", "name": "Developer ID Application: Malformed"}
+        ])
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("missing or invalid metadata", res.stderr)
+
+    def test_negative_signing_and_build_failures_prevent_stop_and_install(self):
+        self._set_xcodebuild_config(code=1)
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+        self._set_xcodebuild_config(code=0)
+        self._set_codesign_config(installed_team=self.synthetic_team, signed_team=self.synthetic_team, sign_fails_target="Autoupdate")
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+        self._set_codesign_config(installed_team=self.synthetic_team, signed_team=self.synthetic_team, verify_fails=True)
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+    def test_installed_metadata_command_failure(self):
+        self._set_codesign_config(installed_metadata_error=True, installed_metadata_exit_code=71)
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Failed to read code signature from installed app", res.stderr)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("xcodebuild", bins)
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+    def test_candidate_metadata_nonzero_with_valid_output(self):
+        self._set_codesign_config(candidate_metadata_error=True, candidate_metadata_exit_code=71)
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Failed to verify candidate bundle signature metadata", res.stderr)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertIn("xcodebuild", bins)
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+    def test_missing_main_entitlements(self):
+        import shutil
+        temp_repo = self.test_dir / "temp_repo"
+        (temp_repo / "Scripts").mkdir(parents=True)
+        isolated_script = temp_repo / "Scripts/build_and_run.sh"
+        shutil.copy2(self.script_path, isolated_script)
+        isolated_script.chmod(0o755)
+        self.script_path = isolated_script
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Required entitlements file not found", res.stderr)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("xcodebuild", bins)
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+
+    def test_healthy_stable_signing_build_only(self):
+        res = self.run_script(["--build-only"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Release build:", res.stdout)
+        inv = self.read_invocations()
+        bins = [c["bin"] for c in inv]
+        self.assertNotIn("osascript", bins)
+        self.assertNotIn("open", bins)
+        sign_calls = [c for c in inv if c["bin"] == "codesign" and "--sign" in c["argv"]]
+        self.assertGreaterEqual(len(sign_calls), 1)
+        for sc in sign_calls:
+            self.assertIn("--options", sc["argv"])
+            self.assertIn("runtime", sc["argv"])
+            self.assertIn("--timestamp=none", sc["argv"])
+
+    def test_healthy_stable_signing_install_and_backup_preservation(self):
+        old_backup = self.log_dir / "previous.old1"
+        old_backup.mkdir(parents=True)
+        (old_backup / "original.app").mkdir()
+        (old_backup / "original.app/Contents").mkdir()
+        (old_backup / "original.app/Contents/Info.plist").write_text("<plist></plist>")
+
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 0)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertIn("osascript", bins)
+        self.assertIn("ditto", bins)
+        self.assertIn("open", bins)
+        self.assertTrue(old_backup.exists())
+        backups = list(self.log_dir.glob("previous.*"))
+        self.assertEqual(len(backups), 2)
+
+    def test_certificate_free_build_only(self):
+        self._set_security_config(code=1)
+        res = self.run_script(["--build-only", "--ad-hoc"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Release build:", res.stdout)
+        bins = [c["bin"] for c in self.read_invocations()]
+        self.assertNotIn("security", bins)
+        self.assertNotIn("osascript", bins)
+
+    def test_spaces_in_paths(self):
+        spaced_app = self.apps_dir / "SystemEQ with spaces.app"
+        self._create_mock_bundle(spaced_app)
+        res = self.run_script(["--build-only", "--ad-hoc"], extra_env={"SYSTEMEQ_INSTALLED_APP": str(spaced_app)})
+        self.assertEqual(res.returncode, 0)
+
+    def test_staging_cleanup_retains_rollback_on_failure(self):
+        self._set_codesign_config(installed_team=self.synthetic_team, signed_team=self.synthetic_team, verify_fails=True)
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        self.assertTrue(self.installed_app.exists())
+        staging_dirs = [p for p in self.apps_dir.iterdir() if p.name.startswith(".SystemEQ-update.")]
+        self.assertEqual(len(staging_dirs), 0)
+
+    def test_staging_cleanup_rollback_failure_preserves_staging(self):
+        self._set_mv_config(fail_target=self.app_name + ".app")
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Failed to restore previous app from staging", res.stderr)
+        staging_dirs = [p for p in self.apps_dir.iterdir() if p.name.startswith(".SystemEQ-update.")]
+        self.assertEqual(len(staging_dirs), 1)
+        self.assertTrue((staging_dirs[0] / "previous.app").exists())
+
+    def test_staging_cleanup_rollback_success_restores_previous(self):
+        self._set_mv_config(fail_update_only=True)
+        res = self.run_script(["--install"])
+        self.assertEqual(res.returncode, 1)
+        self.assertTrue(self.installed_app.exists())
+        staging_dirs = [p for p in self.apps_dir.iterdir() if p.name.startswith(".SystemEQ-update.")]
+        self.assertEqual(len(staging_dirs), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
