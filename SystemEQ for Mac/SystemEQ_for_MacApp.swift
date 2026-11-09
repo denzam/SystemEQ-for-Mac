@@ -69,21 +69,11 @@ enum AppStartup {
             // Filters will be created only when user enables EQ
             if let saved = PresetPersistence.loadPlaybackState() {
                 let engine = AudioEngine.shared
-                engine.bandMode = saved.mode
-                engine.syncBandsToMode()
-
-                // Load values into UI bands WITHOUT syncing to CoreAudioEngine
-                for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
-                    engine.bands[index].gain = gain
-                }
-                engine.preampGain = saved.preamp
+                engine.restorePlayback(saved, sync: false)
 
                 // Restore EQ enabled state
                 let wasEnabled = UserDefaults.standard.bool(forKey: "eqWasEnabled")
                 if wasEnabled {
-                    // Now apply to CoreAudioEngine (this will create filters)
-                    engine.applyEQValues(saved.gains)
-                    engine.setPreampGain(saved.preamp)
                     if engine.setEnabled(true, persistState: false) {
                         dlog("Restored last state: preset + EQ enabled", category: .preset)
                     } else {
@@ -102,14 +92,7 @@ enum AppStartup {
             // Load preset but keep EQ disabled
             if let saved = PresetPersistence.loadPlaybackState() {
                 let engine = AudioEngine.shared
-                engine.bandMode = saved.mode
-                engine.syncBandsToMode()
-
-                // Load values into UI bands WITHOUT syncing to CoreAudioEngine
-                for (index, gain) in saved.gains.prefix(engine.bands.count).enumerated() {
-                    engine.bands[index].gain = gain
-                }
-                engine.preampGain = saved.preamp
+                engine.restorePlayback(saved, sync: false)
 
                 // Keep EQ disabled - NO filters created
                 engine.setEnabled(false, persistState: false)

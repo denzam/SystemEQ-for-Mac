@@ -17,6 +17,8 @@ final class AutoEQStateTests: XCTestCase {
         var enableCount = 0
         var records: [(DevicePresetRecord, String?)] = []
         var saved: [(EQBandMode, [Float], Float, Float)] = []
+        var direct: [AutoEQSourceFilter]?
+        var acceptsDirect = true
 
         var engine: AutoEQState.Engine {
             AutoEQState.Engine(
@@ -28,7 +30,14 @@ final class AutoEQStateTests: XCTestCase {
                 headroom: { _, _ in self.limit },
                 apply: { self.gains = $0; self.applyCount += 1 },
                 enabled: { self.enabled },
-                enable: { self.enabled = true; self.enableCount += 1 }
+                enable: { self.enabled = true; self.enableCount += 1 },
+                directFilters: { self.direct },
+                applyDirect: { filters, preamp in
+                    guard self.acceptsDirect else { return false }
+                    self.direct = filters
+                    self.preamp = preamp
+                    return true
+                }
             )
         }
     }
@@ -96,6 +105,50 @@ final class AutoEQStateTests: XCTestCase {
 
     private func identity(_ name: String) -> AutoEQState.Identity {
         AutoEQState.Identity(name: name, source: "Custom", path: nil, rawText: "Preamp: -4 dB")
+    }
+
+    func testDirectImportCanApplyOriginalFiltersAfterFittingFails() async throws {
+        let harness = Harness()
+        let state = owner(harness, prepare: { _, _ in throw AutoEQImportError.insufficientHeadroom })
+        let original = try input()
+        state.startImport(original, identity: identity("Exact"), autoApply: true, preservePlayback: false)
+        try await waitForImport(state)
+        XCTAssertEqual(harness.applyCount, 0)
+        XCTAssertTrue(state.canApplyDirect)
+        XCTAssertTrue(state.applyDirect())
+        XCTAssertEqual(harness.direct, original.directFilters)
+        XCTAssertEqual(harness.preamp, -4)
+        XCTAssertEqual(harness.gains, [Float](repeating: 0, count: 10))
+        XCTAssertEqual(harness.records.last?.0.directFilters, original.directFilters)
+        XCTAssertEqual(state.appliedIdentity?.name, "Exact")
+    }
+
+    func testRejectedDirectImportDoesNotWritePlaybackIdentityOrDeviceRecord() async throws {
+        let harness = Harness()
+        harness.acceptsDirect = false
+        let state = owner(harness)
+        try state.startImport(input(), identity: identity("Rejected"), autoApply: false, preservePlayback: false)
+        try await waitForImport(state)
+        XCTAssertFalse(state.applyDirect())
+        XCTAssertNil(harness.direct)
+        XCTAssertNil(state.appliedIdentity)
+        XCTAssertTrue(harness.records.isEmpty)
+        XCTAssertNil(defaults.string(forKey: "lastAppliedPresetJSON"))
+    }
+
+    func testDirectImportRejectsCurrentNyquistAndStaleOutput() async throws {
+        let harness = Harness()
+        let state = owner(harness)
+        let original = try AutoEQImportParser.parse("Filter 1: ON PK Fc 18000 Hz Gain -6 dB Q 8")
+        state.startImport(original, identity: identity("Exact"), autoApply: false, preservePlayback: false)
+        try await waitForImport(state)
+        harness.rate = 36000
+        XCTAssertFalse(state.applyDirect())
+        XCTAssertEqual(state.importError, .invalidSampleRate)
+        harness.rate = 48000
+        harness.uid = "B"
+        XCTAssertFalse(state.applyDirect())
+        XCTAssertTrue(harness.records.isEmpty)
     }
 
     nonisolated private static func prepared(

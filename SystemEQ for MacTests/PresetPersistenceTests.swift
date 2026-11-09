@@ -9,6 +9,24 @@
 import XCTest
 
 final class PresetPersistenceTests: XCTestCase {
+    func testDirectPresetAndPlaybackRoundTripWithoutOverwritingOnInvalidSave() {
+        let gains = [Float](repeating: 2, count: 10)
+        let filters = [AutoEQSourceFilter(frequency: 18300, gain: -8, q: 14, type: .peak)]
+        PresetPersistence.save(mode: .tenBand, gains: gains, preamp: -3, directFilters: filters)
+        PresetPersistence.savePlaybackState(mode: .tenBand, gains: gains, preamp: -3, directFilters: filters)
+        let invalid = [AutoEQSourceFilter(frequency: 18300, gain: -8, q: .infinity, type: .peak)]
+        PresetPersistence.save(mode: .tenBand, gains: gains, preamp: -1, directFilters: invalid)
+        PresetPersistence.savePlaybackState(mode: .tenBand, gains: gains, preamp: -1, directFilters: invalid)
+        XCTAssertEqual(PresetPersistence.load()?.directFilters, filters)
+        XCTAssertEqual(PresetPersistence.loadPlaybackState(), .init(
+            mode: .tenBand, gains: gains, preamp: -3, directFilters: filters
+        ))
+        PresetPersistence.save(mode: .tenBand, gains: gains, preamp: -2)
+        PresetPersistence.savePlaybackState(mode: .tenBand, gains: gains, preamp: -2)
+        XCTAssertNil(PresetPersistence.load()?.directFilters)
+        XCTAssertNil(PresetPersistence.loadPlaybackState()?.directFilters)
+    }
+
     func testInvalidSavePreservesCompletePreviousPreset() {
         let gains = [Float](repeating: 2, count: 10)
         PresetPersistence.save(mode: .tenBand, gains: gains, preamp: -3, bassBoost: 1)

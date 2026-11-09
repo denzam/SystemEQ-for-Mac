@@ -212,6 +212,25 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQImport
     case autoEQPreamp
     case autoEQApplyToEQ
+    case autoEQApplyDirect
+    case autoEQApplyDirectHelp
+    case autoEQApply
+    case autoEQApplyOriginalHelp
+    case autoEQApplyFixedHelp
+    case autoEQApplyMenuHelp
+    case autoEQApplyInfoHelp
+    case autoEQApplyInfoTitle
+    case autoEQApplyInfoOriginalsTitle
+    case autoEQApplyInfoOriginalsBody
+    case autoEQApplyInfoFixedTitle
+    case autoEQApplyInfoFixedBody
+    case autoEQApplyInfoChoicesTitle
+    case autoEQApplyInfoChoicesBody
+    case autoEQDirectActive
+    case autoEQDirectInactive
+    case autoEQDirectUnavailable
+    case autoEQDirectFixedControls
+    case autoEQDirectAppliedPreamp
     case autoEQEQOn
     case autoEQEQOff
     case autoEQBassBoost
@@ -226,6 +245,7 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQLegacyPreamp
     case autoEQApplyReview
     case autoEQHeadroomError
+    case autoEQSampleRateError
     case autoEQSaveToFavorites
     case removeFromFavorites
     case addToFavorites
@@ -538,6 +558,8 @@ public enum LocalizedString: String, CaseIterable {
     case autoEQFavoritesLink
     case autoEQFavoritesEmpty
     case autoEQMappedPreviewTitle
+    case autoEQResponseLegend
+    case autoEQLinearResponse
 
     // AudioRouter - Alert messages
     case eqRoutingSetupRequired

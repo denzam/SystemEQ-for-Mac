@@ -38,6 +38,8 @@ final class AutoEQState: ObservableObject {
         let apply: ([Float]) -> Void
         let enabled: () -> Bool
         let enable: () -> Void
+        var directFilters: () -> [AutoEQSourceFilter]? = { nil }
+        var applyDirect: ([AutoEQSourceFilter], Float) -> Bool = { _, _ in false }
     }
 
     struct Request: Equatable {
@@ -53,6 +55,7 @@ final class AutoEQState: ObservableObject {
         let mode: EQBandMode
         let gains: [Float]
         let preamp: Float
+        let directFilters: [AutoEQSourceFilter]?
     }
 
     static let shared: AutoEQState = {
@@ -67,20 +70,26 @@ final class AutoEQState: ObservableObject {
                 headroom: { engine.importPreampLimit(mode: $0, gains: $1) },
                 apply: { engine.applyEQValues($0) },
                 enabled: { engine.isEnabled },
-                enable: { engine.setEnabled(true) }
+                enable: { engine.setEnabled(true) },
+                directFilters: { engine.directEQFilters },
+                applyDirect: { engine.applyDirectEQ($0, preamp: $1) }
             ),
             defaults: .standard,
             outputUID: { AudioRouter.shared.selectedOutputDevice?.uid },
             sampleRate: { CoreAudioEngine.shared.processingSampleRate },
             initialBassBoost: Double(PresetPersistence.load()?.bassBoost ?? 0),
             persist: { PresetPersistence.save(mode: $0, gains: $1, preamp: $2, bassBoost: $3) },
-            recordApply: { DevicePresetManager.shared.recordApply($0, outputUID: $1) }
+            recordApply: { DevicePresetManager.shared.recordApply($0, outputUID: $1) },
+            persistDirect: { mode, gains, preamp, filters in
+                PresetPersistence.save(mode: mode, gains: gains, preamp: preamp, directFilters: filters)
+            }
         )
         owner.bind(to: DevicePresetManager.shared)
-        Publishers.Merge3(
+        Publishers.Merge4(
             engine.$bandMode.map { _ in () },
             engine.$bands.map { _ in () },
-            engine.$preampGain.map { _ in () }
+            engine.$preampGain.map { _ in () },
+            engine.$directEQFilters.map { _ in () }
         )
         .sink { [weak owner] in
             DispatchQueue.main.async { owner?.synchronizePlayback() }
@@ -105,6 +114,7 @@ final class AutoEQState: ObservableObject {
     @Published private(set) var importCurveEdited = false
     @Published private(set) var isImporting = false
     @Published private(set) var importError: AutoEQImportError?
+    @Published private var directPreview: (AutoEQImportedPreset, Identity)?
 
     private let engine: Engine
     private let defaults: UserDefaults
@@ -112,6 +122,7 @@ final class AutoEQState: ObservableObject {
     private let sampleRate: () -> Double
     private let persist: (EQBandMode, [Float], Float, Float) -> Void
     private let recordApply: (DevicePresetRecord, String?) -> Void
+    private let persistDirect: (EQBandMode, [Float], Float, [AutoEQSourceFilter]) -> Void
     private let prepare: @Sendable (AutoEQImportedPreset, Double) async throws -> AutoEQPreparedPreset
     private var generation = UUID()
     private var session = UUID()
@@ -134,6 +145,7 @@ final class AutoEQState: ObservableObject {
         initialBassBoost: Double = 0,
         persist: @escaping (EQBandMode, [Float], Float, Float) -> Void,
         recordApply: @escaping (DevicePresetRecord, String?) -> Void,
+        persistDirect: @escaping (EQBandMode, [Float], Float, [AutoEQSourceFilter]) -> Void = { _, _, _, _ in },
         prepare: @escaping @Sendable (AutoEQImportedPreset, Double) async throws
             -> AutoEQPreparedPreset = { input, rate in
                 let worker = Task
@@ -149,12 +161,15 @@ final class AutoEQState: ObservableObject {
         self.sampleRate = sampleRate
         self.persist = persist
         self.recordApply = recordApply
+        self.persistDirect = persistDirect
         self.prepare = prepare
         bandMode = BandMode(audioEngineMode: engine.mode())
         bassBoost = initialBassBoost.isFinite ? initialBassBoost : 0
         appliedBassBoost = initialBassBoost.isFinite ? initialBassBoost : 0
         playbackUID = outputUID()
-        lastPlayback = Playback(mode: engine.mode(), gains: engine.gains(), preamp: engine.preamp())
+        lastPlayback = Playback(
+            mode: engine.mode(), gains: engine.gains(), preamp: engine.preamp(), directFilters: engine.directFilters()
+        )
         restorePlayback()
     }
 
@@ -182,7 +197,9 @@ final class AutoEQState: ObservableObject {
     }
 
     private func playback() -> Playback {
-        Playback(mode: engine.mode(), gains: engine.gains(), preamp: engine.preamp())
+        Playback(
+            mode: engine.mode(), gains: engine.gains(), preamp: engine.preamp(), directFilters: engine.directFilters()
+        )
     }
 
     private var hasCurrentOutputContext: Bool {
@@ -249,6 +266,7 @@ final class AutoEQState: ObservableObject {
         debounceTask?.cancel()
         isImporting = true
         importError = nil
+        directPreview = input.directFilters == nil ? nil : (input, identity)
         let prepare = prepare
         prepareTask = Task { [weak self] in
             do {
@@ -303,6 +321,7 @@ final class AutoEQState: ObservableObject {
         prepareTask = nil
         debounceTask = nil
         currentRequest = nil
+        directPreview = nil
         isImporting = false
     }
 
@@ -352,6 +371,7 @@ final class AutoEQState: ObservableObject {
         appliedIdentity = json.data(using: .utf8).flatMap { try? JSONDecoder().decode(Identity.self, from: $0) }
         previewIdentity = appliedIdentity
         preparedImport = nil
+        directPreview = nil
         importNeedsApply = false
         importCurveEdited = true
         bassBoost = appliedBassBoost
@@ -461,6 +481,71 @@ final class AutoEQState: ObservableObject {
         }
     }
 
+    var canApplyDirect: Bool {
+        isActive && !isImporting && hasCurrentOutputContext && directPreview != nil
+    }
+
+    var directPreviewName: String? {
+        directPreview?.1.name
+    }
+
+    var fixedDraftGains: [Float] {
+        mapped.map { Float($0.gain + BassBoostCurve.gain(at: $0.center, amount: bassBoost)) }
+    }
+
+    @discardableResult
+    func applyDirect() -> Bool {
+        guard canApplyDirect, let (input, identity) = directPreview, let filters = input.directFilters,
+              let data = try? JSONEncoder().encode(identity), let descriptor = String(data: data, encoding: .utf8)
+        else { return false }
+        debounceTask?.cancel()
+        let rate = sampleRate()
+        guard rate.isFinite, rate > 0, filters.allSatisfy({ $0.frequency < rate / 2 }) else {
+            report(AutoEQImportError.invalidSampleRate)
+            return false
+        }
+        let requested = Float(input.preamp ?? 0)
+        guard requested.isFinite, requested >= -20,
+              engine.applyDirect(filters, min(0, requested))
+        else {
+            report(AutoEQImportError.directUnavailable)
+            return false
+        }
+        let mode = engine.mode()
+        let gains = engine.gains()
+        let preamp = engine.preamp()
+        let hasMatchingFit = preparedImport?.input == input
+        importError = nil
+        importNeedsApply = false
+        importCurveEdited = !hasMatchingFit
+        previewIdentity = identity
+        appliedIdentity = identity
+        appliedBassBoost = 0
+        bassBoost = 0
+        preampDB = Double(preamp)
+        bandMode = BandMode(audioEngineMode: mode)
+        if hasMatchingFit {
+            mapped = fittedMapping()
+        } else {
+            preparedImport = nil
+            mapped = playbackMapping()
+        }
+        parsed = input.displayBands
+        defaults.set(descriptor, forKey: "lastAppliedPresetJSON")
+        if identity.source == "Custom" {
+            defaults.set(identity.rawText ?? "", forKey: "lastCustomPresetText")
+            defaults.set(identity.name ?? "", forKey: "lastCustomPresetName")
+        }
+        recordApply(DevicePresetRecord(
+            mode: mode.rawValue, appliedGains: gains, cleanGains: gains, preamp: preamp,
+            bassBoost: 0, descriptorJSON: descriptor, directFilters: filters
+        ), outputUID())
+        persistDirect(mode, gains, preamp, filters)
+        lastPlayback = playback()
+        if !engine.enabled() { engine.enable() }
+        return true
+    }
+
     @discardableResult
     func apply() -> Bool {
         guard isActive, !isImporting, !mapped.isEmpty else { return false }
@@ -476,7 +561,7 @@ final class AutoEQState: ObservableObject {
         }
         let mode = bandMode.audioEngineMode
         let clean = mapped.map { Float($0.gain) }
-        let values = mapped.map { Float($0.gain + BassBoostCurve.gain(at: $0.center, amount: bassBoost)) }
+        let values = fixedDraftGains
         guard values.count == mode.bandCount, clean.allSatisfy(\.isFinite), bassBoost.isFinite,
               let limit = engine.headroom(mode, values) else {
             report(AutoEQImportError.insufficientHeadroom)

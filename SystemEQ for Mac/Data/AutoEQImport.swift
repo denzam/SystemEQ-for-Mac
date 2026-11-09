@@ -5,19 +5,85 @@ nonisolated enum AutoEQImportError: Error, Equatable {
     case invalidLine(Int)
     case invalidSampleRate
     case insufficientHeadroom
+    case directUnavailable
 }
 
-nonisolated struct AutoEQSourceFilter: Equatable, Sendable {
+nonisolated public struct AutoEQSourceFilter: Codable, Equatable, Sendable {
     let frequency: Double
     let gain: Double
     let q: Double
     let type: FilterType
     var enabled = true
+
+    var band: ParametricBand {
+        ParametricBand(frequency: Float(frequency), gain: Float(gain), q: Float(q), filterType: type)
+    }
+
+    static func validDirect(_ filters: [Self]) -> Bool {
+        filters.count <= 256 && filters.allSatisfy {
+            $0.enabled && (20...20000).contains($0.frequency) &&
+                (-30...30).contains($0.gain) && (0.1...20).contains($0.q)
+        }
+    }
+
+    func centerResponseError(_ response: Double) -> Double {
+        let expected: Double
+        switch type {
+        case .notch:
+            return response <= -30 ? 0 : .infinity
+        case .peak:
+            expected = gain
+        case .highShelf,
+             .lowShelf:
+            expected = gain / 2
+        case .highPass,
+             .lowPass:
+            expected = 20 * log10(q)
+        case .allPass,
+             .allPassPEQ,
+             .bandPass:
+            expected = 0
+        }
+        return abs(response - expected)
+    }
 }
 
 nonisolated struct AutoEQCurvePoint: Equatable, Sendable {
     let frequency: Double
     let gain: Double
+}
+
+nonisolated struct EQLinearResponse: Equatable, Sendable {
+    let sampleRate: Float
+    let coefficients: [BiquadCoefficients]
+    let preampDB: Float
+    var criticalFrequencies: [Double] = []
+
+    func gain(at frequency: Double) -> Double? {
+        guard sampleRate.isFinite, sampleRate > 0, preampDB.isFinite,
+              frequency.isFinite, (0...Double(sampleRate) / 2).contains(frequency)
+        else { return nil }
+        return try? coefficients.reduce(Double(preampDB)) {
+            try $0 + EQConverter.response($1, frequency: frequency, rate: Double(sampleRate))
+        }
+    }
+
+    func plot() -> [AutoEQCurvePoint] {
+        let upper = min(20000, Double(sampleRate) / 2)
+        guard upper.isFinite, upper > 20 else { return [] }
+        let grid = (0..<768).map { index in
+            index == 767 ? upper : 20 * pow(upper / 20, Double(index) / 767)
+        }
+        let frequencies = Set(grid + criticalFrequencies.filter { (20...upper).contains($0) }).sorted()
+        var points: [AutoEQCurvePoint] = []
+        points.reserveCapacity(frequencies.count)
+        for frequency in frequencies {
+            if Task.isCancelled { return [] }
+            guard let gain = gain(at: frequency) else { return [] }
+            points.append(AutoEQCurvePoint(frequency: frequency, gain: gain))
+        }
+        return points
+    }
 }
 
 nonisolated struct AutoEQImportedPreset: Equatable, Sendable {
@@ -29,6 +95,12 @@ nonisolated struct AutoEQImportedPreset: Equatable, Sendable {
     let response: Response
     let preamp: Double?
     var legacyPreamp = false
+
+    var directFilters: [AutoEQSourceFilter]? {
+        guard case let .parametric(filters) = response else { return nil }
+        let enabled = filters.filter(\.enabled)
+        return AutoEQSourceFilter.validDirect(enabled) ? enabled : nil
+    }
 
     var displayBands: [ParsedBand] {
         switch response {
@@ -251,23 +323,143 @@ nonisolated struct AutoEQPreparedPreset: Sendable {
     }
 }
 
+nonisolated private struct SectionPeakResponse {
+    let coefficients: BiquadCoefficients
+    let stationary: [(cosine: Double, gain: Double)]
+
+    init(_ coefficients: BiquadCoefficients) throws {
+        self.coefficients = coefficients
+        stationary = try [-1.0, 1.0].flatMap { edge in
+            let n = Self.powerPolynomial(
+                Double(coefficients.b0), Double(coefficients.b1), Double(coefficients.b2), edge: edge
+            )
+            let d = Self.powerPolynomial(1, Double(coefficients.a1), Double(coefficients.a2), edge: edge)
+            let a = n.square * d.linear - n.linear * d.square
+            let b = 2 * (n.square * d.constant - n.constant * d.square)
+            let c = n.linear * d.constant - n.constant * d.linear
+            return try Self.roots(a: a, b: b, c: c).filter { (0...1).contains($0) }.map {
+                let cosine = edge * (1 - $0)
+                return try (cosine, Self.gain(coefficients, cosine: cosine))
+            }
+        }
+    }
+
+    private static func roots(a: Double, b: Double, c: Double) -> [Double] {
+        let roots: [Double]
+        if a == 0 {
+            roots = b == 0 ? [] : [-c / b]
+        } else {
+            let discriminant = b * b - 4 * a * c
+            if discriminant < 0 {
+                roots = []
+            } else {
+                let root = sqrt(discriminant)
+                let q = -0.5 * (b + (b >= 0 ? root : -root))
+                roots = q == 0 ? [0] : [q / a, c / q]
+            }
+        }
+        return roots
+    }
+
+    func gain(cosine: Double) throws -> Double {
+        try Self.gain(coefficients, cosine: cosine)
+    }
+
+    private static func powerPolynomial(_ first: Double, _ middle: Double, _ last: Double, edge: Double)
+        -> (square: Double, linear: Double, constant: Double) {
+        let sum = first + last
+        let difference = first - last
+        let endpoint = sum * edge + middle
+        return (4 * first * last, 2 * (difference * difference - sum * edge * endpoint), endpoint * endpoint)
+    }
+
+    private static func gain(_ c: BiquadCoefficients, cosine: Double) throws -> Double {
+        func power(_ first: Double, _ middle: Double, _ last: Double) -> Double {
+            let real = (first + last) * cosine + middle
+            let difference = first - last
+            return real * real + difference * difference * (1 - cosine * cosine)
+        }
+        let numerator = power(Double(c.b0), Double(c.b1), Double(c.b2))
+        let denominator = power(1, Double(c.a1), Double(c.a2))
+        guard numerator.isFinite, denominator.isFinite, denominator > 0
+        else { throw AutoEQImportError.invalidSource }
+        return 10 * log10(max(1e-30, numerator / denominator))
+    }
+}
+
 extension EQConverter {
+    nonisolated static func directPreampLimit(bands: [ParametricBand], sampleRate: Double) throws -> Float {
+        guard sampleRate.isFinite, sampleRate > 0, sampleRate <= 384_000
+        else { throw AutoEQImportError.invalidSampleRate }
+        let coefficients = BiquadResponseCalculator.preparedCoefficients(
+            bands: bands, sampleRate: Float(sampleRate), minimumGainMagnitude: 0
+        )
+        guard !coefficients.isEmpty else { return 0 }
+        let sections = try coefficients.map(SectionPeakResponse.init)
+        var previousCosine = 1.0
+        var previousGains = try sections.map { try $0.gain(cosine: previousCosine) }
+        var maximum = 0.0
+        var refinements = 4096
+        func intervalBound(
+            low: Double, lowGains: [Double], high: Double, highGains: [Double], depth: Int
+        ) throws -> Double {
+            var bound = 0.0
+            var lowTotal = 0.0
+            var highTotal = 0.0
+            for index in sections.indices {
+                var peak = max(lowGains[index], highGains[index])
+                for point in sections[index].stationary where (low...high).contains(point.cosine) {
+                    peak = max(peak, point.gain)
+                }
+                bound += peak
+                lowTotal += lowGains[index]
+                highTotal += highGains[index]
+            }
+            let middle = (low + high) / 2
+            guard bound > max(maximum, lowTotal, highTotal) + 0.1,
+                  refinements > 0, depth > 0, low < middle, middle < high else { return bound }
+            refinements -= 1
+            let middleGains = try sections.map { try $0.gain(cosine: middle) }
+            let left = try intervalBound(
+                low: low, lowGains: lowGains, high: middle, highGains: middleGains, depth: depth - 1
+            )
+            let right = try intervalBound(
+                low: middle, lowGains: middleGains, high: high, highGains: highGains, depth: depth - 1
+            )
+            return max(left, right)
+        }
+        for index in 0...4096 {
+            if index.isMultiple(of: 128) { try Task.checkCancellation() }
+            let frequency = pow(sampleRate / 2, Double(index) / 4096)
+            let cosine = index == 4096 ? -1 : cos(2 * .pi * frequency / sampleRate)
+            let gains = try sections.map { try $0.gain(cosine: cosine) }
+            let bound = try intervalBound(
+                low: cosine, lowGains: gains, high: previousCosine, highGains: previousGains, depth: 14
+            )
+            maximum = max(maximum, bound)
+            previousCosine = cosine
+            previousGains = gains
+        }
+        return maximum > 0.001 ? Float(-ceil((maximum + 0.2) * 10) / 10) : 0
+    }
+
     nonisolated static func preampLimit(mode: EQBandMode, gains: [Float], sampleRate: Double) throws -> Float {
         guard sampleRate.isFinite, (40000...384_000).contains(sampleRate), gains.count == mode.bandCount,
               gains.allSatisfy({ $0.isFinite && abs($0) <= 20 }) else { throw AutoEQImportError.invalidSource }
-        let coefficients = FixedBandEQDefinition.bands(mode: mode, gains: gains).map {
-            BiquadResponseCalculator.coefficients(
-                frequency: $0.frequency,
-                gain: $0.gain,
-                q: $0.q,
-                type: $0.filterType,
-                sampleRate: Float(sampleRate)
-            )
-        }
+        return try preampLimit(bands: FixedBandEQDefinition.bands(mode: mode, gains: gains), sampleRate: sampleRate)
+    }
+
+    nonisolated static func preampLimit(bands: [ParametricBand], sampleRate: Double) throws -> Float {
+        guard sampleRate.isFinite, sampleRate > 0, sampleRate <= 384_000
+        else { throw AutoEQImportError.invalidSampleRate }
+        let coefficients = BiquadResponseCalculator.preparedCoefficients(
+            bands: bands, sampleRate: Float(sampleRate)
+        )
+        guard !coefficients.isEmpty else { return 0 }
         var peak = 0.0
-        for index in 0...4096 {
+        for index in 0...4097 {
             if index.isMultiple(of: 128) { try Task.checkCancellation() }
-            let frequency = pow(sampleRate * 0.499, Double(index) / 4096)
+            let frequency = index == 0 ? 0 : pow(sampleRate / 2, Double(index - 1) / 4096)
             let value = try coefficients.reduce(0.0) { try $0 + response($1, frequency: frequency, rate: sampleRate) }
             peak = max(peak, value)
         }
@@ -437,7 +629,9 @@ extension EQConverter {
         let di = -Double(coefficients.a1) * sin(omega) - Double(coefficients.a2) * sin(2 * omega)
         let numerator = nr * nr + ni * ni
         let denominator = dr * dr + di * di
-        guard numerator > 0, denominator > 0 else { throw AutoEQImportError.invalidSource }
+        guard numerator.isFinite, denominator.isFinite, denominator > 0
+        else { throw AutoEQImportError.invalidSource }
+        if numerator == 0 { return -300 }
         let value = 10 * log10(numerator / denominator)
         guard value.isFinite else { throw AutoEQImportError.invalidSource }
         return value

@@ -18,6 +18,7 @@ struct DevicePresetRecord: Codable, Equatable {
     let preamp: Float
     let bassBoost: Float
     let descriptorJSON: String // дескриптор пресета для UI AutoEQ
+    var directFilters: [AutoEQSourceFilter]?
 }
 
 @MainActor
@@ -99,22 +100,24 @@ final class DevicePresetManager: ObservableObject {
               record.appliedGains.allSatisfy(\.isFinite),
               record.cleanGains.allSatisfy(\.isFinite),
               record.preamp.isFinite,
-              record.bassBoost.isFinite else {
+              record.bassBoost.isFinite,
+              record.directFilters.map(AutoEQSourceFilter.validDirect) ?? true else {
             applyFlat(to: engine, outputUID: uid)
             appliedPreset = AppliedPreset(context: context, record: nil)
             return
         }
 
-        engine.bandMode = mode
-        engine.applyEQValues(record.appliedGains)
-        engine.setPreampGain(record.preamp)
+        engine.restorePlayback(.init(
+            mode: mode, gains: record.appliedGains, preamp: record.preamp, directFilters: record.directFilters
+        ))
 
         // Глобальний стан: наступний запуск відновить пресет саме цього виводу
         PresetPersistence.save(
             mode: mode,
             gains: record.cleanGains,
             preamp: record.preamp,
-            bassBoost: record.bassBoost
+            bassBoost: record.bassBoost,
+            directFilters: record.directFilters
         )
         Self.defaults.set(record.descriptorJSON, forKey: "lastAppliedPresetJSON")
         appliedPreset = AppliedPreset(context: context, record: record)
@@ -125,8 +128,7 @@ final class DevicePresetManager: ObservableObject {
     private func applyFlat(to engine: AudioEngine, outputUID: String) {
         let mode = engine.bandMode
         let gains = [Float](repeating: 0, count: mode.bandCount)
-        engine.applyEQValues(gains)
-        engine.setPreampGain(0)
+        engine.restorePlayback(.init(mode: mode, gains: gains, preamp: 0))
         PresetPersistence.save(mode: mode, gains: gains, preamp: 0, bassBoost: 0)
         Self.defaults.removeObject(forKey: "lastAppliedPresetJSON")
         dlog("Flat EQ applied for unmapped output \(outputUID)", level: .info, category: .preset)

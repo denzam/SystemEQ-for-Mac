@@ -128,7 +128,7 @@ nonisolated struct OutputSafetyProcessor {
     }
 }
 
-nonisolated struct BiquadCoefficients {
+nonisolated struct BiquadCoefficients: Equatable, Sendable {
     let b0: Float
     let b1: Float
     let b2: Float
@@ -150,13 +150,15 @@ nonisolated struct BiquadCoefficients {
 }
 
 nonisolated enum BiquadResponseCalculator {
-    static func preparedCoefficients(bands: [ParametricBand], sampleRate: Float) -> [BiquadCoefficients] {
+    static func preparedCoefficients(
+        bands: [ParametricBand], sampleRate: Float, minimumGainMagnitude: Float = 0.01
+    ) -> [BiquadCoefficients] {
         bands.compactMap { band in
             switch band.filterType {
             case .highShelf,
                  .lowShelf,
                  .peak:
-                guard abs(band.gain) >= 0.01 else { return nil }
+                guard band.gain != 0, abs(band.gain) >= minimumGainMagnitude else { return nil }
             case .allPass,
                  .allPassPEQ,
                  .bandPass,
@@ -337,6 +339,9 @@ public final class BiquadFilterVDSP {
     /// vDSP_biquad_CreateSetup is single-precision Float despite the name suffix.
     private var setupL: vDSP_biquad_Setup?
     private var setupR: vDSP_biquad_Setup?
+    var isPrepared: Bool {
+        filterCount == 0 || (setupL != nil && setupR != nil)
+    }
     /// Delays buffer layout: 2*numSections + 2 floats, initialized to zero.
     private var delaysL: [Float] = []
     private var delaysR: [Float] = []
@@ -344,6 +349,13 @@ public final class BiquadFilterVDSP {
     /// Preamp gain (linear)
     private var preampLinear: Float = 1.0
     private var outputSafety = OutputSafetyProcessor()
+    private var configuredCoefficients: [BiquadCoefficients] = []
+    private(set) var linearGainDB: Float = 0
+    private(set) var linearCriticalFrequencies: [Double] = []
+
+    var linearCoefficients: [BiquadCoefficients] {
+        setupL == nil ? [] : configuredCoefficients
+    }
 
     // MARK: - Initialization
 
@@ -364,13 +376,20 @@ public final class BiquadFilterVDSP {
         bands: [ParametricBand],
         preamp: Float,
         outputBoost: Float = 0.0,
-        sampleRate: Float
+        sampleRate: Float,
+        minimumGainMagnitude: Float = 0.01
     ) {
         self.sampleRate = sampleRate
         self.preampLinear = pow(10.0, preamp / 20.0)
         outputSafety.configure(boostDB: outputBoost, sampleRate: sampleRate)
+        let boost = outputBoost.isFinite ? min(max(outputBoost, 0), OutputSafetyProcessor.maximumBoostDB) : 0
+        linearGainDB = preamp + boost
 
-        let prepared = BiquadResponseCalculator.preparedCoefficients(bands: bands, sampleRate: sampleRate)
+        let prepared = BiquadResponseCalculator.preparedCoefficients(
+            bands: bands, sampleRate: sampleRate, minimumGainMagnitude: minimumGainMagnitude
+        )
+        configuredCoefficients = prepared
+        linearCriticalFrequencies = bands.map { Double($0.frequency) }
         let newCount = prepared.count
 
         // Destroy previous setup before rebuilding.

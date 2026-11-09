@@ -3176,6 +3176,129 @@ final class CalibrationProfileTests: XCTestCase {
         }
     }
 
+    func testDirectNotchIsExactAcrossBypassAndRateRecovery() throws {
+        try withProfile { engine, _, core, defaults in
+            let manual = [Float](repeating: 3, count: 10)
+            engine.applyEQValues(manual)
+            let filters = [AutoEQSourceFilter(frequency: 16000, gain: 0, q: 20, type: .notch)]
+            XCTAssertTrue(engine.applyDirectEQ(filters, preamp: 0))
+            XCTAssertEqual(engine.getCurrentEQValues(), manual)
+            XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults)?.directFilters, filters)
+            XCTAssertTrue(engine.isDirectEQAvailable)
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 1)
+            XCTAssertLessThan(try measuredGain(core, frequency: 16000), -45)
+            let plottedNotch = try XCTUnwrap(core.activeLinearResponse.plot().first { $0.frequency == 16000 })
+            XCTAssertLessThan(plottedNotch.gain, -45)
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 0, accuracy: 0.05)
+
+            XCTAssertTrue(engine.setEnabled(false))
+            XCTAssertEqual(try measuredGain(core, frequency: 16000, includingRoom: true), 0, accuracy: 0.05)
+            XCTAssertTrue(engine.setEnabled(true))
+            XCTAssertLessThan(try measuredGain(core, frequency: 16000, includingRoom: true), -45)
+
+            core.rebuildActiveEQFilter(sampleRate: 32000)
+            engine.reapplyCurrentFilters()
+            XCTAssertFalse(engine.isDirectEQAvailable)
+            XCTAssertEqual(engine.directEQFilters, filters)
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 0)
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), 0, accuracy: 0.05)
+
+            core.rebuildActiveEQFilter(sampleRate: 96000)
+            engine.reapplyCurrentFilters()
+            XCTAssertTrue(engine.isDirectEQAvailable)
+            XCTAssertLessThan(try measuredGain(core, frequency: 16000), -45)
+            engine.updateBandGain(bandId: 0, gain: 4)
+            engine.reapplyCurrentFilters()
+            XCTAssertNil(engine.directEQFilters)
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 10)
+        }
+    }
+
+    func testInvalidDirectApplyPreservesActiveCascadeAndPlaybackSnapshot() throws {
+        try withProfile { engine, _, core, defaults in
+            core.rebuildActiveEQFilter(sampleRate: 32000)
+            let valid = [AutoEQSourceFilter(frequency: 1000, gain: 0, q: 6, type: .notch)]
+            XCTAssertTrue(engine.applyDirectEQ(valid, preamp: 0))
+            let activeFilter = try XCTUnwrap(core.vdspFilter)
+            let saved = try XCTUnwrap(PresetPersistence.loadPlaybackState(in: defaults))
+            let rejected = [
+                AutoEQSourceFilter(frequency: 1000, gain: 0, q: .nan, type: .notch),
+                AutoEQSourceFilter(frequency: 16000, gain: 0, q: 20, type: .notch),
+                AutoEQSourceFilter(frequency: 1000, gain: 30, q: 1, type: .peak),
+                AutoEQSourceFilter(frequency: 15981.1042, gain: 21, q: 20, type: .peak)
+            ]
+            for filter in rejected {
+                XCTAssertFalse(engine.applyDirectEQ([filter], preamp: 0))
+                XCTAssertTrue(core.vdspFilter === activeFilter)
+                XCTAssertEqual(engine.directEQFilters, valid)
+                XCTAssertEqual(PresetPersistence.loadPlaybackState(in: defaults), saved)
+            }
+        }
+    }
+
+    func testDirectCascadeRetainsSmallNonzeroGainsAndConstrainsManualPreamp() throws {
+        try withProfile { engine, _, core, _ in
+            let small = AutoEQSourceFilter(frequency: 1000, gain: -0.009, q: 4, type: .peak)
+            XCTAssertTrue(engine.applyDirectEQ(Array(repeating: small, count: 256), preamp: 0))
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 256)
+            XCTAssertEqual(try measuredGain(core, frequency: 1000), -2.304, accuracy: 0.05)
+
+            let boost = AutoEQSourceFilter(frequency: 1000, gain: 6, q: 4, type: .peak)
+            XCTAssertTrue(engine.applyDirectEQ([boost], preamp: -10))
+            engine.setPreampGain(0)
+            engine.reapplyCurrentFilters()
+            XCTAssertEqual(engine.preampGain, 0)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(core.appliedDirectPreamp), -6.2)
+            XCTAssertLessThan(try measuredGain(core, frequency: 1000), 0)
+
+            core.rebuildActiveEQFilter(sampleRate: 32000)
+            let narrow = AutoEQSourceFilter(frequency: 15981.1042, gain: 10, q: 20, type: .peak)
+            XCTAssertTrue(engine.applyDirectEQ([narrow], preamp: 0))
+            XCTAssertLessThanOrEqual(try XCTUnwrap(core.appliedDirectPreamp), -10.2)
+            XCTAssertLessThan(try XCTUnwrap(core.activeLinearResponse.gain(at: narrow.frequency)), 0)
+            core.rebuildActiveEQFilter(sampleRate: 96000)
+            let unrepresentableNotch = AutoEQSourceFilter(frequency: 20, gain: 0, q: 20, type: .notch)
+            XCTAssertFalse(engine.applyDirectEQ([unrepresentableNotch], preamp: 0))
+            XCTAssertEqual(engine.directEQFilters, [narrow])
+
+            core.rebuildActiveEQFilter(sampleRate: 192_000)
+            let smallAtLowFrequency = AutoEQSourceFilter(frequency: 44, gain: -0.009, q: 20, type: .peak)
+            XCTAssertFalse(engine.applyDirectEQ(Array(repeating: smallAtLowFrequency, count: 256), preamp: 0))
+            XCTAssertEqual(engine.directEQFilters, [narrow])
+        }
+    }
+
+    func testDirectCalibrationRoomAndGraphMatchRenderedSmallSignalResponse() throws {
+        try withProfile { engine, _, core, _ in
+            let filters = [AutoEQSourceFilter(frequency: 4000, gain: -5, q: 3, type: .peak)]
+            XCTAssertTrue(engine.applyDirectEQ(filters, preamp: -5))
+            var adjustments = [Float](repeating: 0, count: 31)
+            let index = try XCTUnwrap(EQBandMode.thirtyOneBand.frequencies.firstIndex(of: 1000))
+            adjustments[index] = 3
+            XCTAssertTrue(engine.setCalibrationAdjustments(adjustments, overallGainDB: -1))
+            engine.setOutputBoostGain(2)
+            core.applyRoomNotchFilters([(frequency: 1000, gain: -4, q: 3)])
+            XCTAssertEqual(core.vdspFilter?.activeFilterCount, 2)
+            XCTAssertEqual(core.roomFilter?.activeFilterCount, 1)
+            let response = core.activeLinearResponse
+            XCTAssertEqual(response.coefficients.count, 3)
+            XCTAssertEqual(response.preampDB, -4, accuracy: 0.01)
+            for frequency in [1000.0, 4000.0, 16000.0] {
+                let expected = try XCTUnwrap(response.gain(at: frequency))
+                XCTAssertEqual(
+                    try measuredGain(core, frequency: frequency, includingRoom: true),
+                    expected,
+                    accuracy: 0.05
+                )
+            }
+            let revision = core.eqResponseRevision
+            core.setEnabled(false)
+            XCTAssertEqual(core.activeLinearResponse.coefficients, [])
+            XCTAssertEqual(core.activeLinearResponse.preampDB, 0)
+            XCTAssertNotEqual(core.eqResponseRevision, revision)
+        }
+    }
+
     func testProfilePreserves31BandModeAcrossRateAndModeChanges() throws {
         try withProfile(mode: .thirtyOneBand) { engine, calibration, core, _ in
             var gains = [Float](repeating: 1, count: 31)

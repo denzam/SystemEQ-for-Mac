@@ -205,9 +205,11 @@ public final class CoreAudioEngine: ObservableObject {
     // MARK: - Published Properties
 
     @Published public var isRunning: Bool = false
+    @Published private(set) var eqResponseRevision: UInt64 = 0
     @Published public var isEnabled: Bool = true {
         didSet {
             seq_atomic_int32_store_release(isEnabledAtomic, isEnabled ? 1 : 0)
+            if isEnabled != oldValue { eqResponseRevision &+= 1 }
         }
     }
 
@@ -253,6 +255,26 @@ public final class CoreAudioEngine: ObservableObject {
 
     var processingSampleRate: Double {
         currentSampleRate
+    }
+
+    var activeLinearResponse: EQLinearResponse {
+        let rate = Float(currentSampleRate)
+        guard isEnabled else { return EQLinearResponse(sampleRate: rate, coefficients: [], preampDB: 0) }
+        return EQLinearResponse(
+            sampleRate: rate,
+            coefficients: (vdspFilter?.linearCoefficients ?? []) + (roomFilter?.linearCoefficients ?? []),
+            preampDB: (vdspFilter?.linearGainDB ?? 0) + (roomFilter?.linearGainDB ?? 0),
+            criticalFrequencies: (vdspFilter?.linearCriticalFrequencies ?? []) +
+                (roomFilter?.linearCriticalFrequencies ?? [])
+        )
+    }
+
+    var roomLinearResponse: EQLinearResponse {
+        EQLinearResponse(
+            sampleRate: Float(currentSampleRate), coefficients: roomFilter?.linearCoefficients ?? [],
+            preampDB: roomFilter?.linearGainDB ?? 0,
+            criticalFrequencies: roomFilter?.linearCriticalFrequencies ?? []
+        )
     }
 
     // EQ processing — lock-free filter swap via C11 atomic pointer.
@@ -305,6 +327,7 @@ public final class CoreAudioEngine: ObservableObject {
             retiredVDSPFilters.append(previous)
             scheduleRetiredObjectReclamation()
         }
+        eqResponseRevision &+= 1
     }
 
     private var _roomFilterStrong: BiquadFilterVDSP?
@@ -353,6 +376,7 @@ public final class CoreAudioEngine: ObservableObject {
             retiredRoomFilters.append(previous)
             scheduleRetiredObjectReclamation()
         }
+        eqResponseRevision &+= 1
     }
 
     fileprivate var currentSampleRate: Double = 48000.0
@@ -361,6 +385,18 @@ public final class CoreAudioEngine: ObservableObject {
     // EQ parameters (10-band)
     fileprivate var eqGains: [Float] = Array(repeating: 0.0, count: 10)
     private var activeEQMode: EQBandMode = .tenBand
+    @Published private(set) var isDirectEQAvailable = false
+    private(set) var appliedDirectPreamp: Float?
+    private(set) var appliedDirectPreampLimit: Float?
+    private var activeDirectEQ: DirectEQConfiguration?
+
+    private struct DirectEQConfiguration {
+        let filters: [AutoEQSourceFilter]
+        let calibrationBands: [ParametricBand]
+        var preamp: Float
+        let outputBoost: Float
+        let calibrationPreamp: Float
+    }
     private let eqFrequencies: [Float] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
     fileprivate var preampGain: Float = 0.0
@@ -1372,6 +1408,7 @@ public final class CoreAudioEngine: ObservableObject {
         outputBoost: Float = 0.0,
         calibrationPreamp: Float = 0
     ) {
+        clearDirectEQConfiguration()
         activeEQMode = .tenBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
@@ -1401,6 +1438,7 @@ public final class CoreAudioEngine: ObservableObject {
         outputBoost: Float = 0.0,
         calibrationPreamp: Float = 0
     ) {
+        clearDirectEQConfiguration()
         activeEQMode = .thirtyOneBand
         let preamp = Self.sanitizedDB(preamp)
         let gains = gains.map(Self.sanitizedDB)
@@ -1423,11 +1461,128 @@ public final class CoreAudioEngine: ObservableObject {
         self.vdspFilter = filter
     }
 
+    func directEQPreampLimit(
+        _ filters: [AutoEQSourceFilter], calibrationBands: [ParametricBand], calibrationPreamp: Float
+    ) -> Float? {
+        let rate = Float(currentSampleRate)
+        guard rate.isFinite, rate > 0, AutoEQSourceFilter.validDirect(filters),
+              filters.allSatisfy({ Float($0.frequency) < rate / 2 }) else { return nil }
+        let sourceBands = filters.map(\.band)
+        var centerErrorBudget = 0.25
+        for (source, band) in zip(filters, sourceBands) {
+            switch band.filterType {
+            case .highShelf,
+                 .lowShelf,
+                 .peak:
+                if band.gain == 0 { continue }
+            default:
+                break
+            }
+            let coefficients = BiquadResponseCalculator.coefficients(
+                frequency: band.frequency, gain: band.gain, q: band.q,
+                type: band.filterType, sampleRate: rate
+            )
+            guard !coefficients.isIdentity, coefficients.isStable,
+                  let center = try? EQConverter.response(
+                      coefficients, frequency: source.frequency, rate: currentSampleRate
+                  )
+            else { return nil }
+            centerErrorBudget -= source.centerResponseError(center)
+            guard centerErrorBudget >= 0 else { return nil }
+        }
+        guard let limit = try? EQConverter.directPreampLimit(
+            bands: sourceBands + calibrationBands, sampleRate: currentSampleRate
+        ) else { return nil }
+        return min(0, limit - calibrationPreamp)
+    }
+
+    @discardableResult
+    func applyDirectEQ(
+        _ filters: [AutoEQSourceFilter], preamp: Float, outputBoost: Float,
+        calibrationBands: [ParametricBand], calibrationPreamp: Float, retainingRequest: Bool = false
+    ) -> Float? {
+        guard preamp.isFinite, AutoEQSourceFilter.validDirect(filters) else { return nil }
+        let configuration = DirectEQConfiguration(
+            filters: filters, calibrationBands: calibrationBands, preamp: Self.sanitizedDB(preamp),
+            outputBoost: Self.sanitizedOutputBoost(outputBoost),
+            calibrationPreamp: calibrationPreamp.isFinite ? min(0, max(-20, calibrationPreamp)) : 0
+        )
+        return installDirectEQ(configuration, retainingRequest: retainingRequest)
+    }
+
+    @discardableResult
+    private func installDirectEQ(
+        _ configuration: DirectEQConfiguration, retainingRequest: Bool
+    ) -> Float? {
+        if let limit = directEQPreampLimit(
+            configuration.filters, calibrationBands: configuration.calibrationBands,
+            calibrationPreamp: configuration.calibrationPreamp
+        ) {
+            let attenuation = min(configuration.preamp, limit)
+            if attenuation >= -20 {
+                let rate = Float(currentSampleRate)
+                let filter = BiquadFilterVDSP(sampleRate: rate)
+                filter.configure(
+                    bands: configuration.filters.map(\.band) + configuration.calibrationBands,
+                    preamp: attenuation + configuration.calibrationPreamp,
+                    outputBoost: configuration.outputBoost, sampleRate: rate, minimumGainMagnitude: 0
+                )
+                if filter.isPrepared {
+                    var requested = configuration
+                    if !retainingRequest { requested.preamp = attenuation }
+                    activeDirectEQ = requested
+                    appliedDirectPreamp = attenuation
+                    appliedDirectPreampLimit = limit
+                    vdspFilter = filter
+                    setDirectEQAvailability(true)
+                    return attenuation
+                }
+            }
+        }
+        if retainingRequest {
+            let currentRate = Float(currentSampleRate)
+            let rate = currentRate.isFinite && currentRate > 0 ? currentRate : 48000
+            let safe = BiquadFilterVDSP(sampleRate: rate)
+            let attenuation = min(0, configuration.preamp + configuration.calibrationPreamp)
+            if let limit = try? EQConverter.preampLimit(
+                bands: configuration.calibrationBands, sampleRate: Double(rate)
+            ) {
+                safe.configure(
+                    bands: configuration.calibrationBands, preamp: min(attenuation, limit), sampleRate: rate
+                )
+            } else {
+                safe.configure(bands: [], preamp: attenuation, sampleRate: rate)
+            }
+            if !safe.isPrepared {
+                safe.configure(bands: [], preamp: attenuation, sampleRate: rate)
+            }
+            activeDirectEQ = configuration
+            appliedDirectPreamp = nil
+            appliedDirectPreampLimit = nil
+            vdspFilter = safe
+            setDirectEQAvailability(false)
+        }
+        return nil
+    }
+
+    private func clearDirectEQConfiguration() {
+        activeDirectEQ = nil
+        appliedDirectPreamp = nil
+        appliedDirectPreampLimit = nil
+        setDirectEQAvailability(false)
+    }
+
+    private func setDirectEQAvailability(_ value: Bool) {
+        if isDirectEQAvailable != value { isDirectEQAvailable = value }
+    }
+
     /// Rebuild active vDSP filter with new sample rate (called on sample rate change)
     func rebuildActiveEQFilter(sampleRate: Double) {
         currentSampleRate = sampleRate
         guard vdspFilter != nil else { return }
-        if activeEQMode == .thirtyOneBand {
+        if let activeDirectEQ {
+            installDirectEQ(activeDirectEQ, retainingRequest: true)
+        } else if activeEQMode == .thirtyOneBand {
             applyGraphicEQ31(
                 eqGains,
                 preamp: preampGain,
@@ -1446,6 +1601,7 @@ public final class CoreAudioEngine: ObservableObject {
 
     /// Clear EQ
     public func clearEQ() {
+        clearDirectEQConfiguration()
         activeEQMode = .tenBand
         self.vdspFilter = nil
         self.preampGain = 0.0
@@ -1992,6 +2148,10 @@ public final class CoreAudioEngine: ObservableObject {
     }
 
     private func applyCurrentEQGains() {
+        if let activeDirectEQ {
+            installDirectEQ(activeDirectEQ, retainingRequest: true)
+            return
+        }
         switch activeEQMode {
         case .tenBand:
             applyFixedBandEQ(
@@ -2419,7 +2579,7 @@ private func renderCallbackFunction(
     let engine = Unmanaged<CoreAudioEngine>.fromOpaque(inRefCon).takeUnretainedValue()
 
     // One-shot real-time priority promotion for the output render thread.
-    if !engine.didPromoteOutputThread {
+    if !engine.didPromoteOutputThread, inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity {
         engine.didPromoteOutputThread = true
         let period = Double(inNumberFrames) / engine.currentSampleRate
         RealtimeThread.promoteCurrentThread(
@@ -2504,7 +2664,7 @@ private func inputCaptureCallbackFunction(
     engine.lastInputBufferFrames = inNumberFrames
 
     // One-shot real-time priority promotion for the input capture thread.
-    if !engine.didPromoteInputThread {
+    if !engine.didPromoteInputThread, inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity {
         engine.didPromoteInputThread = true
         let period = Double(inNumberFrames) / engine.currentSampleRate
         RealtimeThread.promoteCurrentThread(
@@ -2520,11 +2680,11 @@ private func inputCaptureCallbackFunction(
           let inputBufferList = engine.inputBufferList else { return kAudioUnitErr_Uninitialized }
     let bytesPerFrame: UInt32 = 4
     let frames = Int(inNumberFrames)
-    let bufferSize = inNumberFrames * bytesPerFrame
     // 🔧 Пристрій, що порушує MaximumFramesPerSlice, не має писати за межі преалокованих буферів
     guard inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity else {
         return kAudioUnitErr_TooManyFramesToProcess
     }
+    let bufferSize = inNumberFrames * bytesPerFrame
     let inABL = UnsafeMutableAudioBufferListPointer(inputBufferList)
     for i in 0..<Int(engine.channelCount) {
         inABL[i].mDataByteSize = bufferSize

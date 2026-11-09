@@ -71,6 +71,9 @@ struct AutoEQView: View {
     // MARK: - Audio Engine (ObservableObject для реактивності)
 
     @StateObject private var audioEngine = AudioEngine.shared
+    @State private var appliedResponse = CoreAudioEngine.shared.activeLinearResponse
+    @State private var appliedDirectPreamp = CoreAudioEngine.shared.appliedDirectPreamp
+    @State private var appliedDirectPreampLimit = CoreAudioEngine.shared.appliedDirectPreampLimit
     @State private var isTogglingEQ = false
 
     // MARK: - Active Preset Tracking
@@ -89,6 +92,7 @@ struct AutoEQView: View {
     @State private var searchError: String?
     @State private var offlineIndex: [OfflineIndexEntry] = []
     @State private var isBuildingIndex: Bool = false
+    @State private var showApplyInfo = false
     @State private var indexStatusRaw: IndexStatusKind?
 
     private enum IndexStatusKind: Equatable {
@@ -192,7 +196,7 @@ struct AutoEQView: View {
                     searchResultsSection
                 }
 
-                if !presetState.parsed.isEmpty {
+                if !presetState.parsed.isEmpty || presetState.canApplyDirect {
                     mappedPreviewSection
                 } else {
                     manualEQGraphSection
@@ -209,6 +213,11 @@ struct AutoEQView: View {
             isSearching = false
         }
         .onReceive(presetState.$importError.compactMap(\.self)) { showImportError($0) }
+        .onReceive(CoreAudioEngine.shared.$eqResponseRevision.receive(on: RunLoop.main)) { _ in
+            appliedResponse = CoreAudioEngine.shared.activeLinearResponse
+            appliedDirectPreamp = CoreAudioEngine.shared.appliedDirectPreamp
+            appliedDirectPreampLimit = CoreAudioEngine.shared.appliedDirectPreampLimit
+        }
         .onAppear {
             let session = presetState.open()
             // Defer state changes to next run loop to avoid "Publishing changes from within view updates"
@@ -246,10 +255,11 @@ struct AutoEQView: View {
 
     @ViewBuilder private var activePresetSection: some View {
         if let presetName = presetState.activePresetName {
+            let isApplied = directEQStatus.map { $0 == .autoEQDirectActive } ?? true
             autoEQPanel {
                 HStack(spacing: AppSpacing.md) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    Image(systemName: isApplied ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isApplied ? Color.green : Color.secondary)
                         .imageScale(.medium)
 
                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
@@ -469,18 +479,77 @@ struct AutoEQView: View {
                 }
             }
 
+            let bands = mappedAsEQBands
             EQGraphView(
-                bands: mappedAsEQBands,
+                bands: bands,
+                response: audioEngine.previewFixedResponse(
+                    mode: presetState.bandMode.audioEngineMode,
+                    gains: presetState.fixedDraftGains,
+                    preamp: Float(presetState.preampDB ?? 0)
+                ),
+                appliedResponse: appliedResponse,
                 gainBinding: { id in mappedGainBinding(id: id) }
             )
             .frame(height: 300)
+            Text(localization.localized(.autoEQResponseLegend))
+                .font(AppTypography.bodySmall)
+                .foregroundStyle(.secondary)
 
-            HStack(spacing: AppSpacing.md) {
-                Button(localization.localized(.autoEQApplyToEQ)) {
-                    applyToAudioEngine()
+            HStack(spacing: AppSpacing.sm) {
+                Button(localization.localized(.autoEQApply)) {
+                    if shouldPrimaryApplyDirect {
+                        if presetState.applyDirect() { searchError = nil }
+                    } else {
+                        applyToAudioEngine()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(presetState.mapped.isEmpty || isSearching || presetState.isImporting)
+                .disabled(isPrimaryApplyDisabled)
+                .help(primaryApplyHelpText)
+
+                Menu {
+                    Button(localization.localized(.autoEQApplyToEQ)) {
+                        applyToAudioEngine()
+                    }
+                    .disabled(presetState.mapped.isEmpty || isSearching || presetState.isImporting)
+
+                    if presetState.canApplyDirect {
+                        Button(localization.localized(.autoEQApplyDirect)) {
+                            if presetState.applyDirect() { searchError = nil }
+                        }
+                        .disabled(isSearching || presetState.isImporting)
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(isSecondaryMenuDisabled)
+                .help(localization.localized(.autoEQApplyMenuHelp))
+                .accessibilityLabel(localization.localized(.autoEQApplyMenuHelp))
+
+                Button {
+                    showApplyInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                        .font(AppTypography.label)
+                }
+                .buttonStyle(.plain)
+                .help(localization.localized(.autoEQApplyInfoHelp))
+                .accessibilityLabel(localization.localized(.autoEQApplyInfoHelp))
+                .popover(isPresented: $showApplyInfo, arrowEdge: .bottom) {
+                    applyInfoPopoverContent
+                }
+
+                if presetState.canApplyDirect, let name = presetState.directPreviewName {
+                    Text(name)
+                        .font(AppTypography.bodySmall)
+                        .foregroundStyle(.secondary)
+                }
 
                 if !presetState.mapped.isEmpty {
                     Text(String(
@@ -498,13 +567,99 @@ struct AutoEQView: View {
         }
     }
 
+    private var hasIntentionalFixedEdits: Bool {
+        if presetState.importCurveEdited || abs(presetState.bassBoost) > 1e-4 {
+            return true
+        }
+        if let prepared = presetState.preparedImport {
+            let fitted = prepared.result(for: presetState.bandMode.audioEngineMode).gains
+            let current = presetState.mapped.map { Float($0.gain) }
+            if current != fitted {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var shouldPrimaryApplyDirect: Bool {
+        presetState.canApplyDirect && !hasIntentionalFixedEdits
+    }
+
+    private var isPrimaryApplyDisabled: Bool {
+        if isSearching || presetState.isImporting {
+            return true
+        }
+        if shouldPrimaryApplyDirect {
+            return !presetState.canApplyDirect
+        } else {
+            return presetState.mapped.isEmpty
+        }
+    }
+
+    private var isSecondaryMenuDisabled: Bool {
+        if isSearching || presetState.isImporting {
+            return true
+        }
+        return presetState.mapped.isEmpty && !presetState.canApplyDirect
+    }
+
+    private var primaryApplyHelpText: String {
+        if shouldPrimaryApplyDirect {
+            localization.localized(.autoEQApplyOriginalHelp)
+        } else {
+            localization.localized(.autoEQApplyFixedHelp)
+        }
+    }
+
+    private var applyInfoPopoverContent: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            Text(localization.localized(.autoEQApplyInfoTitle))
+                .font(AppTypography.heading3)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(localization.localized(.autoEQApplyInfoOriginalsTitle))
+                    .font(AppTypography.label)
+                    .foregroundStyle(.primary)
+                Text(localization.localized(.autoEQApplyInfoOriginalsBody))
+                    .font(AppTypography.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(localization.localized(.autoEQApplyInfoFixedTitle))
+                    .font(AppTypography.label)
+                    .foregroundStyle(.primary)
+                Text(localization.localized(.autoEQApplyInfoFixedBody))
+                    .font(AppTypography.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(localization.localized(.autoEQApplyInfoChoicesTitle))
+                    .font(AppTypography.label)
+                    .foregroundStyle(.primary)
+                Text(localization.localized(.autoEQApplyInfoChoicesBody))
+                    .font(AppTypography.body)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(AppSpacing.md)
+        .frame(width: 320)
+    }
+
     private var manualEQGraphSection: some View {
         autoEQPanel {
             EQGraphView(
                 bands: audioEngine.bands,
+                response: appliedResponse,
                 gainBinding: { id in manualBandGainBinding(id: id) }
             )
             .frame(height: 300)
+            Text(localization.localized(.autoEQLinearResponse))
+                .font(AppTypography.bodySmall)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -543,8 +698,16 @@ struct AutoEQView: View {
         }
     }
 
+    private var directEQStatus: LocalizedString? {
+        guard audioEngine.directEQFilters != nil else { return nil }
+        guard audioEngine.isEnabled, audioEngine.isRunning else { return .autoEQDirectInactive }
+        return audioEngine.isDirectEQAvailable ? .autoEQDirectActive : .autoEQDirectUnavailable
+    }
+
     private var eqControlsSection: some View {
-        let recommendedPreamp = audioEngine.recommendedPreampGain()
+        let recommendedPreamp = audioEngine.directEQFilters == nil
+            ? audioEngine.recommendedPreampGain()
+            : appliedDirectPreampLimit ?? min(0, audioEngine.preampGain)
 
         return autoEQPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
@@ -579,6 +742,16 @@ struct AutoEQView: View {
                     .toggleStyle(.switch)
                 }
 
+                if let status = directEQStatus {
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        Text(localization.localized(status))
+                            .foregroundStyle(status == .autoEQDirectUnavailable ? Color.orange : Color.primary)
+                        Text(localization.localized(.autoEQDirectFixedControls))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(AppTypography.bodySmall)
+                }
+
                 HStack(spacing: AppSpacing.md) {
                     Button {
                         withAnimation(.spring(response: 0.3)) { _ = audioEngine.restorePresetDefaults() }
@@ -603,6 +776,15 @@ struct AutoEQView: View {
                             .foregroundStyle(.secondary)
                         Text(audioEngine.formatGain(audioEngine.preampGain))
                             .font(AppTypography.mono)
+                        if directEQStatus == .autoEQDirectActive, let appliedDirectPreamp,
+                           abs(audioEngine.preampGain - appliedDirectPreamp) > 0.05 {
+                            Text(String(
+                                format: localization.localized(.autoEQDirectAppliedPreamp),
+                                audioEngine.formatGain(appliedDirectPreamp)
+                            ))
+                            .font(AppTypography.bodySmall)
+                            .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -1401,6 +1583,10 @@ struct AutoEQView: View {
             searchError = String(format: localization.localized(.autoEQImportLineError), line)
         } else if error as? AutoEQImportError == .insufficientHeadroom {
             searchError = localization.localized(.autoEQHeadroomError)
+        } else if error as? AutoEQImportError == .invalidSampleRate {
+            searchError = localization.localized(.autoEQSampleRateError)
+        } else if error as? AutoEQImportError == .directUnavailable {
+            searchError = localization.localized(.autoEQDirectUnavailable)
         } else {
             searchError = localization.localized(.autoEQImportFileError)
         }

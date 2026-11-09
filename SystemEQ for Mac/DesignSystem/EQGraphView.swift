@@ -2,9 +2,13 @@ import SwiftUI
 
 struct EQGraphView: View {
     let bands: [EQBand]
+    let response: EQLinearResponse
+    var appliedResponse: EQLinearResponse?
     let gainBinding: (Int) -> Binding<Float>
 
     private let hPad: CGFloat = 36
+    @State private var responsePoints: [AutoEQCurvePoint] = []
+    @State private var appliedPoints: [AutoEQCurvePoint] = []
 
     private var accessibilitySummary: String {
         let activeBands = bands.filter { $0.gain.isFinite && abs($0.gain) >= 0.1 }
@@ -23,12 +27,23 @@ struct EQGraphView: View {
             ZStack {
                 EQGridBackground(hPad: hPad)
                 EQCurveView(
-                    bands: bands,
+                    samples: responsePoints,
                     width: geo.size.width,
                     height: geo.size.height,
-                    hPad: hPad
+                    hPad: hPad,
+                    isAppliedOverlay: false
                 )
                 .allowsHitTesting(false)
+                if appliedResponse != nil {
+                    EQCurveView(
+                        samples: appliedPoints,
+                        width: geo.size.width,
+                        height: geo.size.height,
+                        hPad: hPad,
+                        isAppliedOverlay: true
+                    )
+                    .allowsHitTesting(false)
+                }
                 EQSlidersOverlay(
                     bands: bands,
                     hPad: hPad,
@@ -36,11 +51,29 @@ struct EQGraphView: View {
                 )
             }
         }
+        .task(id: response) {
+            if let points = await plot(response) { responsePoints = points }
+        }
+        .task(id: appliedResponse) {
+            if let appliedResponse, let points = await plot(appliedResponse) {
+                appliedPoints = points
+            }
+        }
         .frame(minHeight: 280)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(LocalizationManager.shared.localized(.equalizerCurve))
         .accessibilityValue(accessibilitySummary)
+    }
+
+    private func plot(_ response: EQLinearResponse) async -> [AutoEQCurvePoint]? {
+        let worker = Task.detached { response.plot() }
+        let points = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        return Task.isCancelled ? nil : points
     }
 }
 
@@ -112,66 +145,50 @@ struct EQGridBackground: View {
 }
 
 struct EQCurveView: View {
-    let bands: [EQBand]
+    let samples: [AutoEQCurvePoint]
     let width: CGFloat
     let height: CGFloat
     let hPad: CGFloat
-
-    private var accentColor: Color {
-        Color.accentColor
-    }
-
-    private var points: [CGPoint] {
-        bands.map { band in
-            CGPoint(
-                x: eqXFor(freq: band.frequency, width: width, hPad: hPad),
-                y: eqYFor(gain: band.gain, height: height)
-            )
-        }
-    }
+    let isAppliedOverlay: Bool
 
     var body: some View {
-        ZStack {
-            fillPath.fill(
-                LinearGradient(
-                    colors: [accentColor.opacity(0.25), accentColor.opacity(0.04)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+        let points = samples.map {
+            CGPoint(
+                x: eqXFor(freq: Float($0.frequency), width: width, hPad: hPad),
+                y: eqYFor(gain: Float(min(20, max(-20, $0.gain))), height: height)
             )
-            curvePath.stroke(accentColor, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+        }
+        ZStack {
+            if !isAppliedOverlay {
+                path(points, fill: true).fill(
+                    LinearGradient(
+                        colors: [Color.accentColor.opacity(0.25), Color.accentColor.opacity(0.04)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
+            path(points, fill: false).stroke(
+                isAppliedOverlay ? Color.secondary : .accentColor,
+                style: StrokeStyle(lineWidth: 2, lineJoin: .round, dash: isAppliedOverlay ? [5, 4] : [])
+            )
         }
     }
 
-    private var curvePath: Path {
+    private func path(_ points: [CGPoint], fill: Bool) -> Path {
         Path { path in
-            guard !points.isEmpty else { return }
-            path.move(to: points[0])
-            for i in 1..<points.count {
-                let prev = points[i - 1], curr = points[i]
-                let cp1 = CGPoint(x: (prev.x + curr.x) / 2, y: prev.y)
-                let cp2 = CGPoint(x: (prev.x + curr.x) / 2, y: curr.y)
-                path.addCurve(to: curr, control1: cp1, control2: cp2)
+            guard let first = points.first, let last = points.last else { return }
+            if fill {
+                path.move(to: CGPoint(x: first.x, y: height / 2))
+                path.addLine(to: first)
+            } else {
+                path.move(to: first)
             }
-        }
-    }
-
-    private var fillPath: Path {
-        Path { path in
-            guard !points.isEmpty else { return }
-            let mid = height / 2
-            path.move(to: CGPoint(x: points[0].x, y: mid))
-            path.addLine(to: points[0])
-            for i in 1..<points.count {
-                let prev = points[i - 1], curr = points[i]
-                let cp1 = CGPoint(x: (prev.x + curr.x) / 2, y: prev.y)
-                let cp2 = CGPoint(x: (prev.x + curr.x) / 2, y: curr.y)
-                path.addCurve(to: curr, control1: cp1, control2: cp2)
+            path.addLines(Array(points.dropFirst()))
+            if fill {
+                path.addLine(to: CGPoint(x: last.x, y: height / 2))
+                path.closeSubpath()
             }
-            if let last = points.last {
-                path.addLine(to: CGPoint(x: last.x, y: mid))
-            }
-            path.closeSubpath()
         }
     }
 }

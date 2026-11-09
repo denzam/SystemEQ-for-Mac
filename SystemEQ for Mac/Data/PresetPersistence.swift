@@ -23,6 +23,14 @@ public enum PresetPersistence {
         public let mode: EQBandMode
         public let gains: [Float]
         public let preamp: Float
+        public let directFilters: [AutoEQSourceFilter]?
+
+        public init(mode: EQBandMode, gains: [Float], preamp: Float, directFilters: [AutoEQSourceFilter]? = nil) {
+            self.mode = mode
+            self.gains = gains
+            self.preamp = preamp
+            self.directFilters = directFilters
+        }
     }
 
     private struct Snapshot: Codable {
@@ -30,9 +38,11 @@ public enum PresetPersistence {
         let gains: [Float]
         let preamp: Float
         let bassBoost: Float
+        let directFilters: [AutoEQSourceFilter]?
 
         var isValid: Bool {
-            gains.count == mode.bandCount && gains.allSatisfy(\.isFinite) && preamp.isFinite && bassBoost.isFinite
+            gains.count == mode.bandCount && gains.allSatisfy(\.isFinite) && preamp.isFinite && bassBoost.isFinite &&
+                (directFilters.map(AutoEQSourceFilter.validDirect) ?? true)
         }
     }
 
@@ -40,15 +50,25 @@ public enum PresetPersistence {
     // стирає реальний збережений пресет користувача.
     nonisolated(unsafe) static var defaults: UserDefaults = .standard
 
-    public static func save(mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float = 0.0) {
-        let snapshot = Snapshot(mode: mode, gains: gains, preamp: preamp, bassBoost: bassBoost)
+    public static func save(
+        mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float = 0.0,
+        directFilters: [AutoEQSourceFilter]? = nil
+    ) {
+        let snapshot = Snapshot(
+            mode: mode,
+            gains: gains,
+            preamp: preamp,
+            bassBoost: bassBoost,
+            directFilters: directFilters
+        )
         guard snapshot.isValid, let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
     }
 
-    public static func load() -> (mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float)? {
+    public static func load()
+        -> (mode: EQBandMode, gains: [Float], preamp: Float, bassBoost: Float, directFilters: [AutoEQSourceFilter]?)? {
         if let snapshot = loadSnapshot(key: snapshotKey, from: defaults) {
-            return (snapshot.mode, snapshot.gains, snapshot.preamp, snapshot.bassBoost)
+            return (snapshot.mode, snapshot.gains, snapshot.preamp, snapshot.bassBoost, snapshot.directFilters)
         }
         guard let raw = defaults.string(forKey: modeKey), let mode = EQBandMode(rawValue: raw) else { return nil }
         guard let data = defaults.data(forKey: gainsKey),
@@ -57,17 +77,18 @@ public enum PresetPersistence {
         let preamp = Float(defaults.double(forKey: preampKey))
         let bassBoost = Float(defaults.double(forKey: bassBoostKey))
         guard preamp.isFinite, bassBoost.isFinite else { return nil }
-        return (mode, gains, preamp, bassBoost)
+        return (mode, gains, preamp, bassBoost, nil)
     }
 
     public static func savePlaybackState(
         mode: EQBandMode,
         gains: [Float],
         preamp: Float,
+        directFilters: [AutoEQSourceFilter]? = nil,
         in targetDefaults: UserDefaults? = nil
     ) {
         let target = targetDefaults ?? defaults
-        let snapshot = Snapshot(mode: mode, gains: gains, preamp: preamp, bassBoost: 0)
+        let snapshot = Snapshot(mode: mode, gains: gains, preamp: preamp, bassBoost: 0, directFilters: directFilters)
         guard snapshot.isValid, let data = try? JSONEncoder().encode(snapshot) else { return }
         target.set(data, forKey: playbackSnapshotKey)
     }
@@ -75,7 +96,10 @@ public enum PresetPersistence {
     public static func loadPlaybackState(in targetDefaults: UserDefaults? = nil) -> PlaybackState? {
         let target = targetDefaults ?? defaults
         if let snapshot = loadSnapshot(key: playbackSnapshotKey, from: target) {
-            return PlaybackState(mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp)
+            return PlaybackState(
+                mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp,
+                directFilters: snapshot.directFilters
+            )
         }
         guard let raw = target.string(forKey: playbackModeKey), let mode = EQBandMode(rawValue: raw) else {
             return loadLegacyPlaybackState(in: target)
@@ -118,7 +142,10 @@ public enum PresetPersistence {
 
     private static func loadLegacyPlaybackState(in target: UserDefaults) -> PlaybackState? {
         if let snapshot = loadSnapshot(key: snapshotKey, from: target) {
-            return PlaybackState(mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp)
+            return PlaybackState(
+                mode: snapshot.mode, gains: snapshot.gains, preamp: snapshot.preamp,
+                directFilters: snapshot.directFilters
+            )
         }
         guard let raw = target.string(forKey: modeKey), let mode = EQBandMode(rawValue: raw) else { return nil }
         guard let data = target.data(forKey: gainsKey),

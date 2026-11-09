@@ -150,9 +150,10 @@ public final class AudioEngine: ObservableObject {
     @Published var isEnabled: Bool = true
     @Published var bandMode: EQBandMode = .tenBand {
         didSet {
-            if bandMode != oldValue {
+            if bandMode != oldValue, !restoringPlayback {
+                leaveDirectEQ()
                 DispatchQueue.main.async { [weak self] in
-                    self?.setupEQBands()
+                    self?.syncBandsToMode()
                     self?.syncToCoreAudioEngineImmediate()
                     self?.persistCurrentPlaybackState()
                 }
@@ -162,6 +163,8 @@ public final class AudioEngine: ObservableObject {
 
     @Published var bands: [EQBand] = []
     @Published var preampGain: Float = 0.0
+    @Published private(set) var directEQFilters: [AutoEQSourceFilter]?
+    @Published private(set) var isDirectEQAvailable = false
     @Published var autoNormalizeCalibrationProfiles: Bool {
         didSet {
             guard autoNormalizeCalibrationProfiles != oldValue else { return }
@@ -184,6 +187,7 @@ public final class AudioEngine: ObservableObject {
     let coreAudioEngine: CoreAudioEngine
     private var calibrationAdjustments: [Float]?
     private var calibrationOverallGainDB: Float = 0
+    private var restoringPlayback = false
     private let enableRouting: (Bool) -> Bool
     private let disableRouting: (Bool) -> Void
     private static let outputBoostGainKey = "outputBoostGain"
@@ -231,6 +235,11 @@ public final class AudioEngine: ObservableObject {
             .sink { [weak self] value in
                 DispatchQueue.main.async { self?.isEnabled = value }
             }
+            .store(in: &cancellables)
+
+        coreAudioEngine.$isDirectEQAvailable
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshDirectEQAvailability() }
             .store(in: &cancellables)
 
         // ⚡ Peak levels are deliberately NOT republished here. The App root
@@ -294,6 +303,15 @@ public final class AudioEngine: ObservableObject {
         syncDebounceWorkItem?.cancel()
         syncDebounceWorkItem = nil
         syncBandsToMode()
+        if let directEQFilters {
+            coreAudioEngine.applyDirectEQ(
+                directEQFilters, preamp: preampGain, outputBoost: outputBoostGain,
+                calibrationBands: directCalibrationBands(), calibrationPreamp: calibrationOverallGainDB,
+                retainingRequest: true
+            )
+            refreshDirectEQAvailability()
+            return
+        }
         let gains = effectiveGains(mode: bandMode, gains: bands.map(\.gain))
         switch bandMode {
         case .tenBand:
@@ -311,6 +329,58 @@ public final class AudioEngine: ObservableObject {
                 calibrationPreamp: calibrationOverallGainDB
             )
         }
+    }
+
+    @discardableResult
+    func applyDirectEQ(_ filters: [AutoEQSourceFilter], preamp: Float) -> Bool {
+        guard let attenuation = coreAudioEngine.applyDirectEQ(
+            filters, preamp: preamp, outputBoost: outputBoostGain,
+            calibrationBands: directCalibrationBands(), calibrationPreamp: calibrationOverallGainDB
+        ) else { return false }
+        syncDebounceWorkItem?.cancel()
+        syncDebounceWorkItem = nil
+        directEQFilters = filters
+        preampGain = attenuation
+        refreshDirectEQAvailability()
+        persistCurrentPlaybackState()
+        return true
+    }
+
+    func restorePlayback(_ state: PresetPersistence.PlaybackState, sync: Bool = true) {
+        guard state.gains.count == state.mode.bandCount, state.gains.allSatisfy(\.isFinite),
+              state.preamp.isFinite, state.directFilters.map(AutoEQSourceFilter.validDirect) ?? true
+        else { return }
+        restoringPlayback = true
+        bandMode = state.mode
+        restoringPlayback = false
+        syncBandsToMode()
+        for (index, gain) in state.gains.enumerated() {
+            bands[index].gain = gain
+        }
+        directEQFilters = state.directFilters
+        preampGain = Self.sanitizedPreamp(state.preamp)
+        if sync {
+            syncToCoreAudioEngineImmediate()
+            persistCurrentPlaybackState()
+        } else {
+            isDirectEQAvailable = false
+        }
+    }
+
+    private func directCalibrationBands() -> [ParametricBand] {
+        guard let calibrationAdjustments else { return [] }
+        let gains = calibrationAdjustments.map { min(20, max(-20, $0)) }
+        return FixedBandEQDefinition.bands(mode: .thirtyOneBand, gains: gains)
+    }
+
+    private func refreshDirectEQAvailability() {
+        let available = directEQFilters != nil && coreAudioEngine.isDirectEQAvailable
+        if isDirectEQAvailable != available { isDirectEQAvailable = available }
+    }
+
+    private func leaveDirectEQ() {
+        if directEQFilters != nil { directEQFilters = nil }
+        if isDirectEQAvailable { isDirectEQAvailable = false }
     }
 
     @discardableResult
@@ -391,15 +461,17 @@ public final class AudioEngine: ObservableObject {
     }
 
     func updateBandGain(bandId: Int, gain: Float) {
-        guard bandId < bands.count else { return }
+        guard bands.indices.contains(bandId), gain.isFinite else { return }
         let clampedGain = max(-20.0, min(20.0, gain))
         if Thread.isMainThread {
+            leaveDirectEQ()
             bands[bandId].gain = clampedGain
             syncToCoreAudioEngine()
             schedulePlaybackStatePersistence()
         } else {
             DispatchQueue.main.async { [weak self] in
-                guard let self, bandId < self.bands.count else { return }
+                guard let self, self.bands.indices.contains(bandId) else { return }
+                self.leaveDirectEQ()
                 self.bands[bandId].gain = clampedGain
                 self.syncToCoreAudioEngine()
                 self.schedulePlaybackStatePersistence()
@@ -408,6 +480,7 @@ public final class AudioEngine: ObservableObject {
     }
 
     func resetAllBands() {
+        leaveDirectEQ()
         for index in bands.indices {
             bands[index].gain = 0.0
         }
@@ -429,12 +502,9 @@ public final class AudioEngine: ObservableObject {
                 amount: Double(preset.bassBoost)
             ))
         }
-        if bandMode != preset.mode {
-            bandMode = preset.mode
-        }
-        syncBandsToMode()
-        preampGain = Self.sanitizedPreamp(preset.preamp)
-        applyEQValues(restoredGains)
+        restorePlayback(.init(
+            mode: preset.mode, gains: restoredGains, preamp: preset.preamp, directFilters: preset.directFilters
+        ))
         eqLog("Preset defaults restored")
         return true
     }
@@ -450,6 +520,7 @@ public final class AudioEngine: ObservableObject {
             return
         }
 
+        leaveDirectEQ()
         for (index, gain) in values.enumerated() {
             bands[index].gain = gain
         }
@@ -470,6 +541,11 @@ public final class AudioEngine: ObservableObject {
     }
 
     func recommendedPreampGain() -> Float {
+        if let directEQFilters {
+            return coreAudioEngine.directEQPreampLimit(
+                directEQFilters, calibrationBands: directCalibrationBands(), calibrationPreamp: calibrationOverallGainDB
+            ) ?? min(0, preampGain)
+        }
         let gains = bandMode.frequencies.map { Self.interpolatedGain(at: $0, from: bands) }
         let gain = FixedBandAutoPreamp.recommendedGain(
             mode: bandMode, gains: effectiveGains(mode: bandMode, gains: gains),
@@ -505,6 +581,19 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    func previewFixedResponse(mode: EQBandMode, gains: [Float], preamp: Float) -> EQLinearResponse {
+        let room = coreAudioEngine.roomLinearResponse
+        let effective = effectiveGains(mode: mode, gains: gains)
+        let bands = FixedBandEQDefinition.bands(mode: mode, gains: effective)
+        return EQLinearResponse(
+            sampleRate: room.sampleRate,
+            coefficients: BiquadResponseCalculator.preparedCoefficients(bands: bands, sampleRate: room.sampleRate) +
+                room.coefficients,
+            preampDB: Self.sanitizedPreamp(preamp) + calibrationOverallGainDB + outputBoostGain + room.preampDB,
+            criticalFrequencies: bands.map { Double($0.frequency) } + room.criticalFrequencies
+        )
+    }
+
     private static func sanitizedPreamp(_ gain: Float) -> Float {
         gain.isFinite ? max(-20.0, min(20.0, gain)) : 0.0
     }
@@ -518,6 +607,7 @@ public final class AudioEngine: ObservableObject {
             mode: bandMode,
             gains: bands.map(\.gain),
             preamp: preampGain,
+            directFilters: directEQFilters,
             in: defaults
         )
     }
