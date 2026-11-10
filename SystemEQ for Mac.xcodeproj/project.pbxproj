@@ -585,7 +585,7 @@
 					"-lprojectM-4",
 					"-lprojectM-4-playlist",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ;
+				PRODUCT_BUNDLE_IDENTIFIER = com.denzam.SystemEQ.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
