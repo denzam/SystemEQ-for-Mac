@@ -407,7 +407,7 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate var inputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var inputABL: UnsafeMutableAudioBufferListPointer?
     fileprivate var bufferCapacity: UInt32 = 0 // bytes per buffer
-    fileprivate var allocatedFrameCapacity: UInt32 = 0 // frames; input/output ABL завжди алокуються з одним maxFrames
+    var allocatedFrameCapacity: UInt32 = 0 // frames; input/output ABL завжди алокуються з одним maxFrames
     fileprivate var outputBufferList: UnsafeMutablePointer<AudioBufferList>?
     fileprivate var outputABL: UnsafeMutableAudioBufferListPointer?
     fileprivate var outputScratchLeft: UnsafeMutablePointer<Float>?
@@ -552,17 +552,367 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate var lastOutSampleTimes: [Double] = []
     fileprivate var lastInSampleTimes: [Double] = []
 
+    struct NativeRTSnapshot: Equatable {
+        let epoch: UInt32
+        let sampleRate: Double
+        let nominalBufferFrames: UInt32
+        let isValid: Bool
+        let executedCallbacks: UInt64
+        let earlyReturnCallbacks: UInt64
+        let totalCallbackFrames: UInt64
+        let executionNanosSum: UInt64
+        let maxExecutionNanosSinceEpoch: UInt64
+        let budgetOverrunCount: UInt64
+        let cadenceGapCount: UInt64
+        let maxCadenceNanosSinceEpoch: UInt64
+        let bucketUnder250us: UInt64
+        let bucket250To500us: UInt64
+        let bucket500To1000us: UInt64
+        let bucket1000To2000us: UInt64
+        let bucketOver2000us: UInt64
+        let minObservedFrames: UInt32
+        let maxObservedFrames: UInt32
+        let lastObservedMachTicks: UInt64
+
+        init(
+            epoch: UInt32,
+            sampleRate: Double,
+            nominalBufferFrames: UInt32,
+            isValid: Bool = true,
+            executedCallbacks: UInt64,
+            earlyReturnCallbacks: UInt64,
+            totalCallbackFrames: UInt64,
+            executionNanosSum: UInt64,
+            maxExecutionNanosSinceEpoch: UInt64,
+            budgetOverrunCount: UInt64,
+            cadenceGapCount: UInt64,
+            maxCadenceNanosSinceEpoch: UInt64,
+            bucketUnder250us: UInt64,
+            bucket250To500us: UInt64,
+            bucket500To1000us: UInt64,
+            bucket1000To2000us: UInt64,
+            bucketOver2000us: UInt64,
+            minObservedFrames: UInt32,
+            maxObservedFrames: UInt32,
+            lastObservedMachTicks: UInt64
+        ) {
+            self.epoch = epoch
+            self.sampleRate = sampleRate
+            self.nominalBufferFrames = nominalBufferFrames
+            self.isValid = isValid
+            self.executedCallbacks = executedCallbacks
+            self.earlyReturnCallbacks = earlyReturnCallbacks
+            self.totalCallbackFrames = totalCallbackFrames
+            self.executionNanosSum = executionNanosSum
+            self.maxExecutionNanosSinceEpoch = maxExecutionNanosSinceEpoch
+            self.budgetOverrunCount = budgetOverrunCount
+            self.cadenceGapCount = cadenceGapCount
+            self.maxCadenceNanosSinceEpoch = maxCadenceNanosSinceEpoch
+            self.bucketUnder250us = bucketUnder250us
+            self.bucket250To500us = bucket250To500us
+            self.bucket500To1000us = bucket500To1000us
+            self.bucket1000To2000us = bucket1000To2000us
+            self.bucketOver2000us = bucketOver2000us
+            self.minObservedFrames = minObservedFrames
+            self.maxObservedFrames = maxObservedFrames
+            self.lastObservedMachTicks = lastObservedMachTicks
+        }
+
+        var averageExecutionNanos: UInt64 {
+            let total = executedCallbacks &+ earlyReturnCallbacks
+            return total > 0 ? executionNanosSum / total : 0
+        }
+
+        func delta(from start: NativeRTSnapshot) -> (
+            executed: UInt64,
+            earlyReturns: UInt64,
+            frames: UInt64,
+            overruns: UInt64,
+            cadenceGaps: UInt64,
+            avgNanos: UInt64,
+            cumulativeMaxExecutionNanos: UInt64,
+            cumulativeMaxCadenceNanos: UInt64
+        )? {
+            guard isValid,
+                  start.isValid,
+                  epoch == start.epoch,
+                  epoch > 0,
+                  sampleRate == start.sampleRate,
+                  sampleRate.isFinite,
+                  sampleRate > 0,
+                  nominalBufferFrames == start.nominalBufferFrames,
+                  nominalBufferFrames > 0,
+                  executedCallbacks >= start.executedCallbacks,
+                  earlyReturnCallbacks >= start.earlyReturnCallbacks,
+                  totalCallbackFrames >= start.totalCallbackFrames,
+                  executionNanosSum >= start.executionNanosSum,
+                  budgetOverrunCount >= start.budgetOverrunCount,
+                  cadenceGapCount >= start.cadenceGapCount,
+                  bucketUnder250us >= start.bucketUnder250us,
+                  bucket250To500us >= start.bucket250To500us,
+                  bucket500To1000us >= start.bucket500To1000us,
+                  bucket1000To2000us >= start.bucket1000To2000us,
+                  bucketOver2000us >= start.bucketOver2000us else {
+                return nil
+            }
+            let dExecuted = executedCallbacks - start.executedCallbacks
+            let dEarly = earlyReturnCallbacks - start.earlyReturnCallbacks
+            let dTotalCallbacks = dExecuted + dEarly
+            guard dTotalCallbacks > 0 else { return nil }
+
+            let dFrames = totalCallbackFrames - start.totalCallbackFrames
+            let dSumNanos = executionNanosSum - start.executionNanosSum
+            let dOverruns = budgetOverrunCount - start.budgetOverrunCount
+            let dGaps = cadenceGapCount - start.cadenceGapCount
+
+            let dBucket1 = bucketUnder250us - start.bucketUnder250us
+            let dBucket2 = bucket250To500us - start.bucket250To500us
+            let dBucket3 = bucket500To1000us - start.bucket500To1000us
+            let dBucket4 = bucket1000To2000us - start.bucket1000To2000us
+            let dBucket5 = bucketOver2000us - start.bucketOver2000us
+            let dBucketSum = dBucket1 + dBucket2 + dBucket3 + dBucket4 + dBucket5
+            guard dBucketSum == dTotalCallbacks else { return nil }
+
+            let avg = dSumNanos / dTotalCallbacks
+            return (
+                executed: dExecuted,
+                earlyReturns: dEarly,
+                frames: dFrames,
+                overruns: dOverruns,
+                cadenceGaps: dGaps,
+                avgNanos: avg,
+                cumulativeMaxExecutionNanos: maxExecutionNanosSinceEpoch,
+                cumulativeMaxCadenceNanos: maxCadenceNanosSinceEpoch
+            )
+        }
+    }
+
+    final class NativeRTMetricsStorage {
+        let rtMetricsEnabledAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let writerActiveAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let sequenceAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let epochAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let isEpochValidAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let sampleRateBitsAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let nominalFramesAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let executedCallbacksAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let earlyReturnCallbacksAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let totalCallbackFramesAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let executionNanosSumAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let maxExecutionNanosAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let budgetOverrunCountAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let cadenceGapCountAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let maxCadenceNanosAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let bucketUnder250usAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let bucket250To500usAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let bucket500To1000usAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let bucket1000To2000usAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let bucketOver2000usAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+        let minObservedFramesAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let maxObservedFramesAtomic: UnsafeMutablePointer<SEQAtomicInt32>
+        let lastCallbackEntryTicksAtomic: UnsafeMutablePointer<SEQAtomicInt64>
+
+        init() {
+            rtMetricsEnabledAtomic = .allocate(capacity: 1)
+            writerActiveAtomic = .allocate(capacity: 1)
+            sequenceAtomic = .allocate(capacity: 1)
+            epochAtomic = .allocate(capacity: 1)
+            isEpochValidAtomic = .allocate(capacity: 1)
+            sampleRateBitsAtomic = .allocate(capacity: 1)
+            nominalFramesAtomic = .allocate(capacity: 1)
+            executedCallbacksAtomic = .allocate(capacity: 1)
+            earlyReturnCallbacksAtomic = .allocate(capacity: 1)
+            totalCallbackFramesAtomic = .allocate(capacity: 1)
+            executionNanosSumAtomic = .allocate(capacity: 1)
+            maxExecutionNanosAtomic = .allocate(capacity: 1)
+            budgetOverrunCountAtomic = .allocate(capacity: 1)
+            cadenceGapCountAtomic = .allocate(capacity: 1)
+            maxCadenceNanosAtomic = .allocate(capacity: 1)
+            bucketUnder250usAtomic = .allocate(capacity: 1)
+            bucket250To500usAtomic = .allocate(capacity: 1)
+            bucket500To1000usAtomic = .allocate(capacity: 1)
+            bucket1000To2000usAtomic = .allocate(capacity: 1)
+            bucketOver2000usAtomic = .allocate(capacity: 1)
+            minObservedFramesAtomic = .allocate(capacity: 1)
+            maxObservedFramesAtomic = .allocate(capacity: 1)
+            lastCallbackEntryTicksAtomic = .allocate(capacity: 1)
+
+            seq_atomic_int32_init(rtMetricsEnabledAtomic, 0)
+            seq_atomic_int32_init(writerActiveAtomic, 0)
+            seq_atomic_int32_init(sequenceAtomic, 0)
+            seq_atomic_int32_init(epochAtomic, 0)
+            seq_atomic_int32_init(isEpochValidAtomic, 0)
+            seq_atomic_int64_init(sampleRateBitsAtomic, 0)
+            seq_atomic_int32_init(nominalFramesAtomic, 0)
+            seq_atomic_int64_init(executedCallbacksAtomic, 0)
+            seq_atomic_int64_init(earlyReturnCallbacksAtomic, 0)
+            seq_atomic_int64_init(totalCallbackFramesAtomic, 0)
+            seq_atomic_int64_init(executionNanosSumAtomic, 0)
+            seq_atomic_int64_init(maxExecutionNanosAtomic, 0)
+            seq_atomic_int64_init(budgetOverrunCountAtomic, 0)
+            seq_atomic_int64_init(cadenceGapCountAtomic, 0)
+            seq_atomic_int64_init(maxCadenceNanosAtomic, 0)
+            seq_atomic_int64_init(bucketUnder250usAtomic, 0)
+            seq_atomic_int64_init(bucket250To500usAtomic, 0)
+            seq_atomic_int64_init(bucket500To1000usAtomic, 0)
+            seq_atomic_int64_init(bucket1000To2000usAtomic, 0)
+            seq_atomic_int64_init(bucketOver2000usAtomic, 0)
+            seq_atomic_int32_init(minObservedFramesAtomic, Int32.max)
+            seq_atomic_int32_init(maxObservedFramesAtomic, 0)
+            seq_atomic_int64_init(lastCallbackEntryTicksAtomic, 0)
+        }
+
+        deinit {
+            rtMetricsEnabledAtomic.deallocate()
+            writerActiveAtomic.deallocate()
+            sequenceAtomic.deallocate()
+            epochAtomic.deallocate()
+            isEpochValidAtomic.deallocate()
+            sampleRateBitsAtomic.deallocate()
+            nominalFramesAtomic.deallocate()
+            executedCallbacksAtomic.deallocate()
+            earlyReturnCallbacksAtomic.deallocate()
+            totalCallbackFramesAtomic.deallocate()
+            executionNanosSumAtomic.deallocate()
+            maxExecutionNanosAtomic.deallocate()
+            budgetOverrunCountAtomic.deallocate()
+            cadenceGapCountAtomic.deallocate()
+            maxCadenceNanosAtomic.deallocate()
+            bucketUnder250usAtomic.deallocate()
+            bucket250To500usAtomic.deallocate()
+            bucket500To1000usAtomic.deallocate()
+            bucket1000To2000usAtomic.deallocate()
+            bucketOver2000usAtomic.deallocate()
+            minObservedFramesAtomic.deallocate()
+            maxObservedFramesAtomic.deallocate()
+            lastCallbackEntryTicksAtomic.deallocate()
+        }
+
+        func startEpoch(sampleRate: Double, nominalFrames: UInt32) {
+            guard sampleRate.isFinite, sampleRate >= 1000.0, sampleRate <= 10_000_000.0,
+                  nominalFrames > 0, nominalFrames <= 16384 else {
+                invalidateEpoch()
+                return
+            }
+            let s = UInt32(bitPattern: seq_atomic_int32_load(sequenceAtomic) &+ 1)
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s))
+
+            let nextEpoch = UInt32(bitPattern: seq_atomic_int32_load(epochAtomic) &+ 1)
+            seq_atomic_int32_store_release(epochAtomic, Int32(bitPattern: max(1, nextEpoch)))
+            seq_atomic_int64_store_release(sampleRateBitsAtomic, Int64(bitPattern: sampleRate.bitPattern))
+            seq_atomic_int32_store_release(nominalFramesAtomic, Int32(bitPattern: nominalFrames))
+            seq_atomic_int64_store_release(lastCallbackEntryTicksAtomic, 0)
+            seq_atomic_int32_store_release(isEpochValidAtomic, 1)
+
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s &+ 1))
+        }
+
+        func invalidateEpoch() {
+            let s = UInt32(bitPattern: seq_atomic_int32_load(sequenceAtomic) &+ 1)
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s))
+            seq_atomic_int32_store_release(isEpochValidAtomic, 0)
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s &+ 1))
+        }
+
+        var isEpochValid: Bool {
+            seq_atomic_int32_load(isEpochValidAtomic) != 0
+        }
+
+        func updateNominalFrames(_ frames: UInt32) {
+            guard frames > 0, frames <= 16384 else { return }
+            let s = UInt32(bitPattern: seq_atomic_int32_load(sequenceAtomic) &+ 1)
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s))
+            seq_atomic_int32_store_release(nominalFramesAtomic, Int32(bitPattern: frames))
+            seq_atomic_int32_store_release(sequenceAtomic, Int32(bitPattern: s &+ 1))
+        }
+
+        func snapshot() -> NativeRTSnapshot? {
+            let ep = UInt32(bitPattern: seq_atomic_int32_load(epochAtomic))
+            guard ep > 0 else { return nil }
+
+            for _ in 0..<10 {
+                let s1 = UInt32(bitPattern: seq_atomic_int32_load(sequenceAtomic))
+                if s1 & 1 != 0 { continue }
+
+                let epCheck = UInt32(bitPattern: seq_atomic_int32_load(epochAtomic))
+                guard epCheck == ep else { return nil }
+
+                let valid = seq_atomic_int32_load(isEpochValidAtomic) != 0
+
+                let srBits = UInt64(bitPattern: seq_atomic_int64_load_acquire(sampleRateBitsAtomic))
+                let sr = Double(bitPattern: srBits)
+                guard sr.isFinite, sr > 0 else { continue }
+
+                let nf = UInt32(bitPattern: seq_atomic_int32_load(nominalFramesAtomic))
+                guard nf > 0 else { continue }
+
+                let exec = UInt64(bitPattern: seq_atomic_int64_load_acquire(executedCallbacksAtomic))
+                let early = UInt64(bitPattern: seq_atomic_int64_load_acquire(earlyReturnCallbacksAtomic))
+                let frames = UInt64(bitPattern: seq_atomic_int64_load_acquire(totalCallbackFramesAtomic))
+                let sumNanos = UInt64(bitPattern: seq_atomic_int64_load_acquire(executionNanosSumAtomic))
+                let maxNanos = UInt64(bitPattern: seq_atomic_int64_load_acquire(maxExecutionNanosAtomic))
+                let overruns = UInt64(bitPattern: seq_atomic_int64_load_acquire(budgetOverrunCountAtomic))
+                let gaps = UInt64(bitPattern: seq_atomic_int64_load_acquire(cadenceGapCountAtomic))
+                let maxCadence = UInt64(bitPattern: seq_atomic_int64_load_acquire(maxCadenceNanosAtomic))
+                let b1 = UInt64(bitPattern: seq_atomic_int64_load_acquire(bucketUnder250usAtomic))
+                let b2 = UInt64(bitPattern: seq_atomic_int64_load_acquire(bucket250To500usAtomic))
+                let b3 = UInt64(bitPattern: seq_atomic_int64_load_acquire(bucket500To1000usAtomic))
+                let b4 = UInt64(bitPattern: seq_atomic_int64_load_acquire(bucket1000To2000usAtomic))
+                let b5 = UInt64(bitPattern: seq_atomic_int64_load_acquire(bucketOver2000usAtomic))
+                let minF = UInt32(bitPattern: seq_atomic_int32_load(minObservedFramesAtomic))
+                let maxF = UInt32(bitPattern: seq_atomic_int32_load(maxObservedFramesAtomic))
+                let lastTicks = UInt64(bitPattern: seq_atomic_int64_load_acquire(lastCallbackEntryTicksAtomic))
+
+                let s2 = UInt32(bitPattern: seq_atomic_int32_load(sequenceAtomic))
+                let epFinal = UInt32(bitPattern: seq_atomic_int32_load(epochAtomic))
+
+                if s1 == s2, ep == epFinal {
+                    return NativeRTSnapshot(
+                        epoch: ep,
+                        sampleRate: sr,
+                        nominalBufferFrames: nf,
+                        isValid: valid,
+                        executedCallbacks: exec,
+                        earlyReturnCallbacks: early,
+                        totalCallbackFrames: frames,
+                        executionNanosSum: sumNanos,
+                        maxExecutionNanosSinceEpoch: maxNanos,
+                        budgetOverrunCount: overruns,
+                        cadenceGapCount: gaps,
+                        maxCadenceNanosSinceEpoch: maxCadence,
+                        bucketUnder250us: b1,
+                        bucket250To500us: b2,
+                        bucket500To1000us: b3,
+                        bucket1000To2000us: b4,
+                        bucketOver2000us: b5,
+                        minObservedFrames: minF == Int32.max ? 0 : minF,
+                        maxObservedFrames: maxF,
+                        lastObservedMachTicks: lastTicks
+                    )
+                }
+            }
+            return nil
+        }
+    }
+
+    let nativeRTMetricsStorage = NativeRTMetricsStorage()
+
+    @inline(__always) var isNativeRTMetricsEnabled: Bool {
+        seq_atomic_int32_load(nativeRTMetricsStorage.rtMetricsEnabledAtomic) != 0
+    }
+    private var nativeRTMetricsTimer: DispatchSourceTimer?
+
+    static let machTimebase: mach_timebase_info_data_t = {
+        var tb = mach_timebase_info_data_t()
+        mach_timebase_info(&tb)
+        return tb
+    }()
+
     fileprivate var lastInputBufferFrames: UInt32 = 0
     #if DEBUG
         fileprivate var maxInputCallbackNanos: UInt64 = 0
         fileprivate var sumInputCallbackNanos: UInt64 = 0
         fileprivate var countInputCallbacks: UInt64 = 0
-        fileprivate static let machTimebase: mach_timebase_info_data_t = {
-            var tb = mach_timebase_info_data_t()
-            mach_timebase_info(&tb)
-            return tb
-        }()
-
         private var diagStatsTimer: DispatchSourceTimer?
     #endif
 
@@ -1785,6 +2135,10 @@ public final class CoreAudioEngine: ObservableObject {
         #if DEBUG
             stopDiagStatsTimer()
         #endif
+        stopNativeRTMetricsTimer()
+        pendingNativeRTNominalBufferFrames = nil
+        seq_atomic_int32_store_release(nativeRTMetricsStorage.rtMetricsEnabledAtomic, 0)
+        seq_atomic_int64_store_release(nativeRTMetricsStorage.lastCallbackEntryTicksAtomic, 0)
 
         dlog("🛑 Core Audio Engine stopped", category: .engine)
     }
@@ -1806,13 +2160,28 @@ public final class CoreAudioEngine: ObservableObject {
         """
         if backend == .native, isRunning {
             let recent = callbackWindow?.recentCounts()
-            return summary + "\n" + """
+            var nativeSummary = summary + "\n" + """
             Process Tap callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticNativeCallbacks))
             Process Tap callbacks in approximately the last 60 seconds: \(recent?.native ?? 0)
             Last Process Tap callback: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastNativeCallback), now: now))
             Process Tap callbacks with populated output: \(seq_atomic_int64_load_acquire(diagnosticNativeOutputCallbacks))
             BlackHole ring-buffer health: not applicable (backend inactive)
             """
+            if let snap = nativeRTMetricsStorage.snapshot(), snap.executedCallbacks + snap.earlyReturnCallbacks > 0 {
+                nativeSummary += "\n" + """
+                Native RT metrics epoch: \(snap.epoch) (status: \(snap.isValid ? "valid" : "invalid"))
+                Executed callbacks: \(snap.executedCallbacks)
+                Early return callbacks: \(snap.earlyReturnCallbacks)
+                Total processed frames: \(snap.totalCallbackFrames)
+                Observed callback frames: min=\(snap.minObservedFrames), max=\(snap.maxObservedFrames) (nominal=\(snap.nominalBufferFrames))
+                Average callback execution: \(snap.averageExecutionNanos / 1000)µs
+                Cumulative max callback execution: \(snap.maxExecutionNanosSinceEpoch / 1000)µs
+                Budget overruns: \(snap.budgetOverrunCount)
+                Cadence gaps (>1.5x nominal): \(snap.cadenceGapCount) (max cadence=\(snap.maxCadenceNanosSinceEpoch / 1000)µs)
+                Duration histogram: <250µs: \(snap.bucketUnder250us), 250-500µs: \(snap.bucket250To500us), 500-1000µs: \(snap.bucket500To1000us), 1000-2000µs: \(snap.bucket1000To2000us), >2000µs: \(snap.bucketOver2000us)
+                """
+            }
+            return nativeSummary
         }
         guard backend == .blackHole, isRunning else {
             return summary + "\nBlackHole ring-buffer health: not applicable (backend inactive)"
@@ -2136,6 +2505,122 @@ public final class CoreAudioEngine: ObservableObject {
         seq_atomic_int64_fetch_add(diagnosticNativeOutputCallbacks, 1)
     }
 
+    @inline(__always)
+    func noteNativeRenderMetrics(entryTicks: UInt64, exitTicks: UInt64, frameCount: Int, earlyReturn: Bool) {
+        guard seq_atomic_int32_load(nativeRTMetricsStorage.rtMetricsEnabledAtomic) != 0 else { return }
+
+        if seq_atomic_int32_exchange(nativeRTMetricsStorage.writerActiveAtomic, 1) != 0 {
+            return
+        }
+        defer {
+            seq_atomic_int32_store_release(nativeRTMetricsStorage.writerActiveAtomic, 0)
+        }
+
+        guard entryTicks > 0, exitTicks >= entryTicks else { return }
+
+        let elapsedTicks = exitTicks &- entryTicks
+        let tb = CoreAudioEngine.machTimebase
+        guard tb.denom > 0 else { return }
+
+        let (multiplied, multOverflow) = elapsedTicks.multipliedReportingOverflow(by: UInt64(tb.numer))
+        let elapsedNanos: UInt64 = if multOverflow {
+            UInt64.max
+        } else {
+            multiplied / UInt64(tb.denom)
+        }
+
+        let srBits = UInt64(bitPattern: seq_atomic_int64_load_acquire(nativeRTMetricsStorage.sampleRateBitsAtomic))
+        let sr = Double(bitPattern: srBits)
+        guard sr.isFinite, sr >= 1000.0, sr <= 10_000_000.0 else { return }
+
+        let s = UInt32(bitPattern: seq_atomic_int32_load(nativeRTMetricsStorage.sequenceAtomic) &+ 1)
+        seq_atomic_int32_store_release(nativeRTMetricsStorage.sequenceAtomic, Int32(bitPattern: s))
+
+        let lastEntry =
+            UInt64(bitPattern: seq_atomic_int64_load_relaxed(nativeRTMetricsStorage.lastCallbackEntryTicksAtomic))
+        if lastEntry > 0, entryTicks >= lastEntry {
+            let cadenceTicks = entryTicks &- lastEntry
+            let (cadenceMult, cadenceOverflow) = cadenceTicks.multipliedReportingOverflow(by: UInt64(tb.numer))
+            let cadenceNanos: UInt64 = cadenceOverflow ? UInt64.max : cadenceMult / UInt64(tb.denom)
+
+            seq_atomic_int64_store_max_bounded(
+                nativeRTMetricsStorage.maxCadenceNanosAtomic,
+                Int64(bitPattern: cadenceNanos)
+            )
+
+            let nominalFrames =
+                UInt64(bitPattern: Int64(seq_atomic_int32_load(nativeRTMetricsStorage.nominalFramesAtomic)))
+            if nominalFrames > 0 {
+                let periodSeconds = Double(nominalFrames) / sr
+                if periodSeconds.isFinite, periodSeconds > 0, periodSeconds < 3600.0 {
+                    let nominalPeriodNanos = UInt64(periodSeconds * 1_000_000_000.0)
+                    let gapThreshold = nominalPeriodNanos &+ (nominalPeriodNanos >> 1)
+                    if cadenceNanos > gapThreshold {
+                        seq_atomic_int64_fetch_add(nativeRTMetricsStorage.cadenceGapCountAtomic, 1)
+                    }
+                }
+            }
+        }
+        seq_atomic_int64_store_relaxed(
+            nativeRTMetricsStorage.lastCallbackEntryTicksAtomic,
+            Int64(bitPattern: entryTicks)
+        )
+
+        if earlyReturn {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.earlyReturnCallbacksAtomic, 1)
+        } else {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.executedCallbacksAtomic, 1)
+            let framesUInt = UInt64(clamping: max(0, frameCount))
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.totalCallbackFramesAtomic, Int64(bitPattern: framesUInt))
+
+            let framesU32 = UInt32(clamping: max(0, frameCount))
+            let curMin = UInt32(bitPattern: seq_atomic_int32_load(nativeRTMetricsStorage.minObservedFramesAtomic))
+            if framesU32 < curMin {
+                seq_atomic_int32_store_relaxed(
+                    nativeRTMetricsStorage.minObservedFramesAtomic,
+                    Int32(bitPattern: framesU32)
+                )
+            }
+            let curMax = UInt32(bitPattern: seq_atomic_int32_load(nativeRTMetricsStorage.maxObservedFramesAtomic))
+            if framesU32 > curMax {
+                seq_atomic_int32_store_relaxed(
+                    nativeRTMetricsStorage.maxObservedFramesAtomic,
+                    Int32(bitPattern: framesU32)
+                )
+            }
+        }
+
+        seq_atomic_int64_fetch_add(nativeRTMetricsStorage.executionNanosSumAtomic, Int64(bitPattern: elapsedNanos))
+        seq_atomic_int64_store_max_bounded(
+            nativeRTMetricsStorage.maxExecutionNanosAtomic,
+            Int64(bitPattern: elapsedNanos)
+        )
+
+        if elapsedNanos < 250_000 {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.bucketUnder250usAtomic, 1)
+        } else if elapsedNanos < 500_000 {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.bucket250To500usAtomic, 1)
+        } else if elapsedNanos < 1_000_000 {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.bucket500To1000usAtomic, 1)
+        } else if elapsedNanos < 2_000_000 {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.bucket1000To2000usAtomic, 1)
+        } else {
+            seq_atomic_int64_fetch_add(nativeRTMetricsStorage.bucketOver2000usAtomic, 1)
+        }
+
+        if frameCount > 0 {
+            let budgetSeconds = Double(frameCount) / sr
+            if budgetSeconds.isFinite, budgetSeconds > 0, budgetSeconds < 3600.0 {
+                let budgetNanos = UInt64(budgetSeconds * 1_000_000_000.0)
+                if elapsedNanos > budgetNanos {
+                    seq_atomic_int64_fetch_add(nativeRTMetricsStorage.budgetOverrunCountAtomic, 1)
+                }
+            }
+        }
+
+        seq_atomic_int32_store_release(nativeRTMetricsStorage.sequenceAtomic, Int32(bitPattern: s &+ 1))
+    }
+
     /// Set all bands at once
     public func setAllBands(_ gains: [Float]) {
         guard gains.allSatisfy(\.isFinite) else { return }
@@ -2294,10 +2779,31 @@ public final class CoreAudioEngine: ObservableObject {
         self.roomFilter = filter
     }
 
+    fileprivate var pendingNativeRTNominalBufferFrames: UInt32?
+
+    func setPendingNativeRTNominalBufferFrames(_ frames: UInt32) {
+        guard frames > 0, frames <= 16384 else { return }
+        pendingNativeRTNominalBufferFrames = frames
+    }
+
+    func setNativeRTNominalBufferFrames(_ frames: UInt32) {
+        guard frames > 0, frames <= 16384 else { return }
+        nativeRTMetricsStorage.updateNominalFrames(frames)
+    }
+
+    func invalidateNativeRTMetrics(reason: String, nominal: UInt32 = 0, running: UInt32 = 0) {
+        nativeRTMetricsStorage.invalidateEpoch()
+        var details: [String: String] = ["reason": reason]
+        if nominal > 0 { details["nominal"] = "\(nominal)" }
+        if running > 0 { details["running"] = "\(running)" }
+        DiagnosticEventStore.shared.record("engine.nativeRTMetrics.invalidated", details: details)
+    }
+
     func prepareProcessTap(
         sampleRate: Double,
         outputDeviceID: AudioDeviceID,
-        bufferFrames: UInt32
+        bufferFrames: UInt32,
+        nominalBufferFrames: UInt32? = nil
     ) {
         seq_atomic_int64_store_release(diagnosticLastInputSignal, 0)
         seq_atomic_int64_store_release(diagnosticLastOutputSignal, 0)
@@ -2313,11 +2819,84 @@ public final class CoreAudioEngine: ObservableObject {
         self.outputDeviceID = outputDeviceID
         allocatedFrameCapacity = min(max(bufferFrames, 1), 4096)
         isSetupComplete = true
+
+        let actualNominal = nominalBufferFrames ?? pendingNativeRTNominalBufferFrames ??
+            (bufferFrames > 0 ? bufferFrames : nil)
+        pendingNativeRTNominalBufferFrames = nil
+        if let actualNominal, actualNominal > 0 {
+            nativeRTMetricsStorage.startEpoch(sampleRate: sampleRate, nominalFrames: actualNominal)
+        } else {
+            nativeRTMetricsStorage.invalidateEpoch()
+        }
+        let rtEnabled = UserDefaults.standard.bool(forKey: "enableRTDiagnostics")
+        seq_atomic_int32_store_release(nativeRTMetricsStorage.rtMetricsEnabledAtomic, rtEnabled ? 1 : 0)
+        if rtEnabled {
+            startNativeRTMetricsTimer()
+        } else {
+            stopNativeRTMetricsTimer()
+        }
     }
 
     func markProcessTapStarted() {
         isRunning = true
         DiagnosticEventStore.shared.record("engine.start.succeeded", details: ["backend": "native"])
+    }
+
+    var rawNativeCallbackCount: Int64 {
+        seq_atomic_int64_load_acquire(diagnosticNativeCallbacks)
+    }
+
+    func recordNativeRTMetrics(to store: DiagnosticEventStore = .shared) {
+        let rawCallbacks = seq_atomic_int64_load_acquire(diagnosticNativeCallbacks)
+        guard let snap = nativeRTMetricsStorage.snapshot() else {
+            store.record("engine.nativeRTMetrics", details: [
+                "version": "1",
+                "status": "invalid",
+                "epoch": "0",
+                "epochValid": "false",
+                "enabled": "\(isNativeRTMetricsEnabled)",
+                "sampleRateHz": "0",
+                "nominalFrames": "0",
+                "ioProcInvocations": "\(rawCallbacks)",
+                "callbacks": "{\"executed\":0,\"earlyReturns\":0,\"totalFrames\":0}",
+                "execution": "{\"sumNanos\":0,\"maxNanos\":0}",
+                "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":0}",
+                "frameBounds": "{\"min\":0,\"max\":0}",
+                "histogram": "{\"under250us\":0,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+            ])
+            return
+        }
+        store.record("engine.nativeRTMetrics", details: [
+            "version": "1",
+            "status": snap.isValid ? "valid" : "invalid",
+            "epoch": "\(snap.epoch)",
+            "epochValid": "\(snap.isValid)",
+            "enabled": "\(isNativeRTMetricsEnabled)",
+            "sampleRateHz": String(format: "%.0f", snap.sampleRate),
+            "nominalFrames": "\(snap.nominalBufferFrames)",
+            "ioProcInvocations": "\(rawCallbacks)",
+            "callbacks": "{\"executed\":\(snap.executedCallbacks),\"earlyReturns\":\(snap.earlyReturnCallbacks),\"totalFrames\":\(snap.totalCallbackFrames)}",
+            "execution": "{\"sumNanos\":\(snap.executionNanosSum),\"maxNanos\":\(snap.maxExecutionNanosSinceEpoch)}",
+            "anomalies": "{\"budgetOverruns\":\(snap.budgetOverrunCount),\"cadenceGaps\":\(snap.cadenceGapCount),\"maxCadenceNanos\":\(snap.maxCadenceNanosSinceEpoch)}",
+            "frameBounds": "{\"min\":\(snap.minObservedFrames),\"max\":\(snap.maxObservedFrames)}",
+            "histogram": "{\"under250us\":\(snap.bucketUnder250us),\"250To500us\":\(snap.bucket250To500us),\"500To1000us\":\(snap.bucket500To1000us),\"1000To2000us\":\(snap.bucket1000To2000us),\"over2000us\":\(snap.bucketOver2000us)}"
+        ])
+    }
+
+    private func startNativeRTMetricsTimer() {
+        nativeRTMetricsTimer?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 30.0, repeating: 30.0)
+        t.setEventHandler { [weak self] in
+            self?.recordNativeRTMetrics(to: .shared)
+        }
+        t.resume()
+        nativeRTMetricsTimer = t
+    }
+
+    private func stopNativeRTMetricsTimer() {
+        nativeRTMetricsTimer?.cancel()
+        nativeRTMetricsTimer = nil
     }
 
     @inline(__always)

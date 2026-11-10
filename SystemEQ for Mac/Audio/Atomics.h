@@ -33,6 +33,9 @@ static inline int32_t seq_atomic_int32_load(const SEQAtomicInt32 *a) {
 static inline void seq_atomic_int32_store_release(SEQAtomicInt32 *a, int32_t v) {
     atomic_store_explicit(&a->value, v, memory_order_release);
 }
+static inline void seq_atomic_int32_store_relaxed(SEQAtomicInt32 *a, int32_t v) {
+    atomic_store_explicit(&a->value, v, memory_order_relaxed);
+}
 static inline int32_t seq_atomic_int32_fetch_add(SEQAtomicInt32 *a, int32_t delta) {
     return atomic_fetch_add_explicit(&a->value, delta, memory_order_acq_rel);
 }
@@ -78,6 +81,14 @@ static inline void seq_atomic_int64_store_relaxed(SEQAtomicInt64 *a, int_fast64_
 
 static inline int_fast64_t seq_atomic_int64_fetch_add(SEQAtomicInt64 *a, int_fast64_t delta) {
     return atomic_fetch_add_explicit(&a->value, delta, memory_order_relaxed);
+}
+
+static inline void seq_atomic_int64_store_max_bounded(SEQAtomicInt64 *a, int_fast64_t v) {
+    uint64_t uv = (uint64_t)v;
+    uint64_t cur = (uint64_t)atomic_load_explicit(&a->value, memory_order_relaxed);
+    if (uv > cur) {
+        atomic_store_explicit(&a->value, (int_fast64_t)uv, memory_order_relaxed);
+    }
 }
 
 static inline void seq_atomic_ptr_init(SEQAtomicPtr *a, void *p) {

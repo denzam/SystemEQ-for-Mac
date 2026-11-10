@@ -87,6 +87,12 @@ final class ProcessTapEngine {
     private let processor: CoreAudioEngine
     private let createTap: (CATapDescription, inout AudioObjectID) -> OSStatus
     private let deviceUIDProvider: ((AudioDeviceID) -> String?)?
+    private let createAggregate: ((CFDictionary, inout AudioObjectID) -> OSStatus)?
+    private let deviceBufferFramesProvider: ((AudioDeviceID) -> UInt32)?
+    private let selectionProvider: (() -> ProcessTapInputSelection?)?
+    private let nominalSampleRateProvider: ((AudioDeviceID) -> Double?)?
+    private let createIOProcID: ((AudioDeviceID, inout AudioDeviceIOProcID?) -> OSStatus)?
+    private let startDevice: ((AudioDeviceID, AudioDeviceIOProcID) -> OSStatus)?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
@@ -106,7 +112,13 @@ final class ProcessTapEngine {
         deviceUIDProvider: ((AudioDeviceID) -> String?)? = nil,
         createTap: @escaping (CATapDescription, inout AudioObjectID) -> OSStatus = {
             AudioHardwareCreateProcessTap($0, &$1)
-        }
+        },
+        createAggregate: ((CFDictionary, inout AudioObjectID) -> OSStatus)? = nil,
+        deviceBufferFramesProvider: ((AudioDeviceID) -> UInt32)? = nil,
+        selectionProvider: (() -> ProcessTapInputSelection?)? = nil,
+        nominalSampleRateProvider: ((AudioDeviceID) -> Double?)? = nil,
+        createIOProcID: ((AudioDeviceID, inout AudioDeviceIOProcID?) -> OSStatus)? = nil,
+        startDevice: ((AudioDeviceID, AudioDeviceIOProcID) -> OSStatus)? = nil
     ) {
         self.processor = processor
         let gain = initialOutputVolumeGain.isFinite ? min(max(initialOutputVolumeGain, 0), 1) : 0
@@ -115,6 +127,12 @@ final class ProcessTapEngine {
         previousOutputGain = gain
         self.deviceUIDProvider = deviceUIDProvider
         self.createTap = createTap
+        self.createAggregate = createAggregate
+        self.deviceBufferFramesProvider = deviceBufferFramesProvider
+        self.selectionProvider = selectionProvider
+        self.nominalSampleRateProvider = nominalSampleRateProvider
+        self.createIOProcID = createIOProcID
+        self.startDevice = startDevice
     }
 
     deinit {
@@ -198,7 +216,11 @@ final class ProcessTapEngine {
         ]
 
         var newAggregateID = AudioObjectID(kAudioObjectUnknown)
-        status = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &newAggregateID)
+        if let createAggregate {
+            status = createAggregate(aggregateDescription as CFDictionary, &newAggregateID)
+        } else {
+            status = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &newAggregateID)
+        }
         guard status == noErr, newAggregateID != kAudioObjectUnknown else {
             cleanupTap()
             return .failure(.createAggregate(status))
@@ -227,48 +249,77 @@ final class ProcessTapEngine {
             }
         }
 
-        guard let tapFormat = audioFormat(tapID, selector: kAudioTapPropertyFormat),
-              let streams = inputStreams(aggregateID),
-              let formats = streamFormats(streams),
-              let channelCounts = inputStreamChannelCounts(aggregateID),
-              let startingChannels = streamStartingChannels(streams),
-              let selection = ProcessTapInputSelection.select(
-                  tapFormat: tapFormat,
-                  aggregateFormats: formats,
-                  aggregateChannelCounts: channelCounts,
-                  aggregateStartingChannels: startingChannels,
-                  physicalInputChannelCount: inputChannelCount(outputDeviceID)
-              ) else {
+        let selection: ProcessTapInputSelection? = if let selectionProvider {
+            selectionProvider()
+        } else if let tapFormat = audioFormat(tapID, selector: kAudioTapPropertyFormat),
+                  let streams = inputStreams(aggregateID),
+                  let formats = streamFormats(streams),
+                  let channelCounts = inputStreamChannelCounts(aggregateID),
+                  let startingChannels = streamStartingChannels(streams) {
+            ProcessTapInputSelection.select(
+                tapFormat: tapFormat,
+                aggregateFormats: formats,
+                aggregateChannelCounts: channelCounts,
+                aggregateStartingChannels: startingChannels,
+                physicalInputChannelCount: inputChannelCount(outputDeviceID)
+            )
+        } else {
+            nil
+        }
+        guard let selection else {
             cleanup()
             return .failure(.unsupportedTopology)
         }
         inputSelection = selection
 
-        guard let sampleRate = nominalSampleRate(outputDeviceID) else {
+        let resolvedSampleRate = nominalSampleRateProvider?(outputDeviceID) ?? nominalSampleRate(outputDeviceID)
+        guard let sampleRate = resolvedSampleRate else {
             cleanup()
             return .failure(.sampleRate)
         }
         let bufferFrames = deviceBufferFrames(aggregateID)
-        prepareProcessing(sampleRate, max(originalBufferFrames, bufferFrames))
+        if bufferFrames > 0 {
+            processor.setPendingNativeRTNominalBufferFrames(bufferFrames)
+            prepareProcessing(sampleRate, max(originalBufferFrames, bufferFrames))
+            processor.setNativeRTNominalBufferFrames(bufferFrames)
+        } else {
+            prepareProcessing(sampleRate, max(originalBufferFrames, bufferFrames))
+            processor.invalidateNativeRTMetrics(reason: "unknownBufferFrames")
+        }
 
-        status = AudioDeviceCreateIOProcID(
-            aggregateID,
-            processTapIOProc,
-            Unmanaged.passUnretained(self).toOpaque(),
-            &ioProcID
-        )
+        if let createIOProcID {
+            status = createIOProcID(aggregateID, &ioProcID)
+        } else {
+            status = AudioDeviceCreateIOProcID(
+                aggregateID,
+                processTapIOProc,
+                Unmanaged.passUnretained(self).toOpaque(),
+                &ioProcID
+            )
+        }
         guard status == noErr, let ioProcID else {
             cleanup()
             return .failure(.createIOProc(status))
         }
 
-        status = AudioDeviceStart(aggregateID, ioProcID)
+        if let startDevice {
+            status = startDevice(aggregateID, ioProcID)
+        } else {
+            status = AudioDeviceStart(aggregateID, ioProcID)
+        }
         guard status == noErr else {
             cleanup()
             return .failure(.startDevice(status))
         }
         installSampleRateListener(sampleRate: sampleRate)
         let runningBufferFrames = deviceBufferFrames(aggregateID)
+        if runningBufferFrames > 0, bufferFrames > 0, runningBufferFrames != bufferFrames {
+            processor.invalidateNativeRTMetrics(
+                reason: "bufferVariance",
+                nominal: bufferFrames,
+                running: runningBufferFrames
+            )
+        }
         return .success(StartInfo(
             sampleRate: sampleRate,
             bufferFrames: runningBufferFrames > 0 ? runningBufferFrames : bufferFrames
@@ -334,22 +385,51 @@ final class ProcessTapEngine {
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>
     ) {
+        let rtEnabled = processor.isNativeRTMetricsEnabled
+        let entryTicks: UInt64 = rtEnabled ? mach_absolute_time() : 0
         processor.noteNativeCallbackInvocation()
         let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outputs = UnsafeMutableAudioBufferListPointer(output)
         guard inputSelection.bufferIndex < inputs.count else {
             zero(outputs)
+            if rtEnabled {
+                let exitTicks = mach_absolute_time()
+                processor.noteNativeRenderMetrics(
+                    entryTicks: entryTicks,
+                    exitTicks: exitTicks,
+                    frameCount: 0,
+                    earlyReturn: true
+                )
+            }
             return
         }
 
         let tapBuffer = inputs[inputSelection.bufferIndex]
         guard tapBuffer.mNumberChannels == 2, let inputData = tapBuffer.mData else {
             zero(outputs)
+            if rtEnabled {
+                let exitTicks = mach_absolute_time()
+                processor.noteNativeRenderMetrics(
+                    entryTicks: entryTicks,
+                    exitTicks: exitTicks,
+                    frameCount: 0,
+                    earlyReturn: true
+                )
+            }
             return
         }
         let frameCount = Int(tapBuffer.mDataByteSize) / (2 * MemoryLayout<Float>.size)
         guard frameCount > 0, frameCount <= scratchCapacity else {
             zero(outputs)
+            if rtEnabled {
+                let exitTicks = mach_absolute_time()
+                processor.noteNativeRenderMetrics(
+                    entryTicks: entryTicks,
+                    exitTicks: exitTicks,
+                    frameCount: frameCount,
+                    earlyReturn: true
+                )
+            }
             return
         }
 
@@ -412,6 +492,15 @@ final class ProcessTapEngine {
         }
         processor.noteNativeOutputCallback(frameCount: copiedFrames)
         processor.noteNativeTestToneOutput(left: scratchLeft, right: scratchRight, frameCount: copiedFrames)
+        if rtEnabled {
+            let exitTicks = mach_absolute_time()
+            processor.noteNativeRenderMetrics(
+                entryTicks: entryTicks,
+                exitTicks: exitTicks,
+                frameCount: copiedFrames,
+                earlyReturn: false
+            )
+        }
     }
 
     @inline(__always)
@@ -479,6 +568,9 @@ final class ProcessTapEngine {
     }
 
     private func deviceBufferFrames(_ deviceID: AudioDeviceID) -> UInt32 {
+        if let deviceBufferFramesProvider {
+            return deviceBufferFramesProvider(deviceID)
+        }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyBufferFrameSize,
             mScope: kAudioObjectPropertyScopeGlobal,

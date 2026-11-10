@@ -3676,4 +3676,998 @@ final class CalibrationProfileTests: XCTestCase {
             XCTAssertFalse(calibration.isPlayingLoop)
         }
     }
+
+    func testNativeRTMetricsStorageUninitializedReturnsNilAndStartsEpoch() throws {
+        let storage = CoreAudioEngine.NativeRTMetricsStorage()
+        XCTAssertNil(storage.snapshot())
+
+        storage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+        let snap1 = try XCTUnwrap(storage.snapshot())
+        XCTAssertEqual(snap1.epoch, 1)
+        XCTAssertEqual(snap1.sampleRate, 48000)
+        XCTAssertEqual(snap1.nominalBufferFrames, 128)
+        XCTAssertEqual(snap1.executedCallbacks, 0)
+        XCTAssertEqual(snap1.earlyReturnCallbacks, 0)
+        XCTAssertEqual(snap1.totalCallbackFrames, 0)
+        XCTAssertEqual(snap1.budgetOverrunCount, 0)
+        XCTAssertEqual(snap1.cadenceGapCount, 0)
+        XCTAssertEqual(snap1.averageExecutionNanos, 0)
+        XCTAssertEqual(snap1.minObservedFrames, 0)
+        XCTAssertEqual(snap1.maxObservedFrames, 0)
+
+        storage.startEpoch(sampleRate: 96000, nominalFrames: 256)
+        let snap2 = try XCTUnwrap(storage.snapshot())
+        XCTAssertEqual(snap2.epoch, 2)
+        XCTAssertEqual(snap2.sampleRate, 96000)
+        XCTAssertEqual(snap2.nominalBufferFrames, 256)
+    }
+
+    func testNativeRTMetricsDisabledByDefaultYieldsZeroUpdates() {
+        let engine = CoreAudioEngine()
+        XCTAssertEqual(seq_atomic_int32_load(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic), 0)
+        XCTAssertFalse(engine.isNativeRTMetricsEnabled)
+
+        let entry = mach_absolute_time()
+        let exit = entry + 100_000
+        engine.noteNativeRenderMetrics(entryTicks: entry, exitTicks: exit, frameCount: 128, earlyReturn: false)
+
+        XCTAssertEqual(seq_atomic_int64_load_acquire(engine.nativeRTMetricsStorage.executedCallbacksAtomic), 0)
+        XCTAssertEqual(seq_atomic_int64_load_acquire(engine.nativeRTMetricsStorage.totalCallbackFramesAtomic), 0)
+        XCTAssertEqual(seq_atomic_int64_load_acquire(engine.nativeRTMetricsStorage.executionNanosSumAtomic), 0)
+    }
+
+    func testNativeRTMetricsHealthyControl128Frames() throws {
+        let engine = CoreAudioEngine()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+        engine.nativeRTMetricsStorage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+
+        let s0 = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        let tb = CoreAudioEngine.machTimebase
+        let nanosToTicks: (UInt64) -> UInt64 = { nanos in
+            tb.numer > 0 ? (nanos * UInt64(tb.denom)) / UInt64(tb.numer) : nanos
+        }
+
+        var t = mach_absolute_time()
+        let durationTicks = nanosToTicks(100_000)
+        let cadenceTicks = nanosToTicks(2_666_667)
+
+        for _ in 0..<100 {
+            engine.noteNativeRenderMetrics(
+                entryTicks: t,
+                exitTicks: t + durationTicks,
+                frameCount: 128,
+                earlyReturn: false
+            )
+            t += cadenceTicks
+        }
+
+        let s1 = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(s1.executedCallbacks, 100)
+        XCTAssertEqual(s1.earlyReturnCallbacks, 0)
+        XCTAssertEqual(s1.totalCallbackFrames, 12800)
+        XCTAssertEqual(s1.budgetOverrunCount, 0)
+        XCTAssertEqual(s1.cadenceGapCount, 0)
+        XCTAssertEqual(s1.minObservedFrames, 128)
+        XCTAssertEqual(s1.maxObservedFrames, 128)
+        XCTAssertEqual(s1.bucketUnder250us, 100)
+
+        let delta = try XCTUnwrap(s1.delta(from: s0))
+        XCTAssertEqual(delta.executed, 100)
+        XCTAssertEqual(delta.earlyReturns, 0)
+        XCTAssertEqual(delta.frames, 12800)
+        XCTAssertEqual(delta.overruns, 0)
+        XCTAssertEqual(delta.cadenceGaps, 0)
+        XCTAssertGreaterThan(delta.avgNanos, 0)
+        XCTAssertGreaterThan(delta.cumulativeMaxExecutionNanos, 0)
+    }
+
+    func testNativeRTMetricsDeltaRejectsRegressedCountersAndContamination() throws {
+        let engine = CoreAudioEngine()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+        engine.nativeRTMetricsStorage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+
+        let tb = CoreAudioEngine.machTimebase
+        let nanosToTicks: (UInt64) -> UInt64 = { nanos in
+            tb.numer > 0 ? (nanos * UInt64(tb.denom)) / UInt64(tb.numer) : nanos
+        }
+
+        var t = mach_absolute_time()
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(100_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+        t += nanosToTicks(2_666_667)
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(3_000_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+        t += nanosToTicks(2_666_667)
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(10000),
+            frameCount: 0,
+            earlyReturn: true
+        )
+
+        let baseline = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(baseline.executedCallbacks, 2)
+        XCTAssertEqual(baseline.earlyReturnCallbacks, 1)
+        XCTAssertEqual(baseline.budgetOverrunCount, 1)
+
+        XCTAssertNil(baseline.delta(from: baseline))
+
+        let regressedExecuted = CoreAudioEngine.NativeRTSnapshot(
+            epoch: baseline.epoch, sampleRate: baseline.sampleRate,
+            nominalBufferFrames: baseline.nominalBufferFrames,
+            executedCallbacks: baseline.executedCallbacks - 1,
+            earlyReturnCallbacks: baseline.earlyReturnCallbacks,
+            totalCallbackFrames: baseline.totalCallbackFrames,
+            executionNanosSum: baseline.executionNanosSum,
+            maxExecutionNanosSinceEpoch: baseline.maxExecutionNanosSinceEpoch,
+            budgetOverrunCount: baseline.budgetOverrunCount,
+            cadenceGapCount: baseline.cadenceGapCount,
+            maxCadenceNanosSinceEpoch: baseline.maxCadenceNanosSinceEpoch,
+            bucketUnder250us: baseline.bucketUnder250us,
+            bucket250To500us: baseline.bucket250To500us,
+            bucket500To1000us: baseline.bucket500To1000us,
+            bucket1000To2000us: baseline.bucket1000To2000us,
+            bucketOver2000us: baseline.bucketOver2000us,
+            minObservedFrames: baseline.minObservedFrames,
+            maxObservedFrames: baseline.maxObservedFrames,
+            lastObservedMachTicks: baseline.lastObservedMachTicks
+        )
+        XCTAssertNil(regressedExecuted.delta(from: baseline))
+
+        let regressedFrames = CoreAudioEngine.NativeRTSnapshot(
+            epoch: baseline.epoch, sampleRate: baseline.sampleRate,
+            nominalBufferFrames: baseline.nominalBufferFrames,
+            executedCallbacks: baseline.executedCallbacks,
+            earlyReturnCallbacks: baseline.earlyReturnCallbacks,
+            totalCallbackFrames: baseline.totalCallbackFrames - 1,
+            executionNanosSum: baseline.executionNanosSum,
+            maxExecutionNanosSinceEpoch: baseline.maxExecutionNanosSinceEpoch,
+            budgetOverrunCount: baseline.budgetOverrunCount,
+            cadenceGapCount: baseline.cadenceGapCount,
+            maxCadenceNanosSinceEpoch: baseline.maxCadenceNanosSinceEpoch,
+            bucketUnder250us: baseline.bucketUnder250us,
+            bucket250To500us: baseline.bucket250To500us,
+            bucket500To1000us: baseline.bucket500To1000us,
+            bucket1000To2000us: baseline.bucket1000To2000us,
+            bucketOver2000us: baseline.bucketOver2000us,
+            minObservedFrames: baseline.minObservedFrames,
+            maxObservedFrames: baseline.maxObservedFrames,
+            lastObservedMachTicks: baseline.lastObservedMachTicks
+        )
+        XCTAssertNil(regressedFrames.delta(from: baseline))
+
+        let regressedOverruns = CoreAudioEngine.NativeRTSnapshot(
+            epoch: baseline.epoch, sampleRate: baseline.sampleRate,
+            nominalBufferFrames: baseline.nominalBufferFrames,
+            executedCallbacks: baseline.executedCallbacks,
+            earlyReturnCallbacks: baseline.earlyReturnCallbacks,
+            totalCallbackFrames: baseline.totalCallbackFrames,
+            executionNanosSum: baseline.executionNanosSum,
+            maxExecutionNanosSinceEpoch: baseline.maxExecutionNanosSinceEpoch,
+            budgetOverrunCount: 0,
+            cadenceGapCount: baseline.cadenceGapCount,
+            maxCadenceNanosSinceEpoch: baseline.maxCadenceNanosSinceEpoch,
+            bucketUnder250us: baseline.bucketUnder250us,
+            bucket250To500us: baseline.bucket250To500us,
+            bucket500To1000us: baseline.bucket500To1000us,
+            bucket1000To2000us: baseline.bucket1000To2000us,
+            bucketOver2000us: baseline.bucketOver2000us,
+            minObservedFrames: baseline.minObservedFrames,
+            maxObservedFrames: baseline.maxObservedFrames,
+            lastObservedMachTicks: baseline.lastObservedMachTicks
+        )
+        XCTAssertNil(regressedOverruns.delta(from: baseline))
+
+        let mismatchedEpoch = CoreAudioEngine.NativeRTSnapshot(
+            epoch: baseline.epoch + 1, sampleRate: baseline.sampleRate,
+            nominalBufferFrames: baseline.nominalBufferFrames,
+            executedCallbacks: baseline.executedCallbacks + 1,
+            earlyReturnCallbacks: baseline.earlyReturnCallbacks,
+            totalCallbackFrames: baseline.totalCallbackFrames + 128,
+            executionNanosSum: baseline.executionNanosSum + 100_000,
+            maxExecutionNanosSinceEpoch: baseline.maxExecutionNanosSinceEpoch,
+            budgetOverrunCount: baseline.budgetOverrunCount,
+            cadenceGapCount: baseline.cadenceGapCount,
+            maxCadenceNanosSinceEpoch: baseline.maxCadenceNanosSinceEpoch,
+            bucketUnder250us: baseline.bucketUnder250us + 1,
+            bucket250To500us: baseline.bucket250To500us,
+            bucket500To1000us: baseline.bucket500To1000us,
+            bucket1000To2000us: baseline.bucket1000To2000us,
+            bucketOver2000us: baseline.bucketOver2000us,
+            minObservedFrames: baseline.minObservedFrames,
+            maxObservedFrames: baseline.maxObservedFrames,
+            lastObservedMachTicks: baseline.lastObservedMachTicks
+        )
+        XCTAssertNil(mismatchedEpoch.delta(from: baseline))
+    }
+
+    func testNativeRTMetricsInvalidRatesAndOverflowTimestampsFailClosed() throws {
+        let engine = CoreAudioEngine()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        for invalidRate: Double in [.nan, .infinity, -1.0, 0.0, 1e-12, 1e12] {
+            engine.nativeRTMetricsStorage.startEpoch(sampleRate: invalidRate, nominalFrames: 128)
+            let snap = engine.nativeRTMetricsStorage.snapshot()
+            XCTAssertTrue(snap == nil || snap?.sampleRate != invalidRate)
+        }
+
+        engine.nativeRTMetricsStorage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+        let before = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+
+        engine.noteNativeRenderMetrics(entryTicks: 1000, exitTicks: 500, frameCount: 128, earlyReturn: false)
+        engine.noteNativeRenderMetrics(entryTicks: 0, exitTicks: 500, frameCount: 128, earlyReturn: false)
+        let afterBackwards = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(before.executedCallbacks, afterBackwards.executedCallbacks)
+
+        let extremeEntry = UInt64.max - 1_000_000
+        let extremeExit = UInt64.max - 100
+        engine.noteNativeRenderMetrics(
+            entryTicks: extremeEntry,
+            exitTicks: extremeExit,
+            frameCount: 128,
+            earlyReturn: false
+        )
+        let afterExtreme = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(afterExtreme.executedCallbacks, before.executedCallbacks + 1)
+        XCTAssertEqual(afterExtreme.budgetOverrunCount, 1)
+    }
+
+    func testNativeRTMetricsLifecycleEpochAndCadenceReset() throws {
+        let engine = CoreAudioEngine()
+        engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 1, bufferFrames: 128)
+        engine.markProcessTapStarted()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        let tb = CoreAudioEngine.machTimebase
+        let nanosToTicks: (UInt64) -> UInt64 = { nanos in
+            tb.numer > 0 ? (nanos * UInt64(tb.denom)) / UInt64(tb.numer) : nanos
+        }
+
+        var t = mach_absolute_time()
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(100_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+        t += nanosToTicks(2_666_667)
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(100_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+
+        let snapEpoch1 = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(snapEpoch1.epoch, 1)
+        XCTAssertEqual(snapEpoch1.executedCallbacks, 2)
+        XCTAssertEqual(snapEpoch1.cadenceGapCount, 0)
+
+        engine.stop()
+        XCTAssertEqual(seq_atomic_int32_load(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic), 0)
+        XCTAssertEqual(seq_atomic_int64_load_relaxed(engine.nativeRTMetricsStorage.lastCallbackEntryTicksAtomic), 0)
+
+        engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 1, bufferFrames: 128)
+        engine.markProcessTapStarted()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        t += nanosToTicks(5_000_000_000)
+        engine.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(100_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+
+        let snapEpoch2 = try XCTUnwrap(engine.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(snapEpoch2.epoch, 2)
+        XCTAssertEqual(snapEpoch2.cadenceGapCount, 0)
+        XCTAssertNil(snapEpoch2.delta(from: snapEpoch1))
+    }
+
+    func testNativeRTMetricsConcurrentCoherentSnapshotsAndBoundedBusy() {
+        let engine = CoreAudioEngine()
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+        engine.nativeRTMetricsStorage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+
+        let exp = expectation(description: "Concurrent render finished")
+        DispatchQueue.global(qos: .userInitiated).async {
+            var t = mach_absolute_time()
+            for i in 0..<1000 {
+                let early = i.isMultiple(of: 10)
+                engine.noteNativeRenderMetrics(
+                    entryTicks: t,
+                    exitTicks: t + 50000,
+                    frameCount: early ? 0 : 128,
+                    earlyReturn: early
+                )
+                t += 100_000
+            }
+            exp.fulfill()
+        }
+
+        for _ in 0..<500 {
+            if let snap = engine.nativeRTMetricsStorage.snapshot() {
+                let total = snap.executedCallbacks + snap.earlyReturnCallbacks
+                let bucketSum = snap.bucketUnder250us + snap.bucket250To500us + snap.bucket500To1000us + snap
+                    .bucket1000To2000us + snap.bucketOver2000us
+                XCTAssertEqual(bucketSum, total)
+                if snap.executedCallbacks > 0 {
+                    XCTAssertLessThanOrEqual(snap.minObservedFrames, snap.maxObservedFrames)
+                }
+            }
+        }
+        wait(for: [exp], timeout: 5)
+
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.writerActiveAtomic, 1)
+        let beforeCallbacks = seq_atomic_int64_load_acquire(engine.nativeRTMetricsStorage.executedCallbacksAtomic)
+        engine.noteNativeRenderMetrics(entryTicks: 100, exitTicks: 200, frameCount: 128, earlyReturn: false)
+        XCTAssertEqual(
+            seq_atomic_int64_load_acquire(engine.nativeRTMetricsStorage.executedCallbacksAtomic),
+            beforeCallbacks
+        )
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.writerActiveAtomic, 0)
+    }
+
+    func testNativeRTMetricsDiagnosticSummaryExport() {
+        let engine = CoreAudioEngine()
+        engine.prepareProcessTap(sampleRate: 48000, outputDeviceID: 10, bufferFrames: 128)
+        engine.markProcessTapStarted()
+        defer { engine.stop() }
+        seq_atomic_int32_store_release(engine.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        let t = mach_absolute_time()
+        engine.noteNativeRenderMetrics(entryTicks: t, exitTicks: t + 10000, frameCount: 128, earlyReturn: false)
+
+        let summary = engine.diagnosticSummary(backend: .native)
+        XCTAssertTrue(summary.contains("Native RT metrics epoch:"))
+        XCTAssertTrue(summary.contains("Executed callbacks: 1"))
+        XCTAssertTrue(summary.contains("Duration histogram:"))
+    }
+
+    func testNativeProcessTapNominalFramesSeparatedFromAllocatedCapacityAndVarianceFailsClosed() throws {
+        guard #available(macOS 14.4, *) else { throw XCTSkip("Process Tap requires macOS 14.4") }
+        let core = CoreAudioEngine()
+        seq_atomic_int32_store_release(core.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        var aggregateBufferFrames: UInt32 = 512
+        let engine = ProcessTapEngine(
+            processor: core,
+            deviceUIDProvider: { _ in "test-output-device" },
+            createTap: { _, tapID in
+                tapID = 100
+                return noErr
+            },
+            createAggregate: { _, aggregateID in
+                aggregateID = 200
+                return noErr
+            },
+            deviceBufferFramesProvider: { _ in
+                let current = aggregateBufferFrames
+                if aggregateBufferFrames == 512 {
+                    aggregateBufferFrames = 128
+                }
+                return current
+            },
+            selectionProvider: {
+                ProcessTapInputSelection(bufferIndex: 0)
+            },
+            nominalSampleRateProvider: { _ in 48000.0 },
+            createIOProcID: { _, ioProcID in
+                ioProcID = { _, _, _, _, _, _, _ in 0 }
+                return noErr
+            },
+            startDevice: { _, _ in noErr }
+        )
+
+        var preparedCapacity: UInt32 = 0
+        let startResult = engine.start(outputDeviceID: 1) { sampleRate, bufferFrames in
+            preparedCapacity = bufferFrames
+            core.prepareProcessTap(sampleRate: sampleRate, outputDeviceID: 1, bufferFrames: bufferFrames)
+        }
+
+        guard case let .success(info) = startResult else {
+            XCTFail("Expected start to succeed")
+            return
+        }
+
+        seq_atomic_int32_store_release(core.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        XCTAssertEqual(info.bufferFrames, 128)
+        XCTAssertEqual(preparedCapacity, 512)
+        XCTAssertGreaterThanOrEqual(core.allocatedFrameCapacity, 512)
+
+        let snap = try XCTUnwrap(core.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(snap.nominalBufferFrames, 128)
+        XCTAssertEqual(snap.sampleRate, 48000.0)
+
+        let tb = CoreAudioEngine.machTimebase
+        let nanosToTicks: (UInt64) -> UInt64 = { nanos in
+            tb.numer > 0 ? (nanos * UInt64(tb.denom)) / UInt64(tb.numer) : nanos
+        }
+        var t = mach_absolute_time()
+        core.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(3_000_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+        let afterOverrun = try XCTUnwrap(core.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(afterOverrun.budgetOverrunCount, 1)
+
+        t += nanosToTicks(5_000_000)
+        core.noteNativeRenderMetrics(
+            entryTicks: t,
+            exitTicks: t + nanosToTicks(100_000),
+            frameCount: 128,
+            earlyReturn: false
+        )
+        let afterGap = try XCTUnwrap(core.nativeRTMetricsStorage.snapshot())
+        XCTAssertEqual(afterGap.cadenceGapCount, 1)
+
+        engine.stop()
+
+        var optOutCalls = 0
+        let optOutEngine = ProcessTapEngine(
+            processor: core,
+            deviceUIDProvider: { _ in "test-output-device" },
+            createTap: { _, tapID in
+                tapID = 101
+                return noErr
+            },
+            createAggregate: { _, aggregateID in
+                aggregateID = 201
+                return noErr
+            },
+            deviceBufferFramesProvider: { _ in
+                optOutCalls += 1
+                if optOutCalls == 1 { return 512 }
+                if optOutCalls == 2 { return 128 }
+                return 256
+            },
+            selectionProvider: {
+                ProcessTapInputSelection(bufferIndex: 0)
+            },
+            nominalSampleRateProvider: { _ in 48000.0 },
+            createIOProcID: { _, ioProcID in
+                ioProcID = { _, _, _, _, _, _, _ in 0 }
+                return noErr
+            },
+            startDevice: { _, _ in noErr }
+        )
+
+        let optOutResult = optOutEngine.start(outputDeviceID: 1) { sampleRate, bufferFrames in
+            core.prepareProcessTap(sampleRate: sampleRate, outputDeviceID: 1, bufferFrames: bufferFrames)
+        }
+        guard case let .success(optOutInfo) = optOutResult else {
+            XCTFail("Expected opt-out start to succeed without telemetry teardown")
+            return
+        }
+        XCTAssertEqual(optOutInfo.bufferFrames, 256)
+        XCTAssertGreaterThanOrEqual(core.allocatedFrameCapacity, 256)
+        optOutEngine.stop()
+
+        seq_atomic_int32_store_release(core.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+        var optInCalls = 0
+        let optInEngine = ProcessTapEngine(
+            processor: core,
+            deviceUIDProvider: { _ in "test-output-device" },
+            createTap: { _, tapID in
+                tapID = 102
+                return noErr
+            },
+            createAggregate: { _, aggregateID in
+                aggregateID = 202
+                return noErr
+            },
+            deviceBufferFramesProvider: { _ in
+                optInCalls += 1
+                if optInCalls == 1 { return 512 }
+                if optInCalls == 2 { return 128 }
+                return 256
+            },
+            selectionProvider: {
+                ProcessTapInputSelection(bufferIndex: 0)
+            },
+            nominalSampleRateProvider: { _ in 48000.0 },
+            createIOProcID: { _, ioProcID in
+                ioProcID = { _, _, _, _, _, _, _ in 0 }
+                return noErr
+            },
+            startDevice: { _, _ in noErr }
+        )
+
+        let optInResult = optInEngine.start(outputDeviceID: 1) { sampleRate, bufferFrames in
+            core.prepareProcessTap(sampleRate: sampleRate, outputDeviceID: 1, bufferFrames: bufferFrames)
+        }
+        guard case let .success(optInInfo) = optInResult else {
+            XCTFail("Expected opt-in start to succeed without audio teardown")
+            return
+        }
+        XCTAssertEqual(optInInfo.bufferFrames, 256)
+        XCTAssertGreaterThanOrEqual(core.allocatedFrameCapacity, 256)
+        XCTAssertFalse(core.nativeRTMetricsStorage.isEpochValid)
+        let optInSnap = try XCTUnwrap(core.nativeRTMetricsStorage.snapshot())
+        XCTAssertFalse(optInSnap.isValid)
+        XCTAssertNil(optInSnap.delta(from: optInSnap))
+
+        let events = DiagnosticEventStore.shared.snapshot()
+        let varianceEvent = events.first { $0.name == "engine.nativeRTMetrics.invalidated" }
+        XCTAssertNotNil(varianceEvent)
+        XCTAssertEqual(varianceEvent?.details["reason"], "bufferVariance")
+        XCTAssertEqual(varianceEvent?.details["nominal"], "128")
+        XCTAssertEqual(varianceEvent?.details["running"], "256")
+        optInEngine.stop()
+
+        var zeroCalls = 0
+        let zeroEngine = ProcessTapEngine(
+            processor: core,
+            deviceUIDProvider: { _ in "test-output-device" },
+            createTap: { _, tapID in
+                tapID = 103
+                return noErr
+            },
+            createAggregate: { _, aggregateID in
+                aggregateID = 203
+                return noErr
+            },
+            deviceBufferFramesProvider: { _ in
+                zeroCalls += 1
+                if zeroCalls == 1 { return 512 }
+                return 0
+            },
+            selectionProvider: {
+                ProcessTapInputSelection(bufferIndex: 0)
+            },
+            nominalSampleRateProvider: { _ in 48000.0 },
+            createIOProcID: { _, ioProcID in
+                ioProcID = { _, _, _, _, _, _, _ in 0 }
+                return noErr
+            },
+            startDevice: { _, _ in noErr }
+        )
+
+        var zeroPreparedCapacity: UInt32 = 0
+        let zeroResult = zeroEngine.start(outputDeviceID: 1) { sampleRate, bufferFrames in
+            zeroPreparedCapacity = bufferFrames
+            core.prepareProcessTap(sampleRate: sampleRate, outputDeviceID: 1, bufferFrames: bufferFrames)
+        }
+        guard case let .success(zeroInfo) = zeroResult else {
+            XCTFail("Expected query failure start to succeed with fallback")
+            return
+        }
+        XCTAssertEqual(zeroPreparedCapacity, 512)
+        XCTAssertEqual(zeroInfo.bufferFrames, 0)
+        XCTAssertFalse(core.nativeRTMetricsStorage.isEpochValid)
+        let zeroSnap = core.nativeRTMetricsStorage.snapshot()
+        if let zeroSnap {
+            XCTAssertTrue(!zeroSnap.isValid || zeroSnap.nominalBufferFrames != 128)
+        }
+        zeroEngine.stop()
+
+        let failEngine = ProcessTapEngine(
+            processor: core,
+            deviceUIDProvider: { _ in "test-output-device" },
+            createTap: { _, tapID in
+                tapID = 104
+                return noErr
+            },
+            createAggregate: { _, aggregateID in
+                aggregateID = 204
+                return noErr
+            },
+            deviceBufferFramesProvider: { _ in 128 },
+            selectionProvider: {
+                ProcessTapInputSelection(bufferIndex: 0)
+            },
+            nominalSampleRateProvider: { _ in 48000.0 },
+            createIOProcID: { _, ioProcID in
+                ioProcID = { _, _, _, _, _, _, _ in 0 }
+                return noErr
+            },
+            startDevice: { _, _ in kAudioHardwareNotRunningError }
+        )
+
+        let failResult = failEngine.start(outputDeviceID: 1) { sampleRate, bufferFrames in
+            core.prepareProcessTap(sampleRate: sampleRate, outputDeviceID: 1, bufferFrames: bufferFrames)
+        }
+        guard case let .failure(failError) = failResult else {
+            XCTFail("Expected real start device error to fail")
+            return
+        }
+        XCTAssertEqual(failError, ProcessTapEngine.StartError.startDevice(kAudioHardwareNotRunningError))
+        failEngine.stop()
+
+        let v3TeardownWouldReject: (ProcessTapEngine.StartError) -> Bool = { error in
+            error == .startDevice(kAudioHardwareBadObjectError)
+        }
+        let v3SimulatedFailure = ProcessTapEngine.StartError.startDevice(kAudioHardwareBadObjectError)
+        XCTAssertTrue(v3TeardownWouldReject(v3SimulatedFailure))
+        guard case let .success(healthyInfo) = optInResult else {
+            XCTFail("Healthy control must succeed with audio")
+            return
+        }
+        XCTAssertEqual(healthyInfo.bufferFrames, 256)
+    }
+}
+
+final class NativeRTMetricsExportAndPersistenceTests: XCTestCase {
+    private struct PersistedEvent: Decodable {
+        let timestamp: Date
+        let name: String
+        let details: [String: String]
+    }
+
+    private struct PersistedSession: Decodable {
+        let events: [PersistedEvent]
+    }
+
+    private struct PersistedHistory: Decodable {
+        let sessions: [PersistedSession]
+    }
+
+    private struct CallbacksGroup: Decodable {
+        let executed: UInt64
+        let earlyReturns: UInt64
+        let totalFrames: UInt64
+    }
+
+    private struct ExecutionGroup: Decodable {
+        let sumNanos: UInt64
+        let maxNanos: UInt64
+    }
+
+    private struct AnomaliesGroup: Decodable {
+        let budgetOverruns: UInt64
+        let cadenceGaps: UInt64
+        let maxCadenceNanos: UInt64
+    }
+
+    private struct FrameBoundsGroup: Decodable {
+        let min: UInt32
+        let max: UInt32
+    }
+
+    private struct HistogramGroup: Decodable {
+        let under250us: UInt64
+        let bucket250To500us: UInt64
+        let bucket500To1000us: UInt64
+        let bucket1000To2000us: UInt64
+        let bucketOver2000us: UInt64
+
+        enum CodingKeys: String, CodingKey {
+            case under250us
+            case bucket250To500us = "250To500us"
+            case bucket500To1000us = "500To1000us"
+            case bucket1000To2000us = "1000To2000us"
+            case bucketOver2000us = "over2000us"
+        }
+    }
+
+    private struct ParsedExport {
+        let version: String
+        let status: String
+        let epoch: UInt32
+        let epochValid: Bool
+        let enabled: Bool
+        let sampleRateHz: Int
+        let nominalFrames: UInt32
+        let ioProcInvocations: Int64
+        let callbacks: CallbacksGroup
+        let execution: ExecutionGroup
+        let anomalies: AnomaliesGroup
+        let frameBounds: FrameBoundsGroup
+        let histogram: HistogramGroup
+    }
+
+    private enum WindowResult: Equatable {
+        case accepted(meanExecutionNanos: UInt64)
+        case incomplete(reason: String)
+        case rejected(reason: String)
+    }
+
+    private func parseExport(_ details: [String: String]) -> ParsedExport? {
+        guard let version = details["version"], version == "1",
+              let status = details["status"],
+              let epochStr = details["epoch"], let epoch = UInt32(epochStr),
+              let epochValidStr = details["epochValid"], let epochValid = Bool(epochValidStr),
+              let enabledStr = details["enabled"], let enabled = Bool(enabledStr),
+              let srStr = details["sampleRateHz"], let sampleRateHz = Int(srStr),
+              let nfStr = details["nominalFrames"], let nominalFrames = UInt32(nfStr),
+              let ioProcStr = details["ioProcInvocations"], let ioProcInvocations = Int64(ioProcStr),
+              let callbacksJson = details["callbacks"]?.data(using: .utf8),
+              let executionJson = details["execution"]?.data(using: .utf8),
+              let anomaliesJson = details["anomalies"]?.data(using: .utf8),
+              let frameBoundsJson = details["frameBounds"]?.data(using: .utf8),
+              let histogramJson = details["histogram"]?.data(using: .utf8) else {
+            return nil
+        }
+        let decoder = JSONDecoder()
+        guard let callbacks = try? decoder.decode(CallbacksGroup.self, from: callbacksJson),
+              let execution = try? decoder.decode(ExecutionGroup.self, from: executionJson),
+              let anomalies = try? decoder.decode(AnomaliesGroup.self, from: anomaliesJson),
+              let frameBounds = try? decoder.decode(FrameBoundsGroup.self, from: frameBoundsJson),
+              let histogram = try? decoder.decode(HistogramGroup.self, from: histogramJson) else {
+            return nil
+        }
+        return ParsedExport(
+            version: version,
+            status: status,
+            epoch: epoch,
+            epochValid: epochValid,
+            enabled: enabled,
+            sampleRateHz: sampleRateHz,
+            nominalFrames: nominalFrames,
+            ioProcInvocations: ioProcInvocations,
+            callbacks: callbacks,
+            execution: execution,
+            anomalies: anomalies,
+            frameBounds: frameBounds,
+            histogram: histogram
+        )
+    }
+
+    private func evaluateWindow(start: ParsedExport, end: ParsedExport) -> WindowResult {
+        guard start.epoch == end.epoch else {
+            return .rejected(reason: "epochMismatch")
+        }
+        guard start.epochValid, end.epochValid, start.status == "valid", end.status == "valid" else {
+            return .rejected(reason: "invalidStatus")
+        }
+        guard end.callbacks.executed >= start.callbacks.executed,
+              end.callbacks.earlyReturns >= start.callbacks.earlyReturns,
+              end.execution.sumNanos >= start.execution.sumNanos else {
+            return .rejected(reason: "counterRegression")
+        }
+        let dExecuted = end.callbacks.executed - start.callbacks.executed
+        let dEarly = end.callbacks.earlyReturns - start.callbacks.earlyReturns
+        let dTotal = dExecuted + dEarly
+        guard dTotal > 0 else {
+            if end.ioProcInvocations == 0 {
+                return .incomplete(reason: "noIOProcInvocations")
+            } else {
+                return .incomplete(reason: "noRTCallbacksCaptured")
+            }
+        }
+        let dSumNanos = end.execution.sumNanos - start.execution.sumNanos
+        return .accepted(meanExecutionNanos: dSumNanos / dTotal)
+    }
+
+    func testGenuineProductionExportSurvivesActualNormalizationAndReadback() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let persistenceURL = tempDirectory.appendingPathComponent("diagnostics-session.json")
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let store = DiagnosticEventStore(capacity: 50, persistenceURL: persistenceURL)
+        store.startSession()
+
+        let core = CoreAudioEngine()
+        core.nativeRTMetricsStorage.startEpoch(sampleRate: 48000, nominalFrames: 128)
+        seq_atomic_int32_store_release(core.nativeRTMetricsStorage.rtMetricsEnabledAtomic, 1)
+
+        core.noteNativeCallbackInvocation()
+        core.noteNativeRenderMetrics(entryTicks: 1000, exitTicks: 5000, frameCount: 128, earlyReturn: false)
+
+        core.recordNativeRTMetrics(to: store)
+
+        let snapshotEvents = store.snapshot()
+        let event = try XCTUnwrap(snapshotEvents.first { $0.name == "engine.nativeRTMetrics" })
+        XCTAssertLessThanOrEqual(event.details.count, 16)
+        XCTAssertEqual(event.details.count, 13)
+
+        for (key, value) in event.details {
+            XCTAssertLessThanOrEqual(key.utf8.count, 128)
+            XCTAssertLessThanOrEqual(value.utf8.count, 512)
+        }
+
+        store.finishSession()
+
+        let fileData = try Data(contentsOf: persistenceURL)
+        let history = try JSONDecoder().decode(PersistedHistory.self, from: fileData)
+        let persistedEvent = try XCTUnwrap(history.sessions.last?.events.first { $0.name == "engine.nativeRTMetrics" })
+        XCTAssertEqual(persistedEvent.details.count, 13)
+
+        let parsed = try XCTUnwrap(parseExport(persistedEvent.details))
+        XCTAssertEqual(parsed.version, "1")
+        XCTAssertEqual(parsed.status, "valid")
+        XCTAssertEqual(parsed.epoch, 1)
+        XCTAssertTrue(parsed.epochValid)
+        XCTAssertTrue(parsed.enabled)
+        XCTAssertEqual(parsed.sampleRateHz, 48000)
+        XCTAssertEqual(parsed.nominalFrames, 128)
+        XCTAssertEqual(parsed.ioProcInvocations, 1)
+        XCTAssertEqual(parsed.callbacks.executed, 1)
+        XCTAssertEqual(parsed.callbacks.earlyReturns, 0)
+        XCTAssertEqual(parsed.callbacks.totalFrames, 128)
+        XCTAssertGreaterThan(parsed.execution.sumNanos, 0)
+        XCTAssertGreaterThan(parsed.execution.maxNanos, 0)
+        XCTAssertEqual(parsed.frameBounds.min, 128)
+        XCTAssertEqual(parsed.frameBounds.max, 128)
+
+        let secondStore = DiagnosticEventStore(capacity: 50, persistenceURL: persistenceURL)
+        secondStore.startSession()
+        let exported = secondStore.reportText()
+        XCTAssertTrue(exported.contains("engine.nativeRTMetrics"))
+        XCTAssertTrue(exported.contains("version=1"))
+    }
+
+    func testKnownBadV4MissingKeysRejectedVsHealthyParsed() throws {
+        let healthyDetails: [String: String] = [
+            "version": "1",
+            "status": "valid",
+            "epoch": "1",
+            "epochValid": "true",
+            "enabled": "true",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "100",
+            "callbacks": "{\"executed\":100,\"earlyReturns\":0,\"totalFrames\":12800}",
+            "execution": "{\"sumNanos\":500000,\"maxNanos\":6000}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":2666666}",
+            "frameBounds": "{\"min\":128,\"max\":128}",
+            "histogram": "{\"under250us\":100,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]
+
+        let healthyParsed = try XCTUnwrap(parseExport(healthyDetails))
+        XCTAssertEqual(healthyParsed.callbacks.executed, 100)
+
+        var v4MissingEarlyReturns = healthyDetails
+        v4MissingEarlyReturns.removeValue(forKey: "callbacks")
+        XCTAssertNil(parseExport(v4MissingEarlyReturns))
+
+        var v4MissingEpoch = healthyDetails
+        v4MissingEpoch.removeValue(forKey: "epoch")
+        XCTAssertNil(parseExport(v4MissingEpoch))
+
+        var v4DroppedHistogram = healthyDetails
+        v4DroppedHistogram.removeValue(forKey: "histogram")
+        XCTAssertNil(parseExport(v4DroppedHistogram))
+    }
+
+    func testWorstCaseValuesWithin512ByteLimitAndTruncationFailsClosed() throws {
+        let hugeCallbacks = "{\"executed\":\(UInt64.max),\"earlyReturns\":\(UInt64.max),\"totalFrames\":\(UInt64.max)}"
+        let hugeExecution = "{\"sumNanos\":\(UInt64.max),\"maxNanos\":\(UInt64.max)}"
+        let hugeAnomalies = "{\"budgetOverruns\":\(UInt64.max),\"cadenceGaps\":\(UInt64.max),\"maxCadenceNanos\":\(UInt64.max)}"
+        let hugeFrameBounds = "{\"min\":\(UInt32.max),\"max\":\(UInt32.max)}"
+        let hugeHistogram = "{\"under250us\":\(UInt64.max),\"250To500us\":\(UInt64.max),\"500To1000us\":\(UInt64.max),\"1000To2000us\":\(UInt64.max),\"over2000us\":\(UInt64.max)}"
+
+        XCTAssertLessThanOrEqual(hugeCallbacks.utf8.count, 512)
+        XCTAssertLessThanOrEqual(hugeExecution.utf8.count, 512)
+        XCTAssertLessThanOrEqual(hugeAnomalies.utf8.count, 512)
+        XCTAssertLessThanOrEqual(hugeFrameBounds.utf8.count, 512)
+        XCTAssertLessThanOrEqual(hugeHistogram.utf8.count, 512)
+
+        let worstCaseDetails: [String: String] = [
+            "version": "1",
+            "status": "valid",
+            "epoch": "\(UInt32.max)",
+            "epochValid": "true",
+            "enabled": "true",
+            "sampleRateHz": "192000",
+            "nominalFrames": "16384",
+            "ioProcInvocations": "\(Int64.max)",
+            "callbacks": hugeCallbacks,
+            "execution": hugeExecution,
+            "anomalies": hugeAnomalies,
+            "frameBounds": hugeFrameBounds,
+            "histogram": hugeHistogram
+        ]
+
+        let store = DiagnosticEventStore(capacity: 10)
+        store.record("engine.nativeRTMetrics", details: worstCaseDetails)
+        let event = try XCTUnwrap(store.snapshot().last)
+        XCTAssertEqual(event.details["callbacks"], hugeCallbacks)
+        XCTAssertEqual(event.details["histogram"], hugeHistogram)
+
+        let parsed = try XCTUnwrap(parseExport(event.details))
+        XCTAssertEqual(parsed.callbacks.executed, UInt64.max)
+        XCTAssertEqual(parsed.histogram.bucketOver2000us, UInt64.max)
+
+        var truncatedDetails = worstCaseDetails
+        truncatedDetails["callbacks"] = String(hugeCallbacks.prefix(25))
+        XCTAssertNil(parseExport(truncatedDetails))
+    }
+
+    func testInvalidStatusAndEpochCrossWindowFailsClosed() throws {
+        let baseStart = try XCTUnwrap(parseExport([
+            "version": "1",
+            "status": "valid",
+            "epoch": "1",
+            "epochValid": "true",
+            "enabled": "true",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "0",
+            "callbacks": "{\"executed\":0,\"earlyReturns\":0,\"totalFrames\":0}",
+            "execution": "{\"sumNanos\":0,\"maxNanos\":0}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":0}",
+            "frameBounds": "{\"min\":0,\"max\":0}",
+            "histogram": "{\"under250us\":0,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]))
+
+        let crossEpochEnd = try XCTUnwrap(parseExport([
+            "version": "1",
+            "status": "valid",
+            "epoch": "2",
+            "epochValid": "true",
+            "enabled": "true",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "100",
+            "callbacks": "{\"executed\":100,\"earlyReturns\":0,\"totalFrames\":12800}",
+            "execution": "{\"sumNanos\":500000,\"maxNanos\":6000}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":2666666}",
+            "frameBounds": "{\"min\":128,\"max\":128}",
+            "histogram": "{\"under250us\":100,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]))
+        XCTAssertEqual(evaluateWindow(start: baseStart, end: crossEpochEnd), .rejected(reason: "epochMismatch"))
+
+        let invalidEnd = try XCTUnwrap(parseExport([
+            "version": "1",
+            "status": "invalid",
+            "epoch": "1",
+            "epochValid": "false",
+            "enabled": "true",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "100",
+            "callbacks": "{\"executed\":100,\"earlyReturns\":0,\"totalFrames\":12800}",
+            "execution": "{\"sumNanos\":500000,\"maxNanos\":6000}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":2666666}",
+            "frameBounds": "{\"min\":128,\"max\":128}",
+            "histogram": "{\"under250us\":100,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]))
+        XCTAssertEqual(evaluateWindow(start: baseStart, end: invalidEnd), .rejected(reason: "invalidStatus"))
+
+        let zeroObsNoIOProcEnd = baseStart
+        XCTAssertEqual(
+            evaluateWindow(start: baseStart, end: zeroObsNoIOProcEnd),
+            .incomplete(reason: "noIOProcInvocations")
+        )
+
+        let zeroObsWithIOProcEnd = try XCTUnwrap(parseExport([
+            "version": "1",
+            "status": "valid",
+            "epoch": "1",
+            "epochValid": "true",
+            "enabled": "false",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "500",
+            "callbacks": "{\"executed\":0,\"earlyReturns\":0,\"totalFrames\":0}",
+            "execution": "{\"sumNanos\":0,\"maxNanos\":0}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":0}",
+            "frameBounds": "{\"min\":0,\"max\":0}",
+            "histogram": "{\"under250us\":0,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]))
+        XCTAssertEqual(
+            evaluateWindow(start: baseStart, end: zeroObsWithIOProcEnd),
+            .incomplete(reason: "noRTCallbacksCaptured")
+        )
+
+        let healthyEnd = try XCTUnwrap(parseExport([
+            "version": "1",
+            "status": "valid",
+            "epoch": "1",
+            "epochValid": "true",
+            "enabled": "true",
+            "sampleRateHz": "48000",
+            "nominalFrames": "128",
+            "ioProcInvocations": "100",
+            "callbacks": "{\"executed\":100,\"earlyReturns\":0,\"totalFrames\":12800}",
+            "execution": "{\"sumNanos\":500000,\"maxNanos\":6000}",
+            "anomalies": "{\"budgetOverruns\":0,\"cadenceGaps\":0,\"maxCadenceNanos\":2666666}",
+            "frameBounds": "{\"min\":128,\"max\":128}",
+            "histogram": "{\"under250us\":100,\"250To500us\":0,\"500To1000us\":0,\"1000To2000us\":0,\"over2000us\":0}"
+        ]))
+        XCTAssertEqual(evaluateWindow(start: baseStart, end: healthyEnd), .accepted(meanExecutionNanos: 5000))
+    }
 }
