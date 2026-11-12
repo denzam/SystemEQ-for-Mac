@@ -72,6 +72,15 @@
       "homebrew": 137,
       "other": 843,
       "total_all_assets": 4041
+    },
+    {
+      "date": "2026-11-12",
+      "total": 3252,
+      "dmg": 2913,
+      "zip": 186,
+      "homebrew": 153,
+      "other": 957,
+      "total_all_assets": 4209
     }
   ]
 }
