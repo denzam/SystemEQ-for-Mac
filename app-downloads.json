@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
-  "total": 3291,
-  "dmg": 2938,
-  "zip": 189,
-  "homebrew": 164,
-  "other": 1074,
-  "total_all_assets": 4365,
+  "total": 3323,
+  "dmg": 2958,
+  "zip": 192,
+  "homebrew": 173,
+  "other": 1190,
+  "total_all_assets": 4513,
   "package_assets": 45,
   "releases": 22,
   "homebrew_available": true,
@@ -232,7 +232,7 @@
       "version": "v1.3.0",
       "name": "SystemEQ-v1.3.0.dmg",
       "category": "dmg",
-      "downloads": 178,
+      "downloads": 180,
       "size": 11620550
     },
     {
@@ -421,7 +421,7 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9.zip",
       "category": "zip",
-      "downloads": 45,
+      "downloads": 48,
       "size": 18066437
     },
     {
@@ -430,7 +430,7 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9-homebrew.dmg",
       "category": "homebrew",
-      "downloads": 164,
+      "downloads": 173,
       "size": 18063982
     },
     {
@@ -439,7 +439,7 @@
       "version": "v1.4.9",
       "name": "appcast.xml",
       "category": "other",
-      "downloads": 806,
+      "downloads": 922,
       "size": 2408
     },
     {
@@ -448,19 +448,19 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9.dmg",
       "category": "dmg",
-      "downloads": 293,
+      "downloads": 311,
       "size": 18063982
     }
   ],
-  "updated_at": "2026-11-13T13:07:37+00:00",
+  "updated_at": "2026-11-14T12:12:07+00:00",
   "history_since": "2026-11-04",
   "daily_change": {
-    "total": 39,
-    "dmg": 25,
+    "total": 32,
+    "dmg": 20,
     "zip": 3,
-    "homebrew": 11,
-    "other": 117,
-    "total_all_assets": 156
+    "homebrew": 9,
+    "other": 116,
+    "total_all_assets": 148
   },
   "source": "https://github.com/denzam/SystemEQ-for-Mac/releases",
   "definition": "Official SystemEQ DMG, ZIP and dedicated Homebrew-file downloads, including updates and repeat downloads; not unique users or installations. Historical Homebrew downloads remain in DMG. ZIP includes app updates. Other release attachments are counted separately. GitHub-generated source archives have no exposed download count."
