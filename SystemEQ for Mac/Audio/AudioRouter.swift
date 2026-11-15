@@ -941,7 +941,10 @@ public final class AudioRouter: ObservableObject {
                 return false
             }
         }
-        stopActiveBackendForRestart(restoreSystemOutput: !preservesBlackHoleOutput)
+        guard stopActiveBackendForRestart(restoreSystemOutput: !preservesBlackHoleOutput) else {
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStop"])
+            return false
+        }
 
         return AudioRoutingStartPolicy.start(
             preference: preservesBlackHoleOutput ? .blackHole : backendPreference,
@@ -1026,6 +1029,10 @@ public final class AudioRouter: ObservableObject {
             volume.stop()
             processTapEngineStorage = nil
             CoreAudioEngine.shared.stop()
+            guard !CoreAudioEngine.shared.isRunning else {
+                DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStop"])
+                return false
+            }
             let recovery = NativeRoutingFailureRecoveryPolicy.recovery(
                 previous: previousDefaultOutput,
                 attempted: output,
@@ -1088,12 +1095,16 @@ public final class AudioRouter: ObservableObject {
             return false
         }
 
+        let engine = CoreAudioEngine.shared
+        engine.stop()
+        guard !engine.isRunning else {
+            DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStop"])
+            return false
+        }
         if preservedVirtualVolume == nil {
             setAsDefaultOutputDevice(blackHoleDevice)
         }
         removeBlackHoleVolumeListeners()
-        let engine = CoreAudioEngine.shared
-        engine.stop()
         engine.setup(
             inputDevice: blackHoleDevice.id,
             outputDevice: physicalOutput.id,
@@ -1186,21 +1197,23 @@ public final class AudioRouter: ObservableObject {
         return true
     }
 
-    private func stopActiveBackendForRestart(restoreSystemOutput: Bool = true) {
+    private func stopActiveBackendForRestart(restoreSystemOutput: Bool = true) -> Bool {
         let previousBackend = activeBackend
-        removeBlackHoleVolumeListeners()
-        NativeVolumeControl.shared.stop()
         if #available(macOS 14.4, *), let nativeEngine = processTapEngineStorage as? ProcessTapEngine {
             nativeEngine.stop()
         }
-        processTapEngineStorage = nil
         CoreAudioEngine.shared.stop()
+        guard !CoreAudioEngine.shared.isRunning else { return false }
+        removeBlackHoleVolumeListeners()
+        NativeVolumeControl.shared.stop()
+        processTapEngineStorage = nil
         if previousBackend == .blackHole, restoreSystemOutput {
             restoreOriginalSystemOutputDevice()
         }
         activeBackend = .none
         activeInputUID = nil
         activeOutputUID = nil
+        return true
     }
 
     private func showSetupInstructions(blackHole: AudioDevice, scarlett: AudioDevice) {
@@ -2248,6 +2261,10 @@ public final class AudioRouter: ObservableObject {
         }
         processTapEngineStorage = nil
         CoreAudioEngine.shared.stop()
+        guard !CoreAudioEngine.shared.isRunning else {
+            DiagnosticEventStore.shared.record("routing.sleep.failed", details: ["reason": "engineStop"])
+            return
+        }
         dlog("Sleep — engine stopped, routing will be restored on wake", level: .info, category: .routing)
     }
 

@@ -209,6 +209,7 @@ public final class CoreAudioEngine: ObservableObject {
     @Published public var isEnabled: Bool = true {
         didSet {
             seq_atomic_int32_store_release(isEnabledAtomic, isEnabled ? 1 : 0)
+            updateActiveCeiling()
             if isEnabled != oldValue { eqResponseRevision &+= 1 }
         }
     }
@@ -243,6 +244,25 @@ public final class CoreAudioEngine: ObservableObject {
         seq_atomic_int32_init(pointer, 1)
         return pointer
     }()
+
+    private var appliedCeilingBoost: Float = 0
+    let activeCeilingAtomic: UnsafeMutablePointer<SEQAtomicInt32> = {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt32>.allocate(capacity: 1)
+        seq_atomic_int32_init(pointer, Int32(bitPattern: (1.0 as Float).bitPattern))
+        return pointer
+    }()
+
+    public var activeCeiling: Float {
+        Float(bitPattern: UInt32(bitPattern: seq_atomic_int32_load(activeCeilingAtomic)))
+    }
+
+    func updateActiveCeiling(outputBoost: Float? = nil) {
+        if let outputBoost {
+            appliedCeilingBoost = Self.sanitizedOutputBoost(outputBoost)
+        }
+        let ceil: Float = isEnabled && appliedCeilingBoost > 0 ? 0.891_250_9 : 1.0
+        seq_atomic_int32_store_release(activeCeilingAtomic, Int32(bitPattern: ceil.bitPattern))
+    }
 
     /// Public read-only accessors for device IDs (used by AudioRouter to skip redundant restarts)
     public var currentInputDeviceID: AudioDeviceID {
@@ -1207,6 +1227,7 @@ public final class CoreAudioEngine: ObservableObject {
         _visualizerCallbackAtomic.deallocate()
         _visualizerCallbackReaders.deallocate()
         isEnabledAtomic.deallocate()
+        activeCeilingAtomic.deallocate()
         testToneEnabledAtomic.deallocate()
         testToneCommandAtomic.deallocate()
         diagnosticInputCallbacks.deallocate()
@@ -1245,6 +1266,10 @@ public final class CoreAudioEngine: ObservableObject {
         // touch buffers that cleanup() is about to free.
         if isRunning {
             stop()
+        }
+        guard !isRunning else {
+            recordSetupFailure("stop")
+            return
         }
 
         // Cleanup any existing units/buffers
@@ -1779,6 +1804,7 @@ public final class CoreAudioEngine: ObservableObject {
             sampleRate: Float(currentSampleRate)
         )
         self.vdspFilter = filter
+        updateActiveCeiling(outputBoost: outputBoost)
     }
 
     /// Apply 31-band graphic EQ using parametric peaks
@@ -1809,6 +1835,7 @@ public final class CoreAudioEngine: ObservableObject {
             sampleRate: Float(currentSampleRate)
         )
         self.vdspFilter = filter
+        updateActiveCeiling(outputBoost: outputBoost)
     }
 
     func directEQPreampLimit(
@@ -1884,6 +1911,7 @@ public final class CoreAudioEngine: ObservableObject {
                     appliedDirectPreamp = attenuation
                     appliedDirectPreampLimit = limit
                     vdspFilter = filter
+                    updateActiveCeiling(outputBoost: configuration.outputBoost)
                     setDirectEQAvailability(true)
                     return attenuation
                 }
@@ -1910,6 +1938,7 @@ public final class CoreAudioEngine: ObservableObject {
             appliedDirectPreamp = nil
             appliedDirectPreampLimit = nil
             vdspFilter = safe
+            updateActiveCeiling(outputBoost: 0.0)
             setDirectEQAvailability(false)
         }
         return nil
@@ -1954,6 +1983,7 @@ public final class CoreAudioEngine: ObservableObject {
         clearDirectEQConfiguration()
         activeEQMode = .tenBand
         self.vdspFilter = nil
+        updateActiveCeiling(outputBoost: 0.0)
         self.preampGain = 0.0
         calibrationPreampGain = 0
         self.eqGains = Array(repeating: 0.0, count: 10)
@@ -2117,8 +2147,31 @@ public final class CoreAudioEngine: ObservableObject {
             dlog("🔕 Test tone auto-stopped (engine stopping)", category: .engine)
         }
 
-        if let iu = inputUnit { AudioOutputUnitStop(iu) }
-        if let ou = outputUnit { AudioOutputUnitStop(ou) }
+        var stopFailed = false
+        if let iu = inputUnit {
+            let status = AudioOutputUnitStop(iu)
+            if status != noErr {
+                stopFailed = true
+                DiagnosticEventStore.shared.record(
+                    "engine.stop.failed", details: ["unit": "input", "status": "\(status)"]
+                )
+                dlog("AudioOutputUnitStop input failed: \(status)", level: .error, category: .engine)
+            }
+        }
+        if let ou = outputUnit {
+            let status = AudioOutputUnitStop(ou)
+            if status != noErr {
+                stopFailed = true
+                DiagnosticEventStore.shared.record(
+                    "engine.stop.failed", details: ["unit": "output", "status": "\(status)"]
+                )
+                dlog("AudioOutputUnitStop output failed: \(status)", level: .error, category: .engine)
+            }
+        }
+        if stopFailed {
+            isRunning = true
+            return
+        }
         isRunning = false
         if wasRunning {
             DiagnosticEventStore.shared.record("engine.stop")
@@ -2128,7 +2181,6 @@ public final class CoreAudioEngine: ObservableObject {
         didPromoteInputThread = false
         didPromoteOutputThread = false
 
-        // Reset peak meters and ring buffer
         peakMeter.resetToZero()
         ringBuffer.reset()
 
@@ -3083,11 +3135,15 @@ nonisolated enum CoreAudioOutput {
         capacity: Int,
         targetFill: Int,
         scratchLeft: UnsafeMutablePointer<Float>?,
-        scratchRight: UnsafeMutablePointer<Float>?
+        scratchRight: UnsafeMutablePointer<Float>?,
+        ceiling: Float = 1.0
     ) -> OSStatus {
         guard frames >= 0, frames <= capacity else { return kAudioUnitErr_TooManyFramesToProcess }
         guard frames > 0 else { return noErr }
+        guard ceiling.isFinite, ceiling > 0 else { return kAudio_ParamError }
         let stride = MemoryLayout<Float>.stride
+        var low = -ceiling
+        var high = ceiling
         if buffers.count == 1 {
             let channels = Int(buffers[0].mNumberChannels)
             guard channels == 1 || channels == 2 else { return kAudioUnitErr_FormatNotSupported }
@@ -3096,14 +3152,21 @@ nonisolated enum CoreAudioOutput {
             else { return kAudio_ParamError }
             if channels == 2 {
                 ring.readInterleavedResampled(outPtr: output, framesRequested: frames, targetFillFrames: targetFill)
+                let totalCount = frames * 2
+                for index in 0..<totalCount where !output[index].isFinite {
+                    output[index] = 0
+                }
+                vDSP_vclip(output, 1, &low, &high, output, 1, vDSP_Length(totalCount))
             } else {
                 guard let scratchLeft, let scratchRight else { return kAudio_ParamError }
                 ring.readNonInterleavedResampled(
                     outL: scratchLeft, outR: scratchRight, framesRequested: frames, targetFillFrames: targetFill
                 )
                 for index in 0..<frames {
-                    output[index] = scratchLeft[index] * 0.5 + scratchRight[index] * 0.5
+                    let mixed = scratchLeft[index] * 0.5 + scratchRight[index] * 0.5
+                    output[index] = mixed.isFinite ? mixed : 0.0
                 }
+                vDSP_vclip(output, 1, &low, &high, output, 1, vDSP_Length(frames))
             }
             buffers[0].mDataByteSize = UInt32(frames * channels * stride)
         } else if buffers.count == 2 {
@@ -3121,6 +3184,12 @@ nonisolated enum CoreAudioOutput {
                 framesRequested: frames,
                 targetFillFrames: targetFill
             )
+            for index in 0..<frames {
+                if !left[index].isFinite { left[index] = 0 }
+                if !right[index].isFinite { right[index] = 0 }
+            }
+            vDSP_vclip(left, 1, &low, &high, left, 1, vDSP_Length(frames))
+            vDSP_vclip(right, 1, &low, &high, right, 1, vDSP_Length(frames))
             buffers[0].mDataByteSize = UInt32(frames * stride)
             buffers[1].mDataByteSize = UInt32(frames * stride)
         } else {
@@ -3195,6 +3264,7 @@ private func renderCallbackFunction(
         return kAudioUnitErr_TooManyFramesToProcess
     }
 
+    let ceiling = Float(bitPattern: UInt32(bitPattern: seq_atomic_int32_load(engine.activeCeilingAtomic)))
     let status = CoreAudioOutput.render(
         ring: engine.ringBuffer,
         buffers: outputBuffers,
@@ -3202,7 +3272,8 @@ private func renderCallbackFunction(
         capacity: Int(engine.allocatedFrameCapacity),
         targetFill: engine.ringTargetFillFrames,
         scratchLeft: engine.outputScratchLeft,
-        scratchRight: engine.outputScratchRight
+        scratchRight: engine.outputScratchRight,
+        ceiling: ceiling
     )
     guard status == noErr else { return status }
     if seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0,

@@ -36,6 +36,30 @@ nonisolated public final class SPSCRingBuffer {
     private var resamplePhase = 0.0
     private var resampleCorrection = 0.0
 
+    private var kernel: UnsafeMutablePointer<Float>?
+    private var history: UnsafeMutablePointer<SIMD2<Float>>?
+    private var historyCount: Int = 0
+    private var historyEnd: Int = 0
+    private var rampProgress: Float = 0
+
+    #if DEBUG
+        var prototypePhase: Double {
+            resamplePhase
+        }
+
+        var prototypeCorrection: Double {
+            resampleCorrection
+        }
+
+        func setInternalResamplePhase(_ phase: Double) {
+            resamplePhase = phase
+        }
+
+        func setInternalResampleCorrection(_ correction: Double) {
+            resampleCorrection = correction
+        }
+    #endif
+
     // MARK: - Init / Deinit
 
     public init() {
@@ -118,6 +142,10 @@ nonisolated public final class SPSCRingBuffer {
         left?.initialize(repeating: 0, count: capacity)
         right?.initialize(repeating: 0, count: capacity)
 
+        prepareKernel()
+        history = .allocate(capacity: 32)
+        history?.initialize(repeating: .zero, count: 32)
+
         reset()
     }
 
@@ -126,10 +154,17 @@ nonisolated public final class SPSCRingBuffer {
         right?.deallocate()
         left = nil
         right = nil
+        kernel?.deallocate()
+        kernel = nil
+        history?.deallocate()
+        history = nil
         capacity = 0
         mask = 0
         seq_atomic_int64_init(writePtr, 0)
         seq_atomic_int64_init(readPtr, 0)
+        historyCount = 0
+        historyEnd = 0
+        rampProgress = 0
     }
 
     // MARK: - Computed Properties
@@ -291,6 +326,100 @@ nonisolated public final class SPSCRingBuffer {
     }
 
     @inline(__always)
+    private func prepareKernel() {
+        guard kernel == nil else { return }
+        let table = UnsafeMutablePointer<Float>.allocate(capacity: 48 * 1025)
+        func sinc(_ x: Double) -> Double {
+            if abs(x) < 1e-12 { return 1 }
+            return sin(.pi * x) / (.pi * x)
+        }
+        for phase in 0...1024 {
+            let fraction = Double(phase) / 1024.0
+            let offset = phase * 48
+            var sum: Double = 0
+            for tap in 0..<48 {
+                let x = Double(tap - 23) - fraction
+                let value = 0.96 * sinc(0.96 * x) * sinc(x / 24.0)
+                table[offset + tap] = Float(value)
+                sum += value
+            }
+            for tap in 0..<48 {
+                table[offset + tap] /= Float(sum)
+            }
+        }
+        kernel = table
+    }
+
+    @inline(__always)
+    private func rememberConsumed(_ l: UnsafePointer<Float>, _ r: UnsafePointer<Float>, base: Int, count: Int) {
+        guard let history, count > 0 else { return }
+        if historyEnd != base { historyCount = 0 }
+        for offset in max(0, count - 24)..<count {
+            let absolute = base + offset
+            let ring = absolute & mask
+            history[absolute & 31] = SIMD2(l[ring], r[ring])
+        }
+        historyEnd = base + count
+        historyCount = min(24, historyCount + count)
+    }
+
+    @inline(__always)
+    private func interpolated(
+        _ l: UnsafePointer<Float>, _ r: UnsafePointer<Float>,
+        base: Int, offset: Int, fraction: Float, available: Int
+    ) -> SIMD2<Float> {
+        let center = (base + offset) & mask
+        let next = (center + 1) & mask
+        let anchor = SIMD2(l[center], r[center])
+        let linear: SIMD2<Float> = if fraction <= 1e-7 {
+            anchor
+        } else {
+            anchor + (SIMD2(l[next], r[next]) - anchor) * fraction
+        }
+
+        let first = offset - 23
+        let future = available - offset - 25
+
+        guard let kernel, let history, future >= 0,
+              first >= 0 || (historyEnd == base && -first <= historyCount)
+        else {
+            rampProgress = 0
+            return linear
+        }
+
+        let effectiveHeadroom = future - 48
+        let target = min(1.0, max(0.0, Float(effectiveHeadroom) / 48.0))
+        let maxStep: Float = 1.0 / 48.0
+        if target > rampProgress {
+            rampProgress = min(target, rampProgress + maxStep)
+        } else if target < rampProgress {
+            rampProgress = max(target, rampProgress - maxStep)
+        }
+
+        let wetMix = 0.5 - 0.5 * cos(.pi * rampProgress)
+
+        if wetMix <= 1e-6 {
+            return linear
+        }
+
+        let phase = Int((fraction * 1024.0).rounded()) * 48
+        var accum = SIMD2<Float>.zero
+        for tap in 0..<48 {
+            let relative = first + tap
+            let absolute = base + relative
+            let ring = absolute & mask
+            let pair = relative >= 0 ? SIMD2(l[ring], r[ring]) : history[absolute & 31]
+            guard pair.x.isFinite, pair.y.isFinite else {
+                rampProgress = 0
+                return linear
+            }
+            accum += pair * kernel[phase + tap]
+        }
+
+        return linear + (accum - linear) * wetMix
+    }
+
+    @inline(__always)
     func readNonInterleavedResampled(
         outL: UnsafeMutablePointer<Float>,
         outR: UnsafeMutablePointer<Float>,
@@ -307,35 +436,40 @@ nonisolated public final class SPSCRingBuffer {
         let requestedCorrection = min(max(error * 0.00001, -0.001), 0.001)
         resampleCorrection += (requestedCorrection - resampleCorrection) * 0.05
         let ratio = 1.0 + resampleCorrection
-        let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
-        let lastOffset = Int(lastPosition)
-        let requiredFrames = lastOffset + 2
-
-        guard avail >= requiredFrames else {
-            resamplePhase = 0
-            readNonInterleaved(outL: outL, outR: outR, framesRequested: framesRequested)
-            return
-        }
 
         publishReadSnapshot(available: avail, requested: framesRequested)
+
         var position = resamplePhase
+        var renderedFrames = 0
+
         for frame in 0..<framesRequested {
             let sourceOffset = Int(position)
             let fraction = Float(position - Double(sourceOffset))
-            let index = (rIdxBase + sourceOffset) & mask
-            if fraction <= 1e-7 {
-                outL[frame] = l[index]
-                outR[frame] = r[index]
-            } else {
-                let nextIndex = (index &+ 1) & mask
-                outL[frame] = l[index] + (l[nextIndex] - l[index]) * fraction
-                outR[frame] = r[index] + (r[nextIndex] - r[index]) * fraction
+            let needed = fraction <= 1e-7 ? (sourceOffset + 1) : (sourceOffset + 2)
+
+            guard needed <= avail else {
+                break
             }
+
+            let sample = interpolated(l, r, base: rIdxBase, offset: sourceOffset, fraction: fraction, available: avail)
+            outL[frame] = sample.x
+            outR[frame] = sample.y
+            renderedFrames += 1
             position += ratio
         }
 
-        let consumed = Int(position)
+        let under = framesRequested - renderedFrames
+        if under > 0 {
+            vDSP_vclr(outL.advanced(by: renderedFrames), 1, vDSP_Length(under))
+            vDSP_vclr(outR.advanced(by: renderedFrames), 1, vDSP_Length(under))
+            seq_atomic_int32_fetch_add(underruns, 1)
+            seq_atomic_int64_fetch_add(totalUnderruns, 1)
+            seq_atomic_int64_store_release(lastUnderrunHostTime, Int64(bitPattern: mach_absolute_time()))
+        }
+
+        let consumed = min(avail, Int(position))
         resamplePhase = position - Double(consumed)
+        rememberConsumed(l, r, base: rIdxBase, count: consumed)
         storeReadRelease(rIdxBase &+ consumed)
     }
 
@@ -355,36 +489,41 @@ nonisolated public final class SPSCRingBuffer {
         let requestedCorrection = min(max(error * 0.00001, -0.001), 0.001)
         resampleCorrection += (requestedCorrection - resampleCorrection) * 0.05
         let ratio = 1.0 + resampleCorrection
-        let lastPosition = resamplePhase + Double(framesRequested - 1) * ratio
-        let lastOffset = Int(lastPosition)
-        let requiredFrames = lastOffset + 2
-
-        guard avail >= requiredFrames else {
-            resamplePhase = 0
-            readInterleaved(outPtr: outPtr, framesRequested: framesRequested)
-            return
-        }
 
         publishReadSnapshot(available: avail, requested: framesRequested)
+
         var position = resamplePhase
+        var renderedFrames = 0
+
         for frame in 0..<framesRequested {
             let sourceOffset = Int(position)
             let fraction = Float(position - Double(sourceOffset))
-            let index = (rIdxBase + sourceOffset) & mask
-            let outIndex = frame &* 2
-            if fraction <= 1e-7 {
-                outPtr[outIndex] = l[index]
-                outPtr[outIndex &+ 1] = r[index]
-            } else {
-                let nextIndex = (index &+ 1) & mask
-                outPtr[outIndex] = l[index] + (l[nextIndex] - l[index]) * fraction
-                outPtr[outIndex &+ 1] = r[index] + (r[nextIndex] - r[index]) * fraction
+            let needed = fraction <= 1e-7 ? (sourceOffset + 1) : (sourceOffset + 2)
+
+            guard needed <= avail else {
+                break
             }
+
+            let sample = interpolated(l, r, base: rIdxBase, offset: sourceOffset, fraction: fraction, available: avail)
+            outPtr[frame * 2] = sample.x
+            outPtr[frame * 2 + 1] = sample.y
+            renderedFrames += 1
             position += ratio
         }
 
-        let consumed = Int(position)
+        let under = framesRequested - renderedFrames
+        if under > 0 {
+            let offset = renderedFrames * 2
+            let underFloats = under * 2
+            vDSP_vclr(outPtr.advanced(by: offset), 1, vDSP_Length(underFloats))
+            seq_atomic_int32_fetch_add(underruns, 1)
+            seq_atomic_int64_fetch_add(totalUnderruns, 1)
+            seq_atomic_int64_store_release(lastUnderrunHostTime, Int64(bitPattern: mach_absolute_time()))
+        }
+
+        let consumed = min(avail, Int(position))
         resamplePhase = position - Double(consumed)
+        rememberConsumed(l, r, base: rIdxBase, count: consumed)
         storeReadRelease(rIdxBase &+ consumed)
     }
 
@@ -410,6 +549,9 @@ nonisolated public final class SPSCRingBuffer {
         seq_atomic_int64_store_release(readSnapshot, 0)
         resamplePhase = 0
         resampleCorrection = 0
+        historyCount = 0
+        historyEnd = 0
+        rampProgress = 0
         diagnosticIntervalStart = ProcessInfo.processInfo.systemUptime
     }
 

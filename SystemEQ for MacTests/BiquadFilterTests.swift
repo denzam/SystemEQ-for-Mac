@@ -5,6 +5,8 @@
 //  Unit tests for BiquadFilter and BiquadFilterChain
 //
 
+import Accelerate
+import AudioToolbox
 @testable import SystemEQ_for_Mac
 import XCTest
 
@@ -751,7 +753,6 @@ final class BiquadFilterTests: XCTestCase {
         let rb = SPSCRingBuffer()
         rb.allocate(capacityFrames: 256)
 
-        // Write exactly 1 frame of data
         let inL: [Float] = [0.5]
         let inR: [Float] = [0.5]
         _ = rb.write(inL: inL, inR: inR, frameCount: 1)
@@ -759,15 +760,26 @@ final class BiquadFilterTests: XCTestCase {
         var outL = [Float](repeating: -999.0, count: 1)
         var outR = [Float](repeating: -999.0, count: 1)
 
-        // Requesting 1 frame when available == 1:
-        // requiredFrames is lastOffset + 2 == 2. avail (1) < requiredFrames (2).
-        // Resampler must safely fall back to readNonInterleaved instead of reading past the boundary!
         rb.readNonInterleavedResampled(outL: &outL, outR: &outR, framesRequested: 1, targetFillFrames: 0)
 
         XCTAssertEqual(outL[0], 0.5, accuracy: 0.001)
         XCTAssertEqual(outR[0], 0.5, accuracy: 0.001)
         XCTAssertFalse(outL[0].isNaN)
         XCTAssertFalse(outR[0].isNaN)
+        XCTAssertEqual(rb.readIndex, 1)
+
+        rb.reset()
+        _ = rb.write(inL: inL, inR: inR, frameCount: 1)
+        rb.setInternalResamplePhase(0.5)
+
+        outL[0] = -999.0
+        outR[0] = -999.0
+        rb.readNonInterleavedResampled(outL: &outL, outR: &outR, framesRequested: 1, targetFillFrames: 0)
+
+        XCTAssertEqual(outL[0], 0.0, accuracy: 0.001)
+        XCTAssertEqual(outR[0], 0.0, accuracy: 0.001)
+        XCTAssertEqual(rb.readIndex, 0)
+        XCTAssertEqual(rb.prototypePhase, 0.5, accuracy: 1e-7)
     }
 
     func testCoreAudioEngine_roomNotchFilters_rebuildsOnSampleRateChange() {
@@ -854,5 +866,601 @@ final class BiquadFilterTests: XCTestCase {
         // Clean up
         engine.clearEQ()
         engine.rebuildActiveEQFilter(sampleRate: 48000)
+    }
+
+    private final class ProductionTestRenderer {
+        enum Layout: CaseIterable { case planar, interleaved, mono }
+        let layout: Layout
+        let ring: SPSCRingBuffer
+        let left: UnsafeMutablePointer<Float>
+        let right: UnsafeMutablePointer<Float>
+        let output: UnsafeMutablePointer<Float>
+        let list: UnsafeMutableAudioBufferListPointer
+        let capacity: Int
+
+        init(layout: Layout, capacity: Int = 2048) {
+            self.layout = layout
+            self.capacity = capacity
+            self.ring = SPSCRingBuffer()
+            ring.allocate(capacityFrames: capacity)
+            left = .allocate(capacity: capacity)
+            right = .allocate(capacity: capacity)
+            output = .allocate(capacity: capacity * 2)
+            left.initialize(repeating: 0, count: capacity)
+            right.initialize(repeating: 0, count: capacity)
+            output.initialize(repeating: 0, count: capacity * 2)
+            list = AudioBufferList.allocate(maximumBuffers: layout == .planar ? 2 : 1)
+        }
+
+        deinit {
+            ring.deallocate()
+            left.deallocate()
+            right.deallocate()
+            output.deallocate()
+            free(list.unsafeMutablePointer)
+        }
+
+        func feed(l: [Float], r: [Float]) -> Int {
+            XCTAssertEqual(l.count, r.count)
+            return ring.write(inL: l, inR: r, frameCount: l.count)
+        }
+
+        func render(frames: Int, targetFill: Int = 512, ceiling: Float = 1.0) -> OSStatus {
+            let stride = MemoryLayout<Float>.stride
+            if layout == .planar {
+                list[0] = AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(frames * stride), mData: left)
+                list[1] = AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(frames * stride), mData: right)
+            } else {
+                let channels: UInt32 = layout == .interleaved ? 2 : 1
+                list[0] = AudioBuffer(
+                    mNumberChannels: channels,
+                    mDataByteSize: UInt32(frames * Int(channels) * stride),
+                    mData: output
+                )
+            }
+            return CoreAudioOutput.render(
+                ring: ring, buffers: list, frames: frames, capacity: capacity,
+                targetFill: targetFill, scratchLeft: left, scratchRight: right, ceiling: ceiling
+            )
+        }
+
+        func values(_ i: Int) -> (Float, Float) {
+            switch layout {
+            case .planar:
+                (left[i], right[i])
+            case .interleaved:
+                (output[i * 2], output[i * 2 + 1])
+            case .mono:
+                (output[i], output[i])
+            }
+        }
+    }
+
+    private final class ScalarReferenceOracle {
+        let ratio: Double
+        var resamplePhase: Double
+        var inputHistoryL: [Float] = []
+        var inputHistoryR: [Float] = []
+        var consumedTotal: Int = 0
+
+        init(ratio: Double = 1.0, initialPhase: Double = 0.0) {
+            self.ratio = ratio
+            self.resamplePhase = initialPhase
+        }
+
+        func feed(left: [Float], right: [Float]) {
+            inputHistoryL.append(contentsOf: left)
+            inputHistoryR.append(contentsOf: right)
+        }
+
+        func render(framesRequested: Int)
+            -> (outL: [Float], outR: [Float], renderedCount: Int, consumed: Int, newPhase: Double) {
+            var renderedL: [Float] = []
+            var renderedR: [Float] = []
+            let avail = inputHistoryL.count - consumedTotal
+            var pos = resamplePhase
+
+            for _ in 0..<framesRequested {
+                let sourceOffset = Int(pos)
+                let fraction = Float(pos - Double(sourceOffset))
+                let needed = fraction <= 1e-7 ? (sourceOffset + 1) : (sourceOffset + 2)
+                if needed > avail { break }
+                let idx0 = consumedTotal + sourceOffset
+                let s0L = inputHistoryL[idx0]
+                let s0R = inputHistoryR[idx0]
+                let s1L = fraction <= 1e-7 ? s0L : inputHistoryL[idx0 + 1]
+                let s1R = fraction <= 1e-7 ? s0R : inputHistoryR[idx0 + 1]
+                renderedL.append(s0L + (s1L - s0L) * fraction)
+                renderedR.append(s0R + (s1R - s0R) * fraction)
+                pos += ratio
+            }
+
+            let renderedCount = renderedL.count
+            let consumed = min(avail, Int(pos))
+            consumedTotal += consumed
+            resamplePhase = pos - Double(consumed)
+
+            let under = framesRequested - renderedCount
+            if under > 0 {
+                renderedL.append(contentsOf: [Float](repeating: 0.0, count: under))
+                renderedR.append(contentsOf: [Float](repeating: 0.0, count: under))
+            }
+            return (renderedL, renderedR, renderedCount, consumed, resamplePhase)
+        }
+    }
+
+    func testProductionCaller_CoreAudioOutput_render_layouts() {
+        for layout in ProductionTestRenderer.Layout.allCases {
+            let renderer = ProductionTestRenderer(layout: layout, capacity: 1024)
+            let feedCount = 256
+            let inL = (0..<feedCount).map { Float(sin(Double($0) * 0.05)) }
+            let inR = (0..<feedCount).map { Float(cos(Double($0) * 0.05)) }
+            let written = renderer.feed(l: inL, r: inR)
+            XCTAssertEqual(written, feedCount)
+
+            let renderFrames = 128
+            let status = renderer.render(frames: renderFrames, targetFill: 512, ceiling: 1.0)
+            XCTAssertEqual(status, noErr)
+
+            for i in 0..<renderFrames {
+                let (valL, valR) = renderer.values(i)
+                XCTAssertFalse(valL.isNaN)
+                XCTAssertFalse(valR.isNaN)
+                XCTAssertLessThanOrEqual(abs(valL), 1.0001)
+                XCTAssertLessThanOrEqual(abs(valR), 1.0001)
+            }
+        }
+
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 512)
+        defer { ring.deallocate() }
+
+        var dummyBuffer = [Float](repeating: 0, count: 256)
+        dummyBuffer.withUnsafeMutableBufferPointer { ptr in
+            let listPtr = AudioBufferList.allocate(maximumBuffers: 1)
+            defer { free(listPtr.unsafeMutablePointer) }
+            listPtr[0] = AudioBuffer(mNumberChannels: 4, mDataByteSize: 1024, mData: ptr.baseAddress)
+            let status = CoreAudioOutput.render(
+                ring: ring, buffers: listPtr, frames: 64, capacity: 512,
+                targetFill: 256, scratchLeft: nil, scratchRight: nil
+            )
+            XCTAssertEqual(status, kAudioUnitErr_FormatNotSupported)
+        }
+
+        dummyBuffer.withUnsafeMutableBufferPointer { ptr in
+            let listPtr = AudioBufferList.allocate(maximumBuffers: 3)
+            defer { free(listPtr.unsafeMutablePointer) }
+            listPtr[0] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 256, mData: ptr.baseAddress)
+            listPtr[1] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 256, mData: ptr.baseAddress)
+            listPtr[2] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 256, mData: ptr.baseAddress)
+            let status = CoreAudioOutput.render(
+                ring: ring, buffers: listPtr, frames: 64, capacity: 512,
+                targetFill: 256, scratchLeft: nil, scratchRight: nil
+            )
+            XCTAssertEqual(status, kAudioUnitErr_FormatNotSupported)
+        }
+
+        dummyBuffer.withUnsafeMutableBufferPointer { ptr in
+            let listPtr = AudioBufferList.allocate(maximumBuffers: 1)
+            defer { free(listPtr.unsafeMutablePointer) }
+            listPtr[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: 2048, mData: ptr.baseAddress)
+            let status = CoreAudioOutput.render(
+                ring: ring, buffers: listPtr, frames: 1024, capacity: 512,
+                targetFill: 256, scratchLeft: nil, scratchRight: nil
+            )
+            XCTAssertEqual(status, kAudioUnitErr_TooManyFramesToProcess)
+        }
+    }
+
+    func testProductionCaller_oracleAssertions_cursorAndPhase() {
+        let ratios = [0.999, 1.0, 1.001]
+        let initialPhases = [0.0, 0.25, 0.5, 0.75, 0.999]
+        let framesRequested = 8
+        let layouts = ProductionTestRenderer.Layout.allCases
+
+        var cellCount = 0
+        for ratio in ratios {
+            let correction = ratio - 1.0
+            for initialPhase in initialPhases {
+                let lastPos = initialPhase + Double(framesRequested - 1) * ratio
+                let reqFrames = Int(lastPos) + 2
+                let availList = [0, 1, 2, reqFrames, max(0, reqFrames - 1)]
+
+                for avail in availList {
+                    for layout in layouts {
+                        let renderer = ProductionTestRenderer(layout: layout, capacity: 2048)
+                        renderer.ring.setInternalResamplePhase(initialPhase)
+                        renderer.ring.setInternalResampleCorrection(correction)
+
+                        let feedL = avail > 0 ? (0..<avail).map { Float(sin(Double($0) * 0.1) * 0.4) } : []
+                        let feedR = avail > 0 ? (0..<avail).map { Float(cos(Double($0) * 0.1) * 0.4) } : []
+                        if avail > 0 {
+                            _ = renderer.feed(l: feedL, r: feedR)
+                        }
+
+                        let initialRead = renderer.ring.readIndex
+                        let status = renderer.render(frames: framesRequested, targetFill: 512, ceiling: 1.0)
+                        XCTAssertEqual(status, noErr)
+
+                        let actualConsumed = renderer.ring.readIndex - initialRead
+                        let effectiveRatio = 1.0 + renderer.ring.prototypeCorrection
+                        let oracle = ScalarReferenceOracle(ratio: effectiveRatio, initialPhase: initialPhase)
+                        if avail > 0 {
+                            oracle.feed(left: feedL, right: feedR)
+                        }
+                        let oracleResult = oracle.render(framesRequested: framesRequested)
+
+                        XCTAssertEqual(actualConsumed, oracleResult.consumed)
+                        XCTAssertEqual(
+                            renderer.ring.prototypePhase,
+                            oracleResult.newPhase,
+                            accuracy: 1e-7
+                        )
+
+                        var maxDiff = 0.0
+                        var allFinite = true
+                        for i in 0..<framesRequested {
+                            let (valL, valR) = renderer.values(i)
+                            if !valL.isFinite || !valR.isFinite {
+                                allFinite = false
+                            }
+                            let expL = oracleResult.outL[i]
+                            let expR = oracleResult.outR[i]
+                            if layout != .mono {
+                                let diffL = abs(Double(valL) - Double(expL))
+                                let diffR = abs(Double(valR) - Double(expR))
+                                maxDiff = max(maxDiff, diffL, diffR)
+                            } else {
+                                let expMono = (Double(expL) + Double(expR)) * 0.5
+                                let diffMono = abs(Double(valL) - expMono)
+                                maxDiff = max(maxDiff, diffMono)
+                            }
+                        }
+
+                        XCTAssertTrue(allFinite)
+                        XCTAssertLessThanOrEqual(maxDiff, 1e-4)
+
+                        cellCount += 1
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(cellCount, 225)
+
+        let corruptedRenderer = ProductionTestRenderer(layout: .planar, capacity: 512)
+        corruptedRenderer.ring.setInternalResamplePhase(0.25)
+        let feedSample: [Float] = [0.1, 0.2, 0.3, 0.4]
+        _ = corruptedRenderer.feed(l: feedSample, r: feedSample)
+        let initRead = corruptedRenderer.ring.readIndex
+        _ = corruptedRenderer.render(frames: 4, targetFill: 512, ceiling: 1.0)
+        let consumedCorr = corruptedRenderer.ring.readIndex - initRead
+        let oracleGood = ScalarReferenceOracle(
+            ratio: 1.0 + corruptedRenderer.ring.prototypeCorrection,
+            initialPhase: 0.25
+        )
+        oracleGood.feed(left: feedSample, right: feedSample)
+        let expectedGood = oracleGood.render(framesRequested: 4)
+
+        XCTAssertEqual(consumedCorr, expectedGood.consumed)
+        XCTAssertEqual(corruptedRenderer.ring.prototypePhase, expectedGood.newPhase, accuracy: 1e-7)
+
+        let corruptOutputSample = corruptedRenderer.values(0).0 + 0.5
+        let outputCorruptionDiff = abs(Double(corruptOutputSample) - Double(expectedGood.outL[0]))
+        XCTAssertGreaterThan(outputCorruptionDiff, 1e-4)
+
+        let firRenderer = ProductionTestRenderer(layout: .planar, capacity: 2048)
+        let steadySine = (0..<128).map { Float(sin(Double($0) * 0.05)) }
+        _ = firRenderer.feed(l: steadySine, r: steadySine)
+        let firStatus = firRenderer.render(frames: 64, targetFill: 0, ceiling: 1.0)
+        XCTAssertEqual(firStatus, noErr)
+        XCTAssertEqual(firRenderer.ring.readIndex, 64)
+        for i in 0..<64 {
+            let (fl, fr) = firRenderer.values(i)
+            XCTAssertTrue(fl.isFinite && fr.isFinite)
+            XCTAssertEqual(fl, fr, accuracy: 1e-5)
+        }
+    }
+
+    func testProductionCaller_refillPreservationAndStarvation() {
+        let ring = SPSCRingBuffer()
+        ring.allocate(capacityFrames: 256)
+        defer { ring.deallocate() }
+
+        let ramp1: [Float] = [10, 11, 12, 13, 14]
+        _ = ring.write(inL: ramp1, inR: ramp1, frameCount: 5)
+        var outL1 = [Float](repeating: 0, count: 8)
+        var outR1 = [Float](repeating: 0, count: 8)
+        ring.readNonInterleavedResampled(outL: &outL1, outR: &outR1, framesRequested: 8, targetFillFrames: 512)
+
+        XCTAssertEqual(ring.readIndex, 4)
+        XCTAssertEqual(ring.availableForReading, 1)
+
+        let ramp2: [Float] = [20, 21, 22, 23, 24]
+        _ = ring.write(inL: ramp2, inR: ramp2, frameCount: 5)
+        var outL2 = [Float](repeating: 0, count: 4)
+        var outR2 = [Float](repeating: 0, count: 4)
+        ring.readNonInterleavedResampled(outL: &outL2, outR: &outR2, framesRequested: 4, targetFillFrames: 512)
+
+        XCTAssertLessThan(outL2[0], 19.999)
+        XCTAssertGreaterThan(outL2[0], 13.9)
+
+        let ringPhase = SPSCRingBuffer()
+        ringPhase.allocate(capacityFrames: 256)
+        defer { ringPhase.deallocate() }
+        ringPhase.setInternalResamplePhase(0.75)
+        _ = ringPhase.write(inL: [0.1, 0.2], inR: [0.1, 0.2], frameCount: 2)
+        var starveL = [Float](repeating: 0, count: 8)
+        var starveR = [Float](repeating: 0, count: 8)
+        ringPhase.readNonInterleavedResampled(outL: &starveL, outR: &starveR, framesRequested: 8, targetFillFrames: 512)
+        XCTAssertGreaterThan(ringPhase.prototypePhase, 0.0)
+
+        let invalidRenderer = ProductionTestRenderer(layout: .planar, capacity: 512)
+        _ = invalidRenderer.render(frames: 64, targetFill: 256, ceiling: 1.0)
+        let invalidStatus = invalidRenderer.list.unsafeMutablePointer.withMemoryRebound(
+            to: AudioBufferList.self,
+            capacity: 1
+        ) { ablPtr in
+            ablPtr.pointee.mBuffers.mData = nil
+            return CoreAudioOutput.render(
+                ring: invalidRenderer.ring, buffers: invalidRenderer.list, frames: 64, capacity: 512,
+                targetFill: 256, scratchLeft: invalidRenderer.left, scratchRight: invalidRenderer.right
+            )
+        }
+        XCTAssertEqual(invalidStatus, kAudio_ParamError)
+    }
+
+    func testProductionCaller_boundaryWrapAndHistoryAcrossBlocks() {
+        let renderer = ProductionTestRenderer(layout: .planar, capacity: 1024)
+
+        let blockSize = 256
+        let prefill = [Float](repeating: 0.1, count: 256)
+        _ = renderer.feed(l: prefill, r: prefill)
+
+        var totalRead = 0
+        for block in 0..<10 {
+            let feedL = (0..<blockSize).map { Float($0 + block * blockSize) }
+            let feedR = feedL
+            let w = renderer.feed(l: feedL, r: feedR)
+            XCTAssertEqual(w, blockSize)
+
+            let status = renderer.render(frames: blockSize, targetFill: 256, ceiling: 10000.0)
+            XCTAssertEqual(status, noErr)
+            totalRead += blockSize
+            XCTAssertEqual(renderer.ring.readIndex, totalRead)
+        }
+
+        renderer.ring.reset()
+        let audioBlock1 = (0..<128).map { Float(sin(Double($0) * 0.2)) }
+        _ = renderer.feed(l: audioBlock1, r: audioBlock1)
+        let st1 = renderer.render(frames: 64, targetFill: 64, ceiling: 1.0)
+        XCTAssertEqual(st1, noErr)
+        XCTAssertEqual(renderer.ring.readIndex, 64)
+
+        let audioBlock2 = (128..<192).map { Float(sin(Double($0) * 0.2)) }
+        _ = renderer.feed(l: audioBlock2, r: audioBlock2)
+        let st2 = renderer.render(frames: 64, targetFill: 64, ceiling: 1.0)
+        XCTAssertEqual(st2, noErr)
+        XCTAssertEqual(renderer.ring.readIndex, 128)
+
+        for i in 0..<64 {
+            let (l, r) = renderer.values(i)
+            XCTAssertFalse(l.isNaN)
+            XCTAssertFalse(r.isNaN)
+            XCTAssertLessThanOrEqual(abs(l), 1.0001)
+        }
+    }
+
+    func testProductionCaller_starvationRefillAndDriftTrajectory() {
+        let renderer = ProductionTestRenderer(layout: .interleaved, capacity: 2048)
+
+        for cycle in 0..<10 {
+            let burstCount = 40
+            let burstAudio = (0..<burstCount).map { Float(cos(Double($0) * 0.05 + Double(cycle))) }
+            _ = renderer.feed(l: burstAudio, r: burstAudio)
+
+            let status = renderer.render(frames: 80, targetFill: 40, ceiling: 1.0)
+            XCTAssertEqual(status, noErr)
+
+            for i in 40..<80 {
+                let (valL, valR) = renderer.values(i)
+                XCTAssertEqual(valL, 0.0, accuracy: 1e-6)
+                XCTAssertEqual(valR, 0.0, accuracy: 1e-6)
+            }
+        }
+
+        renderer.ring.reset()
+        for step in 0..<50 {
+            let driftRatio = sin(Double(step) * 0.1) * 0.001
+            renderer.ring.setInternalResampleCorrection(driftRatio)
+            let block = (0..<64).map { Float(sin(Double($0) * 0.1)) }
+            _ = renderer.feed(l: block, r: block)
+            let status = renderer.render(frames: 64, targetFill: 512, ceiling: 1.0)
+            XCTAssertEqual(status, noErr)
+        }
+        XCTAssertTrue(renderer.ring.readIndex > 0)
+    }
+
+    func testOutputCeilingRetainsAppliedConfigurationAcrossDirectFallbackAndBypass() {
+        let engine = CoreAudioEngine()
+        defer { engine.clearEQ() }
+        engine.rebuildActiveEQFilter(sampleRate: 48000)
+        engine.applyFixedBandEQ([Float](repeating: 0, count: 10), outputBoost: 6)
+        let filters = [AutoEQSourceFilter(frequency: 16000, gain: 0, q: 20, type: .notch)]
+        XCTAssertNotNil(engine.applyDirectEQ(
+            filters, preamp: 0, outputBoost: 6, calibrationBands: [], calibrationPreamp: 0
+        ))
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-6)
+
+        engine.rebuildActiveEQFilter(sampleRate: 32000)
+        XCTAssertFalse(engine.isDirectEQAvailable)
+        XCTAssertEqual(engine.activeCeiling, 1, accuracy: 1e-6)
+        engine.setEnabled(false)
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.activeCeiling, 1, accuracy: 1e-6)
+
+        engine.rebuildActiveEQFilter(sampleRate: 96000)
+        XCTAssertTrue(engine.isDirectEQAvailable)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-6)
+        engine.setEnabled(false)
+        engine.applyFixedBandEQ([Float](repeating: 0, count: 10), outputBoost: 0)
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.activeCeiling, 1, accuracy: 1e-6)
+
+        engine.setEnabled(false)
+        engine.applyGraphicEQ31([Float](repeating: 0, count: 31), outputBoost: 3)
+        XCTAssertEqual(engine.activeCeiling, 1, accuracy: 1e-6)
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-6)
+    }
+
+    func testProductionCaller_outputCeiling_togglesAndDistortion() {
+        let engine = CoreAudioEngine()
+
+        let flat10 = [Float](repeating: 0, count: 10)
+        engine.applyFixedBandEQ(flat10, preamp: 0.0, outputBoost: 0.0)
+        XCTAssertEqual(engine.activeCeiling, 1.0, accuracy: 1e-5)
+
+        engine.applyFixedBandEQ(flat10, preamp: 0.0, outputBoost: 3.0)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-5)
+
+        engine.isEnabled = false
+        XCTAssertEqual(engine.activeCeiling, 1.0, accuracy: 1e-5)
+
+        let renderer = ProductionTestRenderer(layout: .planar, capacity: 512)
+        let passThruAudio: [Float] = (0..<128).map { _ in 0.95 }
+        _ = renderer.feed(l: passThruAudio, r: passThruAudio)
+        _ = renderer.render(frames: 128, targetFill: 128, ceiling: engine.activeCeiling)
+        for i in 0..<128 {
+            let (l, r) = renderer.values(i)
+            XCTAssertEqual(l, 0.95, accuracy: 1e-4)
+            XCTAssertEqual(r, 0.95, accuracy: 1e-4)
+        }
+
+        engine.isEnabled = true
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-5)
+
+        renderer.ring.reset()
+        _ = renderer.feed(l: passThruAudio, r: passThruAudio)
+        _ = renderer.render(frames: 128, targetFill: 128, ceiling: engine.activeCeiling)
+        for i in 0..<128 {
+            let (l, r) = renderer.values(i)
+            XCTAssertLessThanOrEqual(l, 0.8912509 + 1e-6)
+            XCTAssertLessThanOrEqual(r, 0.8912509 + 1e-6)
+        }
+
+        let flat31 = [Float](repeating: 0, count: 31)
+        engine.applyGraphicEQ31(flat31, preamp: 0.0, outputBoost: 6.0)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-5)
+
+        engine.setEnabled(false)
+        XCTAssertEqual(engine.activeCeiling, 1.0, accuracy: 1e-5)
+
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-5)
+
+        let rejectedResult = engine.applyDirectEQ(
+            [], preamp: Float.nan, outputBoost: 10.0,
+            calibrationBands: [], calibrationPreamp: 0.0
+        )
+        XCTAssertNil(rejectedResult)
+        XCTAssertEqual(engine.activeCeiling, 0.8912509, accuracy: 1e-5)
+
+        engine.clearEQ()
+        XCTAssertEqual(engine.activeCeiling, 1.0, accuracy: 1e-5)
+        engine.rebuildActiveEQFilter(sampleRate: 48000)
+        XCTAssertNil(engine.vdspFilter)
+        engine.setEnabled(false)
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.activeCeiling, 1.0, accuracy: 1e-5)
+        engine.clearEQ()
+
+        let subThresh: [Float] = (0..<128).map { _ in 0.5 }
+        _ = renderer.feed(l: subThresh, r: subThresh)
+        _ = renderer.render(frames: 128, targetFill: 0, ceiling: 0.8912509)
+        for i in 0..<128 {
+            let (l, r) = renderer.values(i)
+            XCTAssertEqual(l, 0.5, accuracy: 0.01)
+            XCTAssertEqual(r, 0.5, accuracy: 0.01)
+        }
+
+        renderer.ring.reset()
+        let overThresh: [Float] = (0..<128).map { _ in 1.5 }
+        _ = renderer.feed(l: overThresh, r: overThresh)
+        _ = renderer.render(frames: 128, targetFill: 0, ceiling: 0.8912509)
+
+        var totalClippingError: Float = 0
+        for i in 0..<128 {
+            let (l, r) = renderer.values(i)
+            XCTAssertLessThanOrEqual(l, 0.8912509 + 1e-6)
+            XCTAssertLessThanOrEqual(r, 0.8912509 + 1e-6)
+            totalClippingError += abs(l - 0.8912509)
+        }
+        XCTAssertEqual(totalClippingError, 0.0, accuracy: 1e-4)
+
+        let invalidCeilingRenderer = ProductionTestRenderer(layout: .planar, capacity: 512)
+        let dummyAudio = [Float](repeating: 0.1, count: 64)
+        _ = invalidCeilingRenderer.feed(l: dummyAudio, r: dummyAudio)
+
+        let nanStatus = invalidCeilingRenderer.render(frames: 64, targetFill: 64, ceiling: Float.nan)
+        XCTAssertEqual(nanStatus, kAudio_ParamError)
+
+        let negStatus = invalidCeilingRenderer.render(frames: 64, targetFill: 64, ceiling: -1.0)
+        XCTAssertEqual(negStatus, kAudio_ParamError)
+
+        let zeroStatus = invalidCeilingRenderer.render(frames: 64, targetFill: 64, ceiling: 0.0)
+        XCTAssertEqual(zeroStatus, kAudio_ParamError)
+    }
+
+    func testProductionCaller_lifecycleAndFailureInjection() {
+        let ring = SPSCRingBuffer()
+
+        ring.allocate(capacityFrames: 256)
+        XCTAssertEqual(ring.capacity, 1024)
+        ring.allocate(capacityFrames: 2048)
+        XCTAssertEqual(ring.capacity, 2048)
+
+        _ = ring.write(inL: [0.1, 0.2], inR: [0.1, 0.2], frameCount: 2)
+        XCTAssertEqual(ring.availableForReading, 2)
+        ring.reset()
+        XCTAssertEqual(ring.availableForReading, 0)
+        XCTAssertEqual(ring.readIndex, 0)
+        XCTAssertEqual(ring.writeIndex, 0)
+        ring.deallocate()
+
+        let engine = CoreAudioEngine()
+        engine.stop()
+        XCTAssertFalse(engine.isRunning)
+    }
+
+    func testProductionCaller_acceptanceData_quantitativeBenchmarks() {
+        let renderer = ProductionTestRenderer(layout: .planar, capacity: 2048)
+        let blockSizes = [64, 128, 512]
+
+        for blockSize in blockSizes {
+            let iterations = 100
+            let audio = (0..<blockSize).map { Float(sin(Double($0) * 0.05)) }
+            var executionTimesNanos: [UInt64] = []
+
+            for _ in 0..<iterations {
+                _ = renderer.feed(l: audio, r: audio)
+                let start = mach_absolute_time()
+                _ = renderer.render(frames: blockSize, targetFill: 512, ceiling: 1.0)
+                let end = mach_absolute_time()
+                executionTimesNanos.append(end - start)
+            }
+
+            executionTimesNanos.sort()
+            let p50Nanos = executionTimesNanos[iterations / 2]
+            let p99Nanos = executionTimesNanos[Int(Double(iterations) * 0.99)]
+
+            let deadlineNanos = UInt64(Double(blockSize) / 48000.0 * 1e9)
+            let p99FractionOfDeadline = Double(p99Nanos) / Double(deadlineNanos)
+
+            XCTAssertLessThan(p99FractionOfDeadline, 0.10)
+            XCTAssertGreaterThan(p50Nanos, 0)
+        }
+
+        renderer.ring.reset()
+        XCTAssertEqual(renderer.ring.availableForReading, 0)
     }
 }
