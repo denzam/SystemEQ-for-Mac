@@ -13,24 +13,42 @@ import Darwin
 import Foundation
 
 enum RealtimeThread {
-    /// Promote the calling thread to time-constraint scheduling.
-    /// Safe to call multiple times — the kernel simply overwrites the policy.
-    /// - Parameters:
-    ///   - periodSec: Expected callback period (e.g. 512 frames @ 48 kHz ≈ 0.0107 s).
-    ///   - computationSec: Time we expect to spend processing per callback.
-    ///   - constraintSec: Deadline after which the callback must complete.
+    struct PreparedTimebase: Sendable, Equatable {
+        let status: kern_return_t
+        let ticksPerSec: Double
+
+        init(status: kern_return_t, ticksPerSec: Double) {
+            self.status = status
+            self.ticksPerSec = ticksPerSec
+        }
+    }
+
+    static func prepareTimebase() -> PreparedTimebase {
+        var timebase = mach_timebase_info_data_t()
+        let timebaseStatus = mach_timebase_info(&timebase)
+        guard timebaseStatus == KERN_SUCCESS else {
+            return PreparedTimebase(status: timebaseStatus, ticksPerSec: 0)
+        }
+        guard timebase.numer > 0, timebase.denom > 0 else {
+            return PreparedTimebase(status: KERN_INVALID_ARGUMENT, ticksPerSec: 0)
+        }
+        let ticksPerSec = Double(timebase.denom) / Double(timebase.numer) * 1_000_000_000.0
+        guard ticksPerSec.isFinite, ticksPerSec > 0 else {
+            return PreparedTimebase(status: KERN_INVALID_ARGUMENT, ticksPerSec: 0)
+        }
+        return PreparedTimebase(status: KERN_SUCCESS, ticksPerSec: ticksPerSec)
+    }
+
     @discardableResult
     static func promoteCurrentThread(
+        timebase: PreparedTimebase,
         periodSec: Double,
         computationSec: Double,
         constraintSec: Double
     ) -> kern_return_t {
-        var timebase = mach_timebase_info_data_t()
-        let timebaseStatus = mach_timebase_info(&timebase)
-        guard timebaseStatus == KERN_SUCCESS else { return timebaseStatus }
-        guard timebase.numer > 0, timebase.denom > 0 else { return KERN_INVALID_ARGUMENT }
-        // Convert seconds → mach absolute units (ticks).
-        let ticksPerSec = Double(timebase.denom) / Double(timebase.numer) * 1_000_000_000.0
+        guard timebase.status == KERN_SUCCESS else { return timebase.status }
+        let ticksPerSec = timebase.ticksPerSec
+        guard ticksPerSec > 0 else { return KERN_INVALID_ARGUMENT }
         guard let period = UInt32(exactly: (periodSec * ticksPerSec).rounded(.towardZero)),
               let computation = UInt32(exactly: (computationSec * ticksPerSec).rounded(.towardZero)),
               let constraint = UInt32(exactly: (constraintSec * ticksPerSec).rounded(.towardZero)),
@@ -60,5 +78,26 @@ enum RealtimeThread {
         }
         let releaseStatus = mach_port_deallocate(mach_task_self_, thread)
         return policyStatus == KERN_SUCCESS ? releaseStatus : policyStatus
+    }
+
+    /// Promote the calling thread to time-constraint scheduling.
+    /// Safe to call multiple times — the kernel simply overwrites the policy.
+    /// - Parameters:
+    ///   - periodSec: Expected callback period (e.g. 512 frames @ 48 kHz ≈ 0.0107 s).
+    ///   - computationSec: Time we expect to spend processing per callback.
+    ///   - constraintSec: Deadline after which the callback must complete.
+    @discardableResult
+    static func promoteCurrentThread(
+        periodSec: Double,
+        computationSec: Double,
+        constraintSec: Double
+    ) -> kern_return_t {
+        let prepared = prepareTimebase()
+        return promoteCurrentThread(
+            timebase: prepared,
+            periodSec: periodSec,
+            computationSec: computationSec,
+            constraintSec: constraintSec
+        )
     }
 }

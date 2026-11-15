@@ -568,6 +568,17 @@ public final class CoreAudioEngine: ObservableObject {
     private let diagnosticNativeOutputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticTestToneOutputSeen = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticTestToneDeviceBufferSeen = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let inputPromotionStatusAtomic = CoreAudioEngine.makePromotionStatus()
+    fileprivate let outputPromotionStatusAtomic = CoreAudioEngine.makePromotionStatus()
+    fileprivate var preparedTimebase = RealtimeThread.prepareTimebase()
+
+    var inputPromotionStatus: Int64 {
+        seq_atomic_int64_load_acquire(inputPromotionStatusAtomic)
+    }
+
+    var outputPromotionStatus: Int64 {
+        seq_atomic_int64_load_acquire(outputPromotionStatusAtomic)
+    }
     private var callbackWindow: AudioCallbackWindow?
     fileprivate var lastOutSampleTimes: [Double] = []
     fileprivate var lastInSampleTimes: [Double] = []
@@ -946,6 +957,14 @@ public final class CoreAudioEngine: ObservableObject {
 
     public static let shared = CoreAudioEngine()
 
+    private static let promotionStatusNotAttempted = Int64(Int32.min)
+
+    private static func makePromotionStatus() -> UnsafeMutablePointer<SEQAtomicInt64> {
+        let pointer = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
+        seq_atomic_int64_init(pointer, promotionStatusNotAttempted)
+        return pointer
+    }
+
     private static func makeDiagnosticCounter() -> UnsafeMutablePointer<SEQAtomicInt64> {
         let pointer = UnsafeMutablePointer<SEQAtomicInt64>.allocate(capacity: 1)
         seq_atomic_int64_init(pointer, 0)
@@ -1241,6 +1260,8 @@ public final class CoreAudioEngine: ObservableObject {
         diagnosticNativeOutputCallbacks.deallocate()
         diagnosticTestToneOutputSeen.deallocate()
         diagnosticTestToneDeviceBufferSeen.deallocate()
+        inputPromotionStatusAtomic.deallocate()
+        outputPromotionStatusAtomic.deallocate()
     }
 
     // MARK: - Setup
@@ -2009,6 +2030,9 @@ public final class CoreAudioEngine: ObservableObject {
         ] {
             seq_atomic_int64_store_release(counter, 0)
         }
+        seq_atomic_int64_store_release(inputPromotionStatusAtomic, Self.promotionStatusNotAttempted)
+        seq_atomic_int64_store_release(outputPromotionStatusAtomic, Self.promotionStatusNotAttempted)
+        preparedTimebase = RealtimeThread.prepareTimebase()
         callbackWindow?.reset()
         ringBuffer.reset()
         ringBuffer.primeSilence(frames: 1024)
@@ -2180,6 +2204,8 @@ public final class CoreAudioEngine: ObservableObject {
         // Re-promote callback threads on next start (they may be new threads).
         didPromoteInputThread = false
         didPromoteOutputThread = false
+        seq_atomic_int64_store_release(inputPromotionStatusAtomic, Self.promotionStatusNotAttempted)
+        seq_atomic_int64_store_release(outputPromotionStatusAtomic, Self.promotionStatusNotAttempted)
 
         peakMeter.resetToZero()
         ringBuffer.reset()
@@ -2244,6 +2270,8 @@ public final class CoreAudioEngine: ObservableObject {
         return summary + "\n" + """
         Input callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticInputCallbacks))
         Output callbacks in current run: \(seq_atomic_int64_load_acquire(diagnosticOutputCallbacks))
+        Input thread priority promotion: \(Self.promotionStatusDescription(seq_atomic_int64_load_acquire(inputPromotionStatusAtomic)))
+        Output thread priority promotion: \(Self.promotionStatusDescription(seq_atomic_int64_load_acquire(outputPromotionStatusAtomic)))
         Input callbacks in approximately the last 60 seconds: \(recent?.input ?? 0)
         Output callbacks in approximately the last 60 seconds: \(recent?.output ?? 0)
         Last input callback: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastInputCallback), now: now))
@@ -2263,6 +2291,16 @@ public final class CoreAudioEngine: ObservableObject {
         Last overrun: \(Self.ageDescription(Int64(bitPattern: lifetime.lastOverrun), now: now))
         Export resets interval counters. Fill is a last-read snapshot, not measured end-to-end latency.
         """
+    }
+
+    static func promotionStatusDescription(_ rawValue: Int64) -> String {
+        if rawValue == promotionStatusNotAttempted {
+            return "not attempted"
+        }
+        if rawValue == 0 {
+            return "success (0)"
+        }
+        return "failed (\(rawValue))"
     }
 
     static func ageDescription(_ timestamp: Int64, now: UInt64) -> String {
@@ -3230,11 +3268,13 @@ private func renderCallbackFunction(
     if !engine.didPromoteOutputThread, inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity {
         engine.didPromoteOutputThread = true
         let period = Double(inNumberFrames) / engine.currentSampleRate
-        RealtimeThread.promoteCurrentThread(
+        let status = RealtimeThread.promoteCurrentThread(
+            timebase: engine.preparedTimebase,
             periodSec: period,
             computationSec: period * 0.5,
             constraintSec: period * 0.85
         )
+        seq_atomic_int64_store_release(engine.outputPromotionStatusAtomic, Int64(status))
     }
 
     // Ensure ioData buffers have valid memory (fallback to preallocated buffers)
@@ -3317,11 +3357,13 @@ private func inputCaptureCallbackFunction(
     if !engine.didPromoteInputThread, inNumberFrames > 0, inNumberFrames <= engine.allocatedFrameCapacity {
         engine.didPromoteInputThread = true
         let period = Double(inNumberFrames) / engine.currentSampleRate
-        RealtimeThread.promoteCurrentThread(
+        let status = RealtimeThread.promoteCurrentThread(
+            timebase: engine.preparedTimebase,
             periodSec: period,
             computationSec: period * 0.5,
             constraintSec: period * 0.85
         )
+        seq_atomic_int64_store_release(engine.inputPromotionStatusAtomic, Int64(status))
     }
     let tsIn = inTimeStamp.pointee
 
