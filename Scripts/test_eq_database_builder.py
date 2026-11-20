@@ -126,20 +126,22 @@ class EQDatabaseBuilderTests(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT brand, model, source FROM headphones_fts WHERE headphones_fts MATCH ?",
                            ('"Alpagan" AND "Barut"',)).fetchall(),
-                [("Beyerdynamic", "DT 770 PRO X", "Alpagan Barut")],
+                [("Beyerdynamic", "DT 770 Pro X", "Alpagan Barut")],
             )
             preset_id, source, author, name, preamp = db.execute(
                 "SELECT id, source, author, target_curve, preamp_gain FROM presets WHERE source='community'"
             ).fetchone()
             self.assertEqual((source, author, name, preamp),
-                             ("community", "Alpagan Barut", "Reference Hi-Fi v2 (2025 standard model, 48 Ω)", -2.0))
+                             ("community", "Alpagan Barut", "Music listening (2025 standard model, 48 Ω)", -2.0))
             bands = db.execute(
                 "SELECT filter_type,frequency,gain,q_factor FROM parametric_bands WHERE preset_id=? ORDER BY band_index",
                 (preset_id,),
             ).fetchall()
             self.assertEqual([(kind, freq, round(gain, 2), round(q, 2)) for kind, freq, gain, q in bands], [
-                ("LS", 95, -0.8, 0.71), ("PK", 220, 1.3, 1.2), ("PK", 3300, 0.8, 1.15),
-                ("PK", 6500, -2.5, 2), ("HS", 10500, -0.8, 0.71),
+                ("LS", 55, 0.45, 0.71), ("PK", 115, -1.1, 1.4), ("PK", 235, 1.1, 1.55),
+                ("PK", 1550, 0.3, 1.1), ("PK", 3100, 1.05, 1.25), ("PK", 4400, 0.95, 2.1),
+                ("PK", 5600, -0.65, 2.3), ("PK", 6500, -2.55, 2.15),
+                ("PK", 10500, -1.65, 2.05), ("HS", 14200, -0.3, 0.71),
             ])
             self.assertEqual(db.execute("SELECT count(*) FROM presets WHERE source='source'").fetchone(), (1,))
 
