@@ -200,6 +200,8 @@ SystemEQ for Mac/
 3. Clicca "⚡ Quick Import"
 4. Regola il boost dei bassi se necessario
 
+Puoi includere nella ricerca anche il nome dell’autore del preset, ad esempio `Beyerdynamic DT 770 Pro X Alpagan Barut`. Questo preset della community è per il modello standard del 2025 (48 Ω).
+
 ### Calibrazione
 
 1. Esegui il test dell'udito (31 frequenze)
