@@ -47,7 +47,7 @@ class EQDatabaseBuilderTests(unittest.TestCase):
         self.parametric = self.inputs / "Acme Model ParametricEQ.txt"
         self.fixed.write_text(self.fixed_text())
         centers = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630,
-                   800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000]
+                   800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 19871]
         self.graphic.write_text("GraphicEQ: " + "; ".join(f"{f} -1" for f in centers))
         self.parametric.write_text("Preamp: -2 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7\n")
         self.entry = dict(brand="Acme", model="Model", source="source", type="over-ear")
@@ -76,10 +76,10 @@ class EQDatabaseBuilderTests(unittest.TestCase):
     def state(path):
         return hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns
 
-    def run_builder(self, binary=None):
+    def run_builder(self, binary=None, *arguments):
         return subprocess.run(
             [str(binary or self.builder), "--index", str(self.index), "--autoeq-root", str(self.autoeq),
-             "--output", str(self.database)], cwd=self.work, capture_output=True, text=True, timeout=30,
+             "--output", str(self.database), *arguments], cwd=self.work, capture_output=True, text=True, timeout=30,
         )
 
     def run_indexer(self, *arguments):
@@ -88,9 +88,9 @@ class EQDatabaseBuilderTests(unittest.TestCase):
             cwd=self.work, capture_output=True, text=True, timeout=30,
         )
 
-    def assert_builder_rejected(self, binary=None):
+    def assert_builder_rejected(self, binary=None, *arguments):
         before = self.state(self.database)
-        result = self.run_builder(binary)
+        result = self.run_builder(binary, *arguments)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.state(self.database), before)
         self.assertFalse(list(self.work.glob(".EQDatabase-*")))
@@ -117,6 +117,48 @@ class EQDatabaseBuilderTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT brand FROM headphones_fts WHERE headphones_fts MATCH 'Acme'").fetchone(), ("Acme",))
             self.assertEqual(db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone(), ("1",))
             self.assertEqual(db.execute("SELECT preamp_gain FROM presets").fetchone(), (-2.0,))
+
+    def test_community_preset_is_searchable_and_preserves_the_source_filters(self):
+        manifest = self.root / "Scripts/CommunityPresets/index.json"
+        result = self.run_builder(None, "--community-index", str(manifest))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with closing(sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)) as db:
+            self.assertEqual(
+                db.execute("SELECT brand, model, source FROM headphones_fts WHERE headphones_fts MATCH ?",
+                           ('"Alpagan" AND "Barut"',)).fetchall(),
+                [("Beyerdynamic", "DT 770 PRO X", "Alpagan Barut")],
+            )
+            preset_id, source, author, name, preamp = db.execute(
+                "SELECT id, source, author, target_curve, preamp_gain FROM presets WHERE source='community'"
+            ).fetchone()
+            self.assertEqual((source, author, name, preamp),
+                             ("community", "Alpagan Barut", "Reference Hi-Fi v2 (2025 standard model, 48 Ω)", -2.0))
+            bands = db.execute(
+                "SELECT filter_type,frequency,gain,q_factor FROM parametric_bands WHERE preset_id=? ORDER BY band_index",
+                (preset_id,),
+            ).fetchall()
+            self.assertEqual([(kind, freq, round(gain, 2), round(q, 2)) for kind, freq, gain, q in bands], [
+                ("LS", 95, -0.8, 0.71), ("PK", 220, 1.3, 1.2), ("PK", 3300, 0.8, 1.15),
+                ("PK", 6500, -2.5, 2), ("HS", 10500, -0.8, 0.71),
+            ])
+            self.assertEqual(db.execute("SELECT count(*) FROM presets WHERE source='source'").fetchone(), (1,))
+
+    def test_invalid_community_input_preserves_database(self):
+        profile = self.work / "profile.txt"
+        profile.write_bytes(self.parametric.read_bytes())
+        manifest = self.work / "community.json"
+        entry = dict(brand="Example", model="Model", type="over-ear", author="Author",
+                     name="Reference", file=profile.name)
+        cases = (b"invalid json", json.dumps([entry, entry]).encode(),
+                 json.dumps([dict(entry, file="../profile.txt")]).encode(),
+                 json.dumps([dict(entry, file="missing.txt")]).encode())
+        for payload in cases:
+            with self.subTest(payload=payload):
+                manifest.write_bytes(payload)
+                self.assert_builder_rejected(None, "--community-index", str(manifest))
+        manifest.write_text(json.dumps([entry]))
+        profile.write_text("Filter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7")
+        self.assert_builder_rejected(None, "--community-index", str(manifest))
 
     def test_missing_malformed_empty_index_preserves_database(self):
         for value in (b"", b"[]", b"not json", b"\xff", b"{}"):

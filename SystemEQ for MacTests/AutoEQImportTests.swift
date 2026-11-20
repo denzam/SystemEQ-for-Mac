@@ -201,6 +201,39 @@ final class AutoEQImportTests: XCTestCase {
         return 10 * log10(output / reference)
     }
 
+    func testCommunityDatabaseImportUsesTheDeclaredPreamp() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("community.sqlite")
+        var writer: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
+        defer { if let writer { sqlite3_close(writer) } }
+        let sql = """
+        CREATE TABLE headphones(id INTEGER PRIMARY KEY, brand TEXT, model TEXT, type TEXT, source TEXT);
+        CREATE TABLE presets(id INTEGER PRIMARY KEY, headphone_id INTEGER, source TEXT, author TEXT, target_curve TEXT, preamp_gain REAL, is_hand_crafted INTEGER, is_recommended INTEGER);
+        CREATE TABLE parametric_bands(preset_id INTEGER,band_index INTEGER,filter_type TEXT,frequency REAL,gain REAL,q_factor REAL);
+        CREATE VIRTUAL TABLE headphones_fts USING fts5(brand,model,type,source,content='headphones',content_rowid='id');
+        INSERT INTO headphones VALUES(1,'Beyerdynamic','DT 770 PRO X','over-ear','Alpagan Barut');
+        INSERT INTO headphones VALUES(2,'Beyerdynamic','DT 770 PRO X Limited Edition','over-ear','oratory1990');
+        INSERT INTO headphones_fts(headphones_fts) VALUES('rebuild');
+        INSERT INTO presets VALUES(1,1,'community','Alpagan Barut','Reference Hi-Fi v2',-2,1,0);
+        INSERT INTO parametric_bands VALUES(1,0,'PK',220,1.3,1.2);
+        """
+        XCTAssertEqual(sqlite3_exec(writer, sql, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_close(writer), SQLITE_OK)
+        writer = nil
+
+        let service = AutoEQDatabaseService(database: EQDatabase(databaseURL: url))
+        XCTAssertEqual(service.search("Alpagan Barut").map(\.id), [1])
+        let candidate = try XCTUnwrap(service.search("Beyerdynamic DT 770 PRO X Alpagan Barut").first)
+        XCTAssertEqual(candidate.id, 1)
+        let imported = try service.loadCanonical(headphoneID: candidate.id)
+        XCTAssertFalse(imported.input.legacyPreamp)
+        let fitted = try EQConverter(sampleRate: 48000).prepare(imported.input)
+        XCTAssertEqual(fitted.thirtyOne.preamp, -2)
+    }
+
     func testMissingCanonicalTableAndInvalidRowsAreNotLegacyFallbackSuccess() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -772,11 +772,11 @@ struct AutoEQView: View {
     }
 
     private func offlineSearch(_ query: String) -> [SearchCandidate] {
-        let q = sanitize(query)
-        let t = tokens(q)
+        let q = Self.sanitize(query)
+        let t = Self.tokens(q)
         guard !offlineIndex.isEmpty, !t.isEmpty else { return [] }
         func match(entry: OfflineIndexEntry) -> Bool {
-            let combined = sanitize(entry.brand + " " + entry.model)
+            let combined = Self.sanitize(entry.brand + " " + entry.model)
             return t.allSatisfy { combined.contains($0) }
         }
         let hits = offlineIndex.filter { match(entry: $0) }
@@ -1105,13 +1105,13 @@ struct AutoEQView: View {
         presetState.bandMode == .ten ? localization.localized(.bands10) : localization.localized(.bands31)
     }
 
-    private func sanitize(_ s: String) -> String {
+    private static func sanitize(_ s: String) -> String {
         let lower = s.lowercased()
         let allowed = lower.filter { $0.isLetter || $0.isNumber || $0 == " " || $0 == "/" }
         return allowed.replacingOccurrences(of: "  ", with: " ")
     }
 
-    private func tokens(_ s: String) -> [String] {
+    private static func tokens(_ s: String) -> [String] {
         sanitize(s).split(separator: " ").map(String.init)
     }
 
@@ -1122,10 +1122,10 @@ struct AutoEQView: View {
     }
 
     private func rank(_ input: [SearchCandidate], query: String) -> [SearchCandidate] {
-        let q = sanitize(query)
+        let q = Self.sanitize(query)
         let queryTokens = q.split(separator: " ").map(String.init)
         let scored = input.map { candidate in
-            let sanitizedCandidate = sanitize(candidate.display + " " + candidate.path)
+            let sanitizedCandidate = Self.sanitize(candidate.display + " " + candidate.path)
             var score = 0
             for token in queryTokens {
                 if sanitizedCandidate.contains(token) { score += 2 }
@@ -1341,21 +1341,27 @@ struct AutoEQView: View {
             : offlineSearch(normalizedQuery)
         let rankedCandidates = rank(searchResults, query: normalizedQuery)
 
-        guard !rankedCandidates.isEmpty else {
+        guard let bestMatch = Self.quickImportCandidate(rankedCandidates, query: normalizedQuery) else {
             searchError = "❌ No headphones found for '\(searchQuery)'\n\nTry:\n• Different spelling\n• Brand name (e.g. 'Sennheiser HD 600')"
             return
         }
 
-        let oratoryMatch = rankedCandidates.first {
-            Self.databaseSource(from: $0)?.localizedCaseInsensitiveContains("oratory") == true
-        }
-        guard let bestMatch = oratoryMatch ?? rankedCandidates.first else {
-            searchError = "No valid match found"
-            return
+        importCandidate(bestMatch)
+    }
+
+    static func quickImportCandidate(_ ranked: [SearchCandidate], query: String) -> SearchCandidate? {
+        let queryTokens = tokens(query)
+        if let exact = ranked.first(where: { tokens($0.display) == queryTokens }) {
+            return exact
         }
 
-        // Import the preset
-        importCandidate(bestMatch)
+        let exactModels = ranked.filter { candidate in
+            guard let identity = databaseIdentity(from: candidate.path) else { return false }
+            return tokens("\(identity.brand) \(identity.model)") == queryTokens
+        }
+        let matches = exactModels.isEmpty ? ranked : exactModels
+        return matches.first { databaseSource(from: $0)?.localizedCaseInsensitiveContains("oratory") == true }
+            ?? matches.first
     }
 
     @MainActor
