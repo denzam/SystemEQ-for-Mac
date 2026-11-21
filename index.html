@@ -708,6 +708,7 @@
     letter-spacing: -0.01em;
   }
   .install-step p { color: var(--text-dim); font-size: 14px; line-height: 1.55; }
+  .install-step p a { color: var(--accent); text-decoration: underline; text-underline-offset: 0.15em; }
   code {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     background: rgba(255,255,255,0.06);
@@ -1103,7 +1104,7 @@
         <button type="button" role="menuitem" data-lang="uk"><span class="flag">🇺🇦</span> Українська <span class="check">✓</span></button>
       </div>
     </div>
-    <a class="nav-cta" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="nav.download">Download</a>
+    <a class="nav-cta" href="https://github.com/denzam/SystemEQ-for-Mac/releases/download/v1.4.9/SystemEQ-v1.4.9.dmg" data-download-dmg data-i18n="nav.download">Download</a>
   </div>
 </nav>
 
@@ -1113,8 +1114,8 @@
     <h1 class="hero-title reveal reveal-delay-1">SystemEQ<br/><span class="accent" data-i18n="hero.titleAccent">for Mac.</span></h1>
     <p class="hero-sub reveal reveal-delay-2" data-i18n="hero.sub">A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.</p>
     <div class="cta-group reveal reveal-delay-3">
-      <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="hero.ctaDownload">Download Latest Release</a>
-      <a class="btn btn-ghost" href="https://github.com/denzam/SystemEQ-for-Mac" data-i18n="hero.ctaGithub">View on GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/denzam/SystemEQ-for-Mac/releases/download/v1.4.9/SystemEQ-v1.4.9.dmg" data-download-dmg data-i18n="hero.ctaDownload">Download DMG</a>
+      <a class="btn btn-ghost" href="#install" data-i18n="hero.ctaInstall">Installation guide</a>
     </div>
     <p class="hero-version reveal reveal-delay-3" id="heroVersion" hidden><span data-i18n="hero.latest">Latest:</span> <strong id="heroVersionTag"></strong> · <span data-i18n="hero.free">free</span></p>
     <div class="hero-version download-stats" id="appDownloads" aria-live="polite">
@@ -1226,15 +1227,41 @@
 <section id="install">
   <div class="container">
     <div class="section-label reveal" data-i18n="install.label">Install</div>
-    <h2 class="section-title reveal" data-i18n="install.title">Get started in 2 minutes.</h2>
-    <p class="section-sub reveal" data-i18n="install.sub">Free, open source and distributed outside the App Store. Official releases from v1.4.6 are Developer ID signed and notarized by Apple.</p>
+    <h2 class="section-title reveal" data-i18n="install.title">Install SystemEQ</h2>
+    <p class="section-sub reveal" data-i18n="install.sub">On your Mac, open  → About This Mac to check your macOS version. SystemEQ requires macOS 13 Ventura or later and works on Intel and Apple silicon Macs.</p>
     <div class="install-grid">
-      <div class="install-step reveal"><div class="num">1</div><div class="body"><h4 data-i18n="install.s1.title">BlackHole: only when needed</h4><p data-i18n="install.s1.body">On macOS 14.4+, start with Automatic capture without installing a driver. Install BlackHole for macOS 13–14.3, fallback or manual BlackHole mode; restart if its installer requests it.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew install --cask blackhole-2ch" data-i18n="copy.btn">Copy</button><pre><code>brew install --cask blackhole-2ch</code></pre></div></div></div>
-      <div class="install-step reveal"><div class="num">2</div><div class="body"><h4 data-i18n="install.s2.title">Recommended: install SystemEQ with Homebrew</h4><p data-i18n-html="install.s2.body">Install the official signed release. Homebrew 6.0+ requires trusting the tap once per Mac; on Homebrew 5 and older, skip the first command.</p><div class="codeblock"><button class="copy-btn" type="button" data-copy="brew trust denzam/systemeq&#10;brew install --cask denzam/systemeq/systemeq" data-i18n="copy.btn">Copy</button><pre><code>brew trust denzam/systemeq
-brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
-      <div class="install-step reveal"><div class="num">3</div><div class="body"><h4 data-i18n="install.s3.title">Alternative: download DMG or ZIP</h4><p data-i18n-html="install.s3.body">Download the latest DMG or ZIP from GitHub Releases and move the app to <code>/Applications</code>. From v1.4.6 the app is Developer ID signed and Apple-notarized; open it normally and approve the requested audio permission.</p><a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/latest" data-i18n="install.s3.btn">Download from GitHub Releases</a></div></div>
-      <div class="install-step reveal"><div class="num">4</div><div class="body"><h4 data-i18n="install.s4.title">Set up audio routing</h4><p data-i18n-html="install.s4.body">On macOS 14.4+, leave <strong>Settings → Audio Backend → Automatic</strong> selected, choose your physical output in Routing and click <strong>Enable EQ</strong>. Keep the macOS system output on that device. For BlackHole mode, select BlackHole as the backend, set the macOS output to <code>BlackHole 2ch</code> and select your physical output in SystemEQ.</p></div></div>
-      <div class="install-step reveal"><div class="num">5</div><div class="body"><h4 data-i18n="install.s5.title">(Alternative) Build from source</h4><p data-i18n="install.s5.body">Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.</p></div></div>
+      <div class="install-step reveal">
+        <div class="num">1</div>
+        <div class="body">
+          <h4 data-i18n="install.s1.title">Download and open SystemEQ</h4>
+          <p data-i18n-html="install.s1.body">Open the downloaded <strong>.dmg</strong> file, drag <strong>SystemEQ for Mac</strong> into <strong>Applications</strong>, then open the app from there.</p>
+          <a class="btn btn-primary" style="margin-top: 14px; padding: 10px 20px; font-size: 14px; min-height: auto;" href="https://github.com/denzam/SystemEQ-for-Mac/releases/download/v1.4.9/SystemEQ-v1.4.9.dmg" data-download-dmg data-i18n="hero.ctaDownload">Download DMG</a>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="num">2</div>
+        <div class="body">
+          <h4 data-i18n="install.s2.title">Set up sound for your macOS version</h4>
+          <p data-i18n-html="install.s2.modern"><strong>macOS 14.4 or later</strong><br>Open <strong>Audio Routing</strong> in SystemEQ and leave <strong>Audio Engine</strong> on <strong>Automatic</strong>. Choose your headphones or speakers as the output in SystemEQ and in macOS. If SystemEQ asks you to use BlackHole, follow the steps below.</p>
+          <p style="margin-top: 12px;" data-i18n-html="install.s2.older"><strong>macOS 13 to 14.3</strong><br><a href="https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg">Download BlackHole 2ch (.pkg)</a>, open the installer and restart your Mac if prompted. Reopen SystemEQ and select <strong>BlackHole</strong> as the <strong>Audio Engine</strong> in <strong>Audio Routing</strong>. Choose your headphones or speakers as the output in SystemEQ. In <strong>System Settings → Sound → Output</strong>, select <strong>BlackHole 2ch</strong>.</p>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="num">3</div>
+        <div class="body">
+          <h4 data-i18n="install.s3.title">Turn on the equalizer</h4>
+          <p data-i18n-html="install.s3.body">Click <strong>Enable EQ</strong> and allow the requested permission for system audio in Automatic mode on macOS 14.4 or later, or for the microphone in BlackHole mode.</p>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="body">
+          <h4 data-i18n="install.other.title">Install with Homebrew</h4>
+          <p data-i18n="install.other.body">If you already use Homebrew, run these commands. With Homebrew 5 or earlier, skip the first command.</p>
+          <div class="codeblock"><button class="copy-btn" type="button" data-copy="brew trust denzam/systemeq&#10;brew install --cask denzam/systemeq/systemeq" data-i18n="copy.btn">Copy</button><pre><code>brew trust denzam/systemeq
+brew install --cask denzam/systemeq/systemeq</code></pre></div>
+          <p data-i18n-html="install.other.source"><a href="https://github.com/denzam/SystemEQ-for-Mac#quick-start">Build from source</a></p>
+        </div>
+      </div>
     </div>
     <div class="note reveal" data-i18n-html="install.note"><strong>Signing and permissions.</strong> Official releases from v1.4.6 are Developer ID signed and Apple-notarized; the DMG is also signed and notarized. No quarantine removal is needed. Audio permissions still require your approval. Releases through v1.4.4 and local development builds may use ad-hoc signing; follow older releases’ own instructions.</div>
   </div>
@@ -1382,8 +1409,8 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "hero.eyebrow": "Free &amp; open source · macOS 13+",
       "hero.titleAccent": "for Mac.",
       "hero.sub": "A system-wide parametric equalizer with calibration tools, AutoEQ presets, room tuning and a live MilkDrop visualizer — all running natively on your Mac.",
-      "hero.ctaDownload": "Download Latest Release",
-      "hero.ctaGithub": "View on GitHub",
+      "hero.ctaDownload": "Download DMG",
+      "hero.ctaInstall": "Installation guide",
       "hero.badgeTelemetry": "No app telemetry",
       "hero.badgePresets": "8,850+ AutoEQ presets",
       "features.label": "Features",
@@ -1462,19 +1489,18 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "shot.visualizerLive": "Visualizer in action",
       "shot.liveTag": "LIVE · tap for sound",
       "install.label": "Install",
-      "install.title": "Get started in 2 minutes.",
-      "install.sub": "Free, open source and distributed outside the App Store. Official releases from v1.4.6 are Developer ID signed and notarized by Apple.",
-      "install.s1.title": "BlackHole: only when needed",
-      "install.s1.body": "On macOS 14.4+, start with Automatic capture without installing a driver. Install BlackHole for macOS 13–14.3, fallback or manual BlackHole mode; restart if its installer requests it.",
-      "install.s2.title": "Recommended: install SystemEQ with Homebrew",
-      "install.s2.body": "Install the official signed release. Homebrew 6.0+ requires trusting the tap once per Mac; on Homebrew 5 and older, skip the first command.",
-      "install.s3.title": "Alternative: download DMG or ZIP",
-      "install.s3.body": "Download the latest DMG or ZIP from GitHub Releases and move the app to <code>/Applications</code>. From v1.4.6 the app is Developer ID signed and Apple-notarized; open it normally and approve the requested audio permission.",
-      "install.s3.btn": "Download from GitHub Releases",
-      "install.s4.title": "Set up audio routing",
-      "install.s4.body": "On macOS 14.4+, leave <strong>Settings → Audio Backend → Automatic</strong> selected, choose your physical output in Routing and click <strong>Enable EQ</strong>. Keep the macOS system output on that device. For BlackHole mode, select BlackHole as the backend, set the macOS output to <code>BlackHole 2ch</code> and select your physical output in SystemEQ.",
-      "install.s5.title": "(Alternative) Build from source",
-      "install.s5.body": "Open the Xcode project on macOS with Xcode 16.2+ and build for your local Mac.",
+      "install.title": "Install SystemEQ",
+      "install.sub": "On your Mac, open  → About This Mac to check your macOS version. SystemEQ requires macOS 13 Ventura or later and works on Intel and Apple silicon Macs.",
+      "install.s1.title": "Download and open SystemEQ",
+      "install.s1.body": "Open the downloaded <strong>.dmg</strong> file, drag <strong>SystemEQ for Mac</strong> into <strong>Applications</strong>, then open the app from there.",
+      "install.s2.title": "Set up sound for your macOS version",
+      "install.s2.modern": "<strong>macOS 14.4 or later</strong><br>Open <strong>Audio Routing</strong> in SystemEQ and leave <strong>Audio Engine</strong> on <strong>Automatic</strong>. Choose your headphones or speakers as the output in SystemEQ and in macOS. If SystemEQ asks you to use BlackHole, follow the steps below.",
+      "install.s2.older": "<strong>macOS 13 to 14.3</strong><br><a href=\"https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg\">Download BlackHole 2ch (.pkg)</a>, open the installer and restart your Mac if prompted. Reopen SystemEQ and select <strong>BlackHole</strong> as the <strong>Audio Engine</strong> in <strong>Audio Routing</strong>. Choose your headphones or speakers as the output in SystemEQ. In <strong>System Settings → Sound → Output</strong>, select <strong>BlackHole 2ch</strong>.",
+      "install.s3.title": "Turn on the equalizer",
+      "install.s3.body": "Click <strong>Enable EQ</strong> and allow the requested permission for system audio in Automatic mode on macOS 14.4 or later, or for the microphone in BlackHole mode.",
+      "install.other.title": "Install with Homebrew",
+      "install.other.body": "If you already use Homebrew, run these commands. With Homebrew 5 or earlier, skip the first command.",
+      "install.other.source": "<a href=\"https://github.com/denzam/SystemEQ-for-Mac#quick-start\">Build from source</a>",
       "install.note": "<strong>Signing and permissions.</strong> Official releases from v1.4.6 are Developer ID signed and Apple-notarized; the DMG is also signed and notarized. No quarantine removal is needed. Audio permissions still require your approval. Releases through v1.4.4 and local development builds may use ad-hoc signing; follow older releases’ own instructions.",
       "support.label": "Support",
       "support.title": "Made with ❤️<br/>for the audio community.",
@@ -1546,8 +1572,8 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "hero.eyebrow": "Gratuito e open source · macOS 13+",
       "hero.titleAccent": "for Mac.",
       "hero.sub": "Un equalizzatore parametrico di sistema con strumenti di calibrazione, preset AutoEQ, taratura della stanza e un visualizzatore MilkDrop in tempo reale — tutto in esecuzione nativa sul tuo Mac.",
-      "hero.ctaDownload": "Scarica l'ultima versione",
-      "hero.ctaGithub": "Guarda su GitHub",
+      "hero.ctaDownload": "Scarica DMG",
+      "hero.ctaInstall": "Guida all’installazione",
       "hero.badgeTelemetry": "Nessuna telemetria nell'app",
       "hero.badgePresets": "8.850+ preset AutoEQ",
       "features.label": "Funzioni",
@@ -1626,19 +1652,18 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "shot.visualizerLive": "Visualizzatore in azione",
       "shot.liveTag": "LIVE · tocca per l'audio",
       "install.label": "Installazione",
-      "install.title": "Inizia in 2 minuti.",
-      "install.sub": "Gratuito, open source e distribuito fuori dall’App Store. Le versioni ufficiali dalla v1.4.6 sono firmate Developer ID e notarizzate da Apple.",
-      "install.s1.title": "BlackHole: solo quando serve",
-      "install.s1.body": "Su macOS 14.4+, inizia con la cattura Automatico senza installare driver. Installa BlackHole per macOS 13–14.3, il fallback o la modalità BlackHole manuale; riavvia se richiesto dal suo installer.",
-      "install.s2.title": "Consigliato: installa SystemEQ con Homebrew",
-      "install.s2.body": "Installa la versione ufficiale firmata. Homebrew 6.0+ richiede di autorizzare il tap una volta per Mac; su Homebrew 5 e precedenti salta il primo comando.",
-      "install.s3.title": "Alternativa: scarica DMG o ZIP",
-      "install.s3.body": "Scarica l’ultimo DMG o ZIP da GitHub Releases e sposta l’app in <code>/Applications</code>. Dalla v1.4.6 l’app è firmata Developer ID e notarizzata da Apple: aprila normalmente e approva il permesso audio richiesto.",
-      "install.s3.btn": "Scarica dalle Release di GitHub",
-      "install.s4.title": "Configura l'instradamento audio",
-      "install.s4.body": "Su macOS 14.4+, lascia selezionato <strong>Impostazioni → Audio Backend → Automatico</strong>, scegli l’uscita fisica in Routing e fai clic su <strong>Abilita EQ</strong>. Mantieni l’uscita di macOS su quel dispositivo. Per BlackHole, selezionalo come backend, imposta l’uscita di macOS su <code>BlackHole 2ch</code> e scegli l’uscita fisica in SystemEQ.",
-      "install.s5.title": "(Alternativa) Compila dal sorgente",
-      "install.s5.body": "Apri il progetto Xcode su macOS con Xcode 16.2+ e compila per il tuo Mac locale.",
+      "install.title": "Installa SystemEQ",
+      "install.sub": "Sul Mac apri  → Informazioni su questo Mac per vedere la versione di macOS. SystemEQ richiede macOS 13 Ventura o successivo e funziona sui Mac Intel e con chip Apple.",
+      "install.s1.title": "Scarica e apri SystemEQ",
+      "install.s1.body": "Apri il file <strong>.dmg</strong> scaricato, trascina <strong>SystemEQ for Mac</strong> in <strong>Applicazioni</strong> e apri l’app da lì.",
+      "install.s2.title": "Configura l’audio in base alla versione di macOS",
+      "install.s2.modern": "<strong>macOS 14.4 o successivo</strong><br>In SystemEQ apri <strong>Routing Audio</strong> e lascia <strong>Motore audio</strong> su <strong>Automatico</strong>. Scegli le cuffie o gli altoparlanti come uscita sia in SystemEQ sia in macOS. Se SystemEQ ti chiede di usare BlackHole, segui i passaggi qui sotto.",
+      "install.s2.older": "<strong>Da macOS 13 a 14.3</strong><br><a href=\"https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg\">Scarica BlackHole 2ch (.pkg)</a>, apri il programma di installazione e riavvia il Mac se richiesto. Riapri SystemEQ e in <strong>Routing Audio</strong> scegli <strong>BlackHole</strong> come <strong>Motore audio</strong>. Scegli le cuffie o gli altoparlanti come uscita in SystemEQ. In <strong>Impostazioni di Sistema → Suono → Uscita</strong>, seleziona <strong>BlackHole 2ch</strong>.",
+      "install.s3.title": "Attiva l’equalizzatore",
+      "install.s3.body": "Premi <strong>Abilita EQ</strong> e concedi il permesso richiesto per l’audio di sistema in modalità Automatica su macOS 14.4 o successivo, oppure per il microfono in modalità BlackHole.",
+      "install.other.title": "Installa con Homebrew",
+      "install.other.body": "Se usi già Homebrew, esegui questi comandi. Su Homebrew 5 e precedenti, salta il primo comando.",
+      "install.other.source": "<a href=\"https://github.com/denzam/SystemEQ-for-Mac/blob/main/README.it.md#avvio-rapido\">Compila dal sorgente</a>",
       "install.note": "<strong>Firma e permessi.</strong> Le versioni ufficiali dalla v1.4.6 sono firmate Developer ID e notarizzate da Apple; anche il DMG è firmato e notarizzato. Non serve rimuovere la quarantena. I permessi audio richiedono ancora la tua approvazione. Le versioni fino alla v1.4.4 inclusa e le build locali possono usare firme ad-hoc: segui le istruzioni delle relative vecchie versioni.",
       "support.label": "Sostieni",
       "support.title": "Fatto con ❤️<br/>per la community audio.",
@@ -1710,8 +1735,8 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "hero.eyebrow": "Безкоштовний і з відкритим кодом · macOS 13+",
       "hero.titleAccent": "for Mac.",
       "hero.sub": "Системний параметричний еквалайзер з інструментами калібрування, пресетами AutoEQ, налаштуванням кімнати та живим візуалізатором MilkDrop — усе працює нативно на вашому Mac.",
-      "hero.ctaDownload": "Завантажити останній реліз",
-      "hero.ctaGithub": "Переглянути на GitHub",
+      "hero.ctaDownload": "Завантажити DMG",
+      "hero.ctaInstall": "Інструкція зі встановлення",
       "hero.badgeTelemetry": "Без телеметрії в застосунку",
       "hero.badgePresets": "8 850+ пресетів AutoEQ",
       "features.label": "Можливості",
@@ -1790,19 +1815,18 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
       "shot.visualizerLive": "Візуалізатор у дії",
       "shot.liveTag": "НАЖИВО · торкніться для звуку",
       "install.label": "Встановлення",
-      "install.title": "Почніть за 2 хвилини.",
-      "install.sub": "Безкоштовний відкритий застосунок поза App Store. Офіційні релізи від v1.4.6 мають підпис Developer ID та нотаризацію Apple.",
-      "install.s1.title": "BlackHole: лише за потреби",
-      "install.s1.body": "На macOS 14.4+ почніть з автоматичного захоплення без встановлення драйвера. Встановлюйте BlackHole для macOS 13–14.3, резервного маршруту або ручного режиму BlackHole; перезапустіть Mac, якщо цього просить його інсталятор.",
-      "install.s2.title": "Рекомендовано: встановіть SystemEQ через Homebrew",
-      "install.s2.body": "Встановіть офіційний підписаний реліз. Homebrew 6.0+ потребує довіри до тапу один раз на Mac; на Homebrew 5 і старіших пропустіть першу команду.",
-      "install.s3.title": "Альтернатива: завантажте DMG або ZIP",
-      "install.s3.body": "Завантажте останній DMG або ZIP із GitHub Releases і перемістіть застосунок у <code>/Applications</code>. Від v1.4.6 застосунок має підпис Developer ID та нотаризацію Apple: відкрийте його звичайним способом і надайте запитаний дозвіл на аудіо.",
-      "install.s3.btn": "Завантажити з GitHub Releases",
-      "install.s4.title": "Налаштуйте маршрутизацію звуку",
-      "install.s4.body": "На macOS 14.4+ залиште <strong>Налаштування → Audio Backend → Автоматичний</strong>, оберіть фізичний вихід у Routing і натисніть <strong>Увімкнути EQ</strong>. Системним виходом macOS має залишатися цей пристрій. Для BlackHole оберіть його як backend, встановіть вихід macOS на <code>BlackHole 2ch</code> і оберіть фізичний вихід у SystemEQ.",
-      "install.s5.title": "(Альтернатива) Зберіть із вихідного коду",
-      "install.s5.body": "Відкрийте проєкт Xcode на macOS з Xcode 16.2+ і зберіть для свого Mac.",
+      "install.title": "Установіть SystemEQ",
+      "install.sub": "Відкрийте  → Про цей Mac, щоб дізнатися версію macOS. SystemEQ працює на комп’ютерах Mac з Intel або Apple silicon і потребує macOS 13 Ventura чи новішої.",
+      "install.s1.title": "Завантажте й відкрийте SystemEQ",
+      "install.s1.body": "Відкрийте завантажений файл <strong>.dmg</strong>, перетягніть <strong>SystemEQ for Mac</strong> у папку <strong>Програми</strong> й відкрийте застосунок звідти.",
+      "install.s2.title": "Налаштуйте звук для своєї версії macOS",
+      "install.s2.modern": "<strong>macOS 14.4 або новіша</strong><br>У SystemEQ відкрийте <strong>Маршрутизація аудіо</strong> й залиште для <strong>Аудіорушія</strong> значення <strong>Автоматично</strong>. Виберіть навушники або динаміки як вихід у SystemEQ і в macOS. Якщо SystemEQ запропонує BlackHole, виконайте дії нижче.",
+      "install.s2.older": "<strong>Від macOS 13 до 14.3</strong><br><a href=\"https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg\">Завантажте BlackHole 2ch (.pkg)</a>, відкрийте інсталятор і перезапустіть Mac, якщо він попросить. Знову відкрийте SystemEQ і в розділі <strong>Маршрутизація аудіо</strong> виберіть <strong>BlackHole</strong> як <strong>Аудіорушій</strong>. У SystemEQ виберіть свої навушники або динаміки як вихід. У <strong>Системні параметри → Звук → Вихід</strong> виберіть <strong>BlackHole 2ch</strong>.",
+      "install.s3.title": "Увімкніть еквалайзер",
+      "install.s3.body": "Натисніть <strong>Увімкнути EQ</strong> і надайте запитаний дозвіл на системний звук в автоматичному режимі на macOS 14.4 або новішій чи на мікрофон у режимі BlackHole.",
+      "install.other.title": "Установіть через Homebrew",
+      "install.other.body": "Якщо вже користуєтеся Homebrew, виконайте ці команди. У Homebrew 5 і старіших пропустіть першу команду.",
+      "install.other.source": "<a href=\"https://github.com/denzam/SystemEQ-for-Mac/blob/main/README.ua.md#швидкий-старт\">Зберіть із вихідного коду</a>",
       "install.note": "<strong>Підпис і дозволи.</strong> Офіційні релізи від v1.4.6 мають підпис Developer ID та нотаризацію Apple; DMG також підписаний і нотаризований. Знімати quarantine не потрібно. Дозволи на аудіо все одно надаєте ви. Релізи до v1.4.4 включно й локальні збірки можуть мати ad-hoc підпис: дотримуйтеся інструкцій відповідних старих релізів.",
       "support.label": "Підтримка",
       "support.title": "Зроблено з ❤️<br/>для аудіоспільноти.",
@@ -2263,16 +2287,34 @@ brew install --cask denzam/systemeq/systemeq</code></pre></div></div></div>
     }
   };
 
+  fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases/latest')
+    .then(response => {
+      if (!response.ok) throw new Error('GitHub returned HTTP ' + response.status);
+      return response.json();
+    })
+    .then(release => {
+      const tag = release?.tag_name;
+      if (typeof tag !== 'string' || !/^v\d+\.\d+\.\d+$/.test(tag) ||
+          release.draft !== false || release.prerelease !== false || !Array.isArray(release.assets)) {
+        throw new Error('Invalid stable release metadata');
+      }
+      const filename = 'SystemEQ-' + tag + '.dmg';
+      const downloadURL = 'https://github.com/denzam/SystemEQ-for-Mac/releases/download/' + tag + '/' + filename;
+      const hasDMG = release.assets.some(asset =>
+        asset?.name === filename && asset.state === 'uploaded' &&
+        Number.isSafeInteger(asset.size) && asset.size > 0 && asset.browser_download_url === downloadURL
+      );
+      if (!hasDMG) throw new Error('Missing official DMG for ' + tag);
+
+      document.querySelectorAll('[data-download-dmg]').forEach(link => { link.href = downloadURL; });
+      document.getElementById('heroVersionTag').textContent = tag;
+      document.getElementById('heroVersion').hidden = false;
+    })
+    .catch(error => console.warn('SystemEQ download update failed', error));
+
   fetch('https://api.github.com/repos/denzam/SystemEQ-for-Mac/releases?per_page=12')
     .then(r => r.ok ? r.json() : Promise.reject())
-    .then(releases => {
-      const latest = releases[0];
-      if (latest?.tag_name) {
-        document.getElementById('heroVersionTag').textContent = latest.tag_name;
-        document.getElementById('heroVersion').hidden = false;
-      }
-      renderRecentReleases(releases);
-    })
+    .then(renderRecentReleases)
     .catch(() => {});
 </script>
 
