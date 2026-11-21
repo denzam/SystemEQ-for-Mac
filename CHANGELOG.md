@@ -4,6 +4,14 @@ All notable changes to SystemEQ for Mac are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Support bundled community EQ presets in the catalog and preserve their declared preamp during import.
+
+### Fixed
+- Accept AutoEq GraphicEQ exports ending at 19,871 Hz when rebuilding the catalog.
+
 ## [1.4.9] — 2026-11-04
 
 Optional automatic profile headroom adjustment and safer test tones on multichannel audio interfaces.
