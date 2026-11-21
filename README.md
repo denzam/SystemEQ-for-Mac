@@ -15,6 +15,8 @@ no telemetry.
 [![Application downloads (DMG and ZIP)](https://denzam.github.io/SystemEQ-for-Mac/app-downloads.svg)](https://github.com/denzam/SystemEQ-for-Mac/releases)
 
 > 🇬🇧 English | 🇺🇦 [Українська](README.ua.md) | 🇮🇹 [Italiano](README.it.md)
+>
+> **[Jump to installation](#installation)**
 
 ![SystemEQ for Mac — main window](Docs/screenshots/01-main.jpeg)
 
@@ -33,7 +35,7 @@ no telemetry.
 ### Core Features
 
 - **10/31-band Parametric EQ** — Professional-grade audio processing with biquad filters
-- **AutoEQ Database** — 8,665 headphone models, 8,850 presets (SQLite, 18 MB)
+- **AutoEQ Database** — 8,665 headphone models, 8,850 presets (SQLite, 18 MiB)
 - **Real-time Visualization** — Spectrum, Waveform, Particles, Psychedelic
 - **Calibration Module** — Hearing test + custom profiles + A/B comparison
 - **Subjective Room Tuning** — Tune your room response by ear
@@ -47,15 +49,15 @@ no telemetry.
 
 ### Audio Engine
 
-- **CoreAudioEngine** — Low-latency processing (~11ms Native, ~25ms BlackHole) via AudioUnit (AUHAL)
-- **vDSP Biquad Filters** — Accelerate framework, 5-10× faster than scalar
+- **Audio backends** — Native Process Tap and BlackHole (AUHAL). September 2026 Scarlett loopback tests at 48 kHz measured about 11 ms Native and 25 ms BlackHole in different configurations; these are historical observations, not guarantees for the current build. [Measurement context](Docs/PerfBudget.md#physical-loopback-latency-2026-09-25).
+- **vDSP Biquad Filters** — Batched filtering uses Apple Accelerate vDSP.
 - **Peak Meters** — Real-time audio level monitoring
 - **Clipping Protection** — Automatic gain reduction and preamp control
 - **Keyboard Volume** — Uses macOS volume control when the selected device supports it; SystemEQ does not intercept media keys
 
 ### AutoEQ Integration
 
-- **SQLite Database** — Instant offline search (<10ms)
+- **SQLite Database** — Local offline search uses SQLite FTS5.
 - **Offline SQLite + Network Fallback** — Instant local database search with GitHub fallback
 - **ParametricEQ & GraphicEQ** — Full format support
 
@@ -70,41 +72,49 @@ no telemetry.
 
 ### Installation
 
-#### ✅ Recommended: Homebrew — no manual Gatekeeper step
+1. Check your macOS version under ** → About This Mac**. SystemEQ requires **macOS 13 Ventura or later** and supports Apple Silicon and Intel Macs.
+2. Open the [latest GitHub release](https://github.com/denzam/SystemEQ-for-Mac/releases/latest). Under **Assets**, choose the file named **SystemEQ-vX.Y.Z.dmg**, using the version number shown in that release.
+3. Open the DMG, drag **SystemEQ for Mac** to **Applications**, then launch it from there.
+
+#### Audio setup
+
+**macOS 13–14.3**
+
+1. Install [BlackHole 2ch](https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg). Restart your Mac only if the installer asks; otherwise quit and reopen SystemEQ after installation.
+2. In SystemEQ, open **Audio Routing → Audio Engine** and select **BlackHole**.
+3. Select your headphones or speakers as the output in SystemEQ.
+4. On your Mac, open ** → System Settings → Sound → Output** and select **BlackHole 2ch**.
+5. Click **Enable EQ** and grant microphone access if macOS asks.
+
+**macOS 14.4 or later**
+
+1. In SystemEQ, open **Audio Routing → Audio Engine** and leave it set to **Automatic**.
+2. Select your headphones or speakers as the output in both SystemEQ and macOS.
+3. Click **Enable EQ** and allow System Audio Recording if macOS asks.
+
+If SystemEQ asks you to use BlackHole, follow the macOS 13–14.3 steps above.
+
+In the **AutoEQ** tab, search for your headphone model and import a preset with **⚡ Quick Import**, or adjust the bands in **Equalizer**.
+
+#### Other installation options
+
+You can also download the **ZIP** from the same release page, unzip it, and move the app to **Applications**. Since v1.4.6, official apps and DMGs are Developer ID signed and Apple notarized. For releases through v1.4.4, follow the installation notes on the relevant release.
+
+**Homebrew** is another option if you already use it.
 
 ```bash
 brew trust denzam/systemeq
 brew install --cask denzam/systemeq/systemeq
 ```
 
-Starting with v1.4.6, official releases contain a Developer ID signed,
-Apple-notarized app; the DMG is also signed and notarized. Open the app normally
-without removing quarantine. Releases through v1.4.4 use ad-hoc signing; follow
-the installation instructions in those older releases.
+Homebrew 6.0 requires `brew trust` once per Mac for this tap. On Homebrew 5 and older, skip that command.
 
-> **Why `brew trust`?** Since Homebrew 6.0, third-party taps must be trusted
-> explicitly before Homebrew will load them, and there is no way for a tap
-> owner to grant that on your behalf. Without it you get
-> `Refusing to load cask ... from untrusted tap`. It is a one-time command per
-> machine. On Homebrew 5 and older, skip it — the command does not exist there.
-
-#### Option 2: Download DMG or ZIP
-
-1. Download a DMG or ZIP from [Releases](https://github.com/denzam/SystemEQ-for-Mac/releases) and check that version’s signing and installation notes
-2. Open the DMG and drag `SystemEQ for Mac.app` to `/Applications`, or unzip the ZIP and move the app there
-3. For a Developer ID signed, notarized package, open the app normally and allow the requested audio permission; for older ad-hoc releases, follow their release-specific instructions
-4. On macOS 14.4+, leave Audio Backend set to **Automatic**; install BlackHole if SystemEQ offers the fallback or you select BlackHole mode
-
-Signing and notarization do not grant Microphone or System Audio Recording permission.
-Local development builds may still use ad-hoc signing.
-
-#### Option 3: Build from Source
+To **build from source**, open the project in Xcode and press **⌘R**.
 
 ```bash
 git clone https://github.com/denzam/SystemEQ-for-Mac.git
 cd SystemEQ-for-Mac
 open "SystemEQ for Mac.xcodeproj"
-# Press Cmd+R to build and run
 ```
 
 ### Updating
@@ -123,24 +133,6 @@ Versions without the in-app installer need one manual update: quit SystemEQ,
 download the new package, and replace the app in `/Applications`. If installed
 with Homebrew, use `brew upgrade --cask systemeq` instead.
 
-### Setup Guide
-
-1. **Use Automatic routing** (recommended on macOS 14.4+):
-   - Open SystemEQ → Settings → Audio Backend
-   - Leave it set to **Automatic**
-   - Select your speakers or headphones in Routing, then click **Enable EQ**
-   - SystemEQ captures audio natively; do not change the macOS system output
-
-2. **Use BlackHole only when needed** (macOS 13–14.3, fallback, or manual selection):
-   - Install [BlackHole 2ch](https://existential.audio/blackhole/) and restart SystemEQ
-   - In Settings → Audio Backend, select **BlackHole**; in Routing, select your speakers/headphones as output
-   - Set **BlackHole 2ch** as the macOS System Output, then click **Enable EQ**
-
-3. **Apply EQ Preset**:
-   - AutoEQ tab → Search your headphone model
-   - Click "⚡ Quick Import"
-   - Or manually adjust bands in the Equalizer tab
-
 ## 🛠️ Architecture
 
 ```text
@@ -154,9 +146,9 @@ Fallback:     System Audio → BlackHole 2ch → vDSP Biquad EQ → Physical Out
 ### Technical Details
 
 - **CoreAudioEngine**: Low-level AUHAL dual I/O, lock-free ring buffer
-- **BiquadFilterVDSP**: vDSP batch processing, 5-10× faster than scalar
+- **BiquadFilterVDSP**: Batched filtering uses Apple Accelerate vDSP.
 - **SPSCRingBuffer**: Lock-free SPSC buffer with C11 atomics
-- **EQDatabase**: SQLite, 18 MB, 8,665 headphone models
+- **EQDatabase**: SQLite, 18 MiB, 8,665 headphone models
 
 ## 📁 Project Structure
 
@@ -251,7 +243,7 @@ SystemEQ processes **system-wide audio output**. DAWs typically bypass the syste
 
 **Ableton:** Preferences → Audio → Output Device → BlackHole 2ch
 
-> This adds ~10-20ms extra latency vs direct monitoring. This is an architectural limitation of routing through the BlackHole system driver.
+> BlackHole routing adds buffering and may increase latency; the amount depends on the device and configuration.
 
 ## 📊 Project Status
 

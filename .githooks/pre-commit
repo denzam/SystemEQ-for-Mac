@@ -20,10 +20,19 @@ if ! git diff --cached --check; then
 fi
 echo "✅ Staged diff clean"
 
+STAGED_PATHS=$(mktemp "${TMPDIR:-/tmp}/systemeq-staged.XXXXXX") || exit 1
+trap 'rm -f -- "$STAGED_PATHS"' EXIT
+if ! git diff --cached --no-renames --name-only --diff-filter=ACMT -z -- '*.py' '*.swift' >"$STAGED_PATHS"; then
+    echo "❌ Could not read staged paths." >&2
+    exit 1
+fi
+
 PYTHON_FILES=()
 while IFS= read -r -d '' file; do
-    PYTHON_FILES+=("$file")
-done < <(git diff --cached --no-renames --name-only --diff-filter=ACMT -z -- '*.py')
+    case "$file" in
+        *.py) PYTHON_FILES+=("$file") ;;
+    esac
+done <"$STAGED_PATHS"
 
 if [ ${#PYTHON_FILES[@]} -gt 0 ]; then
     echo "🐍 Compiling ${#PYTHON_FILES[@]} staged Python file(s)..."
@@ -66,10 +75,13 @@ is_excluded() {
 
 FILES=()
 while IFS= read -r -d '' file; do
-    [ -f "$file" ] || continue
+    case "$file" in
+        *.swift) ;;
+        *) continue ;;
+    esac
     is_excluded "$file" && continue
-    FILES+=("$file")
-done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.swift')
+    FILES+=("./$file")
+done <"$STAGED_PATHS"
 
 if [ ${#FILES[@]} -eq 0 ]; then
     echo "✅ No Swift files to check"
@@ -79,19 +91,43 @@ fi
 
 echo "📝 Checking ${#FILES[@]} Swift file(s)..."
 
+git --literal-pathspecs diff --quiet --no-ext-diff -- "${FILES[@]}"
+diff_status=$?
+case "$diff_status" in
+    0) ;;
+    1)
+        echo "❌ Staged files also contain unstaged Swift edits. Resolve the split before automatic formatting." >&2
+        exit 1
+        ;;
+    *)
+        echo "❌ Could not compare staged Swift files with the working tree." >&2
+        exit 1
+        ;;
+esac
+
+for file in "${FILES[@]}"; do
+    if [ ! -f "$file" ] || [ -L "$file" ]; then
+        echo "❌ Expected a regular Swift file: $file" >&2
+        exit 1
+    fi
+done
+
 SKIPPED=0
+FORMATTED=0
 
 if command -v swiftformat &>/dev/null; then
     echo "🎨 Running SwiftFormat..."
-    swiftformat "${FILES[@]}" --config .swiftformat >/dev/null 2>&1
-    git add -- "${FILES[@]}"
-
-    # Auto-format cannot fix every rule, so gate on the same --lint check as CI.
-    if ! swiftformat "${FILES[@]}" --config .swiftformat --lint >/dev/null 2>&1; then
-        echo "❌ SwiftFormat: files still fail --lint after formatting:"
-        swiftformat "${FILES[@]}" --config .swiftformat --lint 2>&1 | grep -E "error|warning"
+    if ! FORMAT_OUTPUT=$(swiftformat "${FILES[@]}" --config .swiftformat 2>&1); then
+        printf '%s\n' "$FORMAT_OUTPUT" >&2
         exit 1
     fi
+
+    if ! FORMAT_OUTPUT=$(swiftformat "${FILES[@]}" --config .swiftformat --lint 2>&1); then
+        echo "❌ SwiftFormat: files still fail --lint after formatting:"
+        printf '%s\n' "$FORMAT_OUTPUT" >&2
+        exit 1
+    fi
+    FORMATTED=1
     echo "✅ SwiftFormat clean"
 else
     echo "⚠️  SwiftFormat NOT INSTALLED — formatting was NOT checked (brew install swiftformat)"
@@ -105,7 +141,7 @@ if command -v swiftlint &>/dev/null; then
     ERRORS=$(printf '%s\n' "$LINT_OUTPUT" | grep -c "error:")
 
     if [ "$LINT_STATUS" -ne 0 ] || [ "$ERRORS" -gt 0 ]; then
-        printf '%s\n' "$LINT_OUTPUT" | grep "error:"
+        printf '%s\n' "$LINT_OUTPUT" >&2
         echo "❌ SwiftLint found $ERRORS error(s). Fix before committing (swiftlint --fix may help)."
         exit 1
     fi
@@ -113,6 +149,14 @@ if command -v swiftlint &>/dev/null; then
 else
     echo "⚠️  SwiftLint NOT INSTALLED — linting was NOT checked (brew install swiftlint)"
     SKIPPED=1
+fi
+
+if [ "$FORMATTED" -eq 1 ]; then
+    if ! git --literal-pathspecs diff --check -- "${FILES[@]}" ||
+        ! git --literal-pathspecs add -- "${FILES[@]}"; then
+        echo "❌ Could not stage the formatted Swift files." >&2
+        exit 1
+    fi
 fi
 
 if [ "$SKIPPED" -eq 1 ]; then

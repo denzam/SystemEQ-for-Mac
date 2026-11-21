@@ -589,11 +589,18 @@ else: sys.exit(99)
         self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", CALL_LOG=str(self.log), OUTSIDE=str(self.outside), SUBMITTED_PATH=str(self.root / "submitted-path"))
 
     def invoke(self, *args, mode=""):
-        return subprocess.run(
-            ["bash", str(self.scripts / "prepare_signed_release.sh"), *map(str, args)],
-            cwd=self.repo, env=dict(self.env, FAIL_MODE=mode),
-            capture_output=True, text=True, timeout=30,
-        )
+        try:
+            return subprocess.run(
+                ["bash", str(self.scripts / "prepare_signed_release.sh"), *map(str, args)],
+                cwd=self.repo, env=dict(self.env, FAIL_MODE=mode),
+                capture_output=True, text=True, timeout=30,
+            )
+        except subprocess.TimeoutExpired as error:
+            last_call = self.log.read_text().splitlines()[-1:] if self.log.exists() else []
+            self.fail(
+                f"{args[0]} ({mode or 'healthy fixture'}) exceeded {error.timeout} seconds. "
+                f"Last mocked command: {last_call}. stdout: {error.stdout!r}; stderr: {error.stderr!r}"
+            )
 
     def build(self, mode=""):
         return self.invoke("--build", "--identity", self.identity, "--team", self.team, mode=mode)
@@ -857,17 +864,62 @@ else: sys.exit(99)
         self.assertEqual(sum(call[:3] == ["xcrun", "notarytool", "submit"] for call in self.calls()), 1)
 
     def test_dmg_failures_never_complete_and_keep_signed_source(self):
-        for mode in ("notary-empty", "notary-malformed", "notary-rejected", "info-mismatch", "log-wrong-archive", "dmg-staple", "dmg-ticket", "dmg-gatekeeper", "mount", "detach", "dmg-mismatch"):
+        baseline, baseline_package, baseline_dmg = self.distribution_fixture()
+        package_path = baseline_package.relative_to(baseline)
+        app_path = Path(self.env["DISTRIBUTION_APP"]).relative_to(baseline)
+        preflight_modes = {"mount", "detach", "dmg-mismatch"}
+        scenarios = {
+            "notary-empty": (["xcrun", "notarytool", "submit"], "Expecting value"),
+            "notary-malformed": (["xcrun", "notarytool", "submit"], "Expecting value"),
+            "notary-rejected": (["xcrun", "notarytool", "log"], "Notarization was not accepted"),
+            "info-mismatch": (["xcrun", "notarytool", "info"], "Notary info belongs to another submission"),
+            "log-wrong-archive": (["xcrun", "notarytool", "log"], "Notary log does not match the submitted ZIP"),
+            "dmg-staple": (["xcrun", "stapler", "staple"], "staple.log"),
+            "dmg-ticket": (["xcrun", "stapler", "validate"], "distribution.log"),
+            "dmg-gatekeeper": (["spctl", "--assess", "--type", "open"], "distribution.log"),
+            "mount": (["hdiutil", "attach"], "packages-preflight.log"),
+            "detach": (["hdiutil", "detach"], "Failed to detach"),
+            "dmg-mismatch": (["hdiutil", "attach"], "ZIP and DMG contain different applications"),
+        }
+        for mode, (command, diagnostic) in scenarios.items():
             with self.subTest(mode=mode):
-                directory, package, dmg = self.distribution_fixture()
+                directory = shutil.copytree(baseline, baseline.with_name(f"release-fixture-{mode}"), symlinks=True)
+                package = directory / package_path
+                dmg = directory / "input.dmg"
+                shutil.copyfile(baseline_dmg, dmg)
+                self.env["DISTRIBUTION_APP"] = str(directory / app_path)
+                self.env["SUBMITTED_PATH"] = str(directory / "submitted-path")
+                temporary = directory / "tmp"
+                temporary.mkdir()
+                self.env["TMPDIR"] = str(temporary)
+                self.log.write_text("")
                 before = dmg.read_bytes(), package.read_bytes()
                 result = self.invoke("--notarize-dmg", directory, "--dmg", dmg, "--profile", "fixture", mode=mode)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(diagnostic, result.stderr)
+                calls = self.calls()
+                reached = [call for call in calls if call[:len(command)] == command]
+                if mode.startswith("dmg-") and mode not in preflight_modes:
+                    reached = [call for call in reached if call[-1].endswith(".dmg")]
+                self.assertTrue(reached, f"Expected mocked command {command}")
                 self.assertFalse((directory / "dmg/completed.json").exists())
                 self.assertEqual((dmg.read_bytes(), package.read_bytes()), before)
                 signed = directory / "dmg/SystemEQ-signed.dmg"
-                if (directory / "dmg/manifest.json").exists():
+                if mode in preflight_modes:
+                    self.assertIn("packages-preflight.log", result.stderr)
+                    self.assertEqual(signed.read_bytes(), before[0])
+                    self.assertFalse((directory / "dmg/manifest.json").exists())
+                    self.assertFalse(any(call[:3] == ["xcrun", "notarytool", "submit"] for call in calls))
+                else:
+                    self.assertTrue((directory / "dmg/manifest.json").is_file())
                     self.assertEqual(signed.read_bytes(), b"fixture dmg|signed")
+                    self.assertEqual(
+                        sum(call[:3] == ["xcrun", "notarytool", "submit"] for call in calls), 1,
+                    )
+                if mode in ("notary-empty", "notary-malformed"):
+                    response = b"" if mode == "notary-empty" else b"broken JSON\n"
+                    expected_log = b"\n--- command attempt ---\n" + response
+                    self.assertEqual((directory / "dmg/submission-output.log").read_bytes(), expected_log)
 
     def test_distribution_verifier_rejects_identity_runtime_timestamp_ticket_and_mismatch(self):
         directory, package, dmg = self.distribution_fixture()

@@ -254,7 +254,7 @@ class FixtureRunnerTests(unittest.TestCase):
 
 
 class QualityGateTests(unittest.TestCase):
-    def run_gate(self, lint_status, missing_tools=()):
+    def run_gate(self, lint_status, missing_tools=(), xcode_status=0):
         source = Path(__file__).with_name("code_quality_check.sh").read_text()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -270,7 +270,10 @@ class QualityGateTests(unittest.TestCase):
                 "git": "exit 0",
                 "swiftformat": "exit 0",
                 "swiftlint": f"echo 'initialization diagnostic' >&2\nexit {lint_status}",
-                "xcodebuild": "exit 0",
+                "xcodebuild": f"""case " $* " in
+    *" Debug test "*) echo 'Xcode test diagnostic'; exit {xcode_status} ;;
+    *) echo 'Expected the Xcode test action' >&2; exit 64 ;;
+esac""",
             }.items():
                 if name in missing_tools:
                     continue
@@ -293,6 +296,13 @@ class QualityGateTests(unittest.TestCase):
         result = self.run_gate(0)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_full_gate_propagates_xcode_test_failure(self):
+        result = self.run_gate(0, xcode_status=65)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Xcode test diagnostic", result.stdout)
+        self.assertIn("Tests failed", result.stdout)
+        self.assertNotIn("All checks passed", result.stdout)
+
     def test_full_gate_rejects_missing_linters(self):
         for tool in ("swiftformat", "swiftlint"):
             with self.subTest(tool=tool):
@@ -300,6 +310,139 @@ class QualityGateTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("not installed", result.stdout)
                 self.assertNotIn("All checks passed", result.stdout)
+
+
+class PreCommitHookTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="systemeq hook test ")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.repo = self.root / "repository"
+        self.repo.mkdir()
+        self.tools = self.root / "tools"
+        self.tools.mkdir()
+        self.git = shutil.which("git")
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env["PATH"] = str(self.tools) + os.pathsep + os.environ["PATH"]
+        self.env["GIT_CONFIG_NOSYSTEM"] = "1"
+        self.env["GIT_CONFIG_GLOBAL"] = os.devnull
+        self.run_git("init", "-q")
+        self.path = self.repo / "Sound Engine.swift"
+        self.path.write_text("let selected=1\n")
+        self.run_git("add", "--", self.path.name)
+        self.hook = Path(__file__).resolve().parent.parent / ".githooks" / "pre-commit"
+        self.stub("swiftformat", """
+for arg in "$@"; do
+    if [ "$arg" = --lint ]; then
+        exit 0
+    fi
+done
+printf 'let selected = 1\\n' > "$1"
+""")
+        self.stub("swiftlint", "exit 0")
+
+    def stub(self, name, body):
+        path = self.tools / name
+        path.write_text("#!/bin/bash\n" + body + "\n")
+        path.chmod(0o755)
+
+    def run_git(self, *args):
+        return subprocess.run(
+            [self.git, *args], cwd=self.repo, env=self.env,
+            text=True, capture_output=True, check=True, timeout=15,
+        ).stdout
+
+    def staged(self):
+        return self.run_git("show", ":" + self.path.name)
+
+    def run_hook(self):
+        return subprocess.run(
+            ["/bin/bash", str(self.hook)], cwd=self.repo, env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15,
+        )
+
+    def test_partially_staged_swift_preserves_index_and_worktree(self):
+        before = self.staged()
+        edited = before + "let notSelected = 2\n"
+        self.path.write_text(edited)
+        self.stub("swiftformat", "touch formatter-was-called")
+        result = self.run_hook()
+        self.assertEqual(self.staged(), before)
+        self.assertEqual(self.path.read_text(), edited)
+        self.assertFalse((self.repo / "formatter-was-called").exists())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unstaged Swift edits", result.stdout)
+
+    def test_fully_staged_swift_can_be_formatted_and_restaged(self):
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.staged(), "let selected = 1\n")
+        self.assertEqual(self.path.read_text(), self.staged())
+
+    def test_swift_filename_pattern_does_not_stage_another_file(self):
+        selected = self.repo / "Curve[1].swift"
+        selected.write_text("let selected=1\n")
+        self.run_git("--literal-pathspecs", "add", "--", selected.name)
+        unrelated = self.repo / "Curve1.swift"
+        unrelated.write_text("let notSelected = 2\n")
+
+        result = self.run_hook()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.run_git("show", ":" + selected.name), "let selected = 1\n")
+        self.assertEqual(self.run_git("ls-files").splitlines(), sorted([selected.name, self.path.name]))
+        self.assertEqual(unrelated.read_text(), "let notSelected = 2\n")
+
+    def test_formatter_failure_cannot_pass_or_restage(self):
+        before = self.staged()
+        self.stub("swiftformat", """case " $* " in
+    *" --lint "*) exit 0 ;;
+esac
+printf 'let formatted = 2\\n' > "$1"
+echo 'formatter invocation failed' >&2
+exit 42
+""")
+        result = self.run_hook()
+        self.assertEqual(self.staged(), before)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("formatter invocation failed", result.stdout)
+
+    def test_linter_failure_does_not_restage_formatted_bytes(self):
+        before = self.staged()
+        self.stub("swiftlint", "echo 'lint initialization failed' >&2\nexit 42")
+        result = self.run_hook()
+        self.assertEqual(self.staged(), before)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("All pre-commit checks passed", result.stdout)
+
+    def test_git_listing_failure_is_not_reported_as_no_files(self):
+        self.stub("git", """
+case " $* " in
+    *" --name-only "*) echo 'staged list unavailable' >&2; exit 42 ;;
+esac
+exec "$SYSTEMEQ_TEST_REAL_GIT" "$@"
+""")
+        self.env["SYSTEMEQ_TEST_REAL_GIT"] = self.git
+        result = self.run_hook()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("staged list unavailable", result.stdout)
+        self.assertNotIn("All pre-commit checks passed", result.stdout)
+
+    def test_git_add_failure_cannot_report_success(self):
+        self.stub("git", """
+if [ "$1" = --literal-pathspecs ] && [ "$2" = add ]; then
+    echo 'index locked' >&2
+    exit 42
+fi
+exec "$SYSTEMEQ_TEST_REAL_GIT" "$@"
+""")
+        self.env["SYSTEMEQ_TEST_REAL_GIT"] = self.git
+        before = self.staged()
+        result = self.run_hook()
+        self.assertEqual(self.staged(), before)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("index locked", result.stdout)
+        self.assertNotIn("All pre-commit checks passed", result.stdout)
 
 
 class PinnedSwiftFormatTests(unittest.TestCase):

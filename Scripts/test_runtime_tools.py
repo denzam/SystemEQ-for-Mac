@@ -515,9 +515,21 @@ func AudioDeviceStart(_ device: AudioDeviceID, _ id: AudioDeviceIOProcID) -> OSS
     trace.append("ioproc.destroy")
     return noErr
 }
+class FakeProcessor {
+    func setPendingNativeRTNominalBufferFrames(_ frames: UInt32) {}
+    func setNativeRTNominalBufferFrames(_ frames: UInt32) {}
+    func invalidateNativeRTMetrics(reason: String) {}
+    func invalidateNativeRTMetrics(reason: String, nominal: UInt32, running: UInt32) {}
+}
 class ProcessTapEngine {
+    private let processor = FakeProcessor()
     private let createTap = fakeCreateTap
     private let deviceUIDProvider: ((AudioDeviceID) -> String?)? = { _ in "fixture-device" }
+    private let createAggregate: ((CFDictionary, inout AudioObjectID) -> OSStatus)? = nil
+    private let selectionProvider: (() -> ProcessTapInputSelection?)? = nil
+    private let nominalSampleRateProvider: ((AudioDeviceID) -> Double?)? = nil
+    private let createIOProcID: ((AudioDeviceID, inout AudioDeviceIOProcID?) -> OSStatus)? = nil
+    private let startDevice: ((AudioDeviceID, AudioDeviceIOProcID) -> OSStatus)? = nil
     private var tapID: AudioObjectID = 0
     private var aggregateID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
