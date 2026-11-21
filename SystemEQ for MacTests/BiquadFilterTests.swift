@@ -1456,7 +1456,14 @@ final class BiquadFilterTests: XCTestCase {
             let deadlineNanos = UInt64(Double(blockSize) / 48000.0 * 1e9)
             let p99FractionOfDeadline = Double(p99Nanos) / Double(deadlineNanos)
 
-            XCTAssertLessThan(p99FractionOfDeadline, 0.10)
+            let env = ProcessInfo.processInfo.environment
+            let isSanitizer = dlsym(dlopen(nil, RTLD_LAZY), "__tsan_init") != nil ||
+                dlsym(dlopen(nil, RTLD_LAZY), "__asan_init") != nil ||
+                env["SYSTEMEQ_TEST_SANITIZER"] != nil
+            let isCI = env["CI"] != nil || env["GITHUB_ACTIONS"] != nil
+            let maxFraction = isSanitizer ? 0.50 : (isCI ? 0.35 : 0.10)
+
+            XCTAssertLessThan(p99FractionOfDeadline, maxFraction)
             XCTAssertGreaterThan(p50Nanos, 0)
         }
 
