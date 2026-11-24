@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
-  "total": 3726,
-  "dmg": 3219,
-  "zip": 215,
-  "homebrew": 292,
-  "other": 2022,
-  "total_all_assets": 5748,
+  "total": 3776,
+  "dmg": 3260,
+  "zip": 216,
+  "homebrew": 300,
+  "other": 2109,
+  "total_all_assets": 5885,
   "package_assets": 45,
   "releases": 22,
   "homebrew_available": true,
@@ -421,7 +421,7 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9.zip",
       "category": "zip",
-      "downloads": 71,
+      "downloads": 72,
       "size": 18066437
     },
     {
@@ -430,7 +430,7 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9-homebrew.dmg",
       "category": "homebrew",
-      "downloads": 292,
+      "downloads": 300,
       "size": 18063982
     },
     {
@@ -439,7 +439,7 @@
       "version": "v1.4.9",
       "name": "appcast.xml",
       "category": "other",
-      "downloads": 1754,
+      "downloads": 1841,
       "size": 2408
     },
     {
@@ -448,19 +448,19 @@
       "version": "v1.4.9",
       "name": "SystemEQ-v1.4.9.dmg",
       "category": "dmg",
-      "downloads": 571,
+      "downloads": 612,
       "size": 18063982
     }
   ],
-  "updated_at": "2026-11-23T15:58:56+00:00",
+  "updated_at": "2026-11-24T15:53:30+00:00",
   "history_since": "2026-11-04",
   "daily_change": {
-    "total": 45,
-    "dmg": 31,
+    "total": 50,
+    "dmg": 41,
     "zip": 1,
-    "homebrew": 13,
-    "other": 84,
-    "total_all_assets": 129
+    "homebrew": 8,
+    "other": 87,
+    "total_all_assets": 137
   },
   "source": "https://github.com/denzam/SystemEQ-for-Mac/releases",
   "definition": "Official SystemEQ DMG, ZIP and dedicated Homebrew-file downloads, including updates and repeat downloads; not unique users or installations. Historical Homebrew downloads remain in DMG. ZIP includes app updates. Other release attachments are counted separately. GitHub-generated source archives have no exposed download count."
