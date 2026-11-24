@@ -30,6 +30,7 @@ struct AutoEQDatabaseService {
     func loadCanonical(headphoneID: Int) throws -> (preset: DatabasePreset, input: AutoEQImportedPreset) {
         guard let preset = database.getRecommendedPreset(for: headphoneID)
         else { throw AutoEQImportError.invalidSource }
-        return try (preset, database.canonicalPreset(presetId: preset.id))
+        let input = try database.canonicalPreset(presetId: preset.id, legacy: preset.source != "community")
+        return (preset, input)
     }
 }

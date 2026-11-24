@@ -45,6 +45,15 @@ struct OfflineIndexEntry: Codable {
     var pathReadme: String?
 }
 
+struct CommunityPreset: Decodable {
+    let brand: String
+    let model: String
+    let type: String
+    let author: String
+    let name: String
+    let file: String
+}
+
 // MARK: - Database Builder
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -55,14 +64,16 @@ class EQDatabaseBuilder {
     private let outputPath: String
     private let indexPath: String?
     private let autoEQRoot: URL
+    private let communityIndex: URL?
     private var headphones: [String: Int] = [:]
     private var nextHeadphoneId = 1
     private var nextPresetId = 1
     
-    init(dbPath: String, indexPath: String? = nil, autoEQRoot: String = "AutoEq") {
+    init(dbPath: String, indexPath: String? = nil, autoEQRoot: String = "AutoEq", communityIndex: URL? = nil) {
         self.dbPath = dbPath
         self.outputPath = dbPath
         self.indexPath = indexPath
+        self.communityIndex = communityIndex
         self.autoEQRoot = URL(fileURLWithPath: autoEQRoot).standardizedFileURL.resolvingSymlinksInPath()
     }
     
@@ -85,6 +96,7 @@ class EQDatabaseBuilder {
             try createDatabase()
             try executeSQL("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE")
             try insertData(entries)
+            if let communityIndex { try insertCommunityPresets(from: communityIndex) }
             try createIndexes()
             try insertMetadata()
             try validateDatabase()
@@ -337,6 +349,45 @@ class EQDatabaseBuilder {
         print("   Total presets inserted: \(processedCount)")
     }
     
+    private func insertCommunityPresets(from index: URL) throws {
+        let root = index.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+        let entries = try JSONDecoder().decode([CommunityPreset].self, from: Data(contentsOf: index))
+        for entry in entries {
+            guard [entry.brand, entry.model, entry.type, entry.author, entry.name].allSatisfy({
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.contains("\0")
+            }), !entry.file.contains("/"), !entry.file.contains("\0"), entry.file.hasSuffix(".txt") else {
+                throw failure("Invalid community preset metadata")
+            }
+            let key = [entry.brand, entry.model, entry.author].joined(separator: "\0")
+            guard headphones[key] == nil else { throw failure("Duplicate community preset: \(entry.model) · \(entry.author)") }
+
+            let file = root.appendingPathComponent(entry.file)
+            guard let response = try parseParametricEQFile(path: file.path),
+                  let preamp = response.preamp, abs(preamp) <= 40,
+                  response.bands.count <= 256,
+                  response.bands.allSatisfy({ (20...20000).contains($0.freq) && abs($0.gain) <= 30 && (0.1...20).contains($0.q) })
+            else { throw failure("Invalid community preset: \(entry.file)") }
+
+            let headphoneId = try insertHeadphone(brand: entry.brand, model: entry.model, type: entry.type, source: entry.author)
+            let presetId = try insertPreset(
+                headphoneId: headphoneId,
+                source: "community",
+                author: entry.author,
+                targetCurve: entry.name,
+                preampGain: Float(preamp),
+                isHandCrafted: true,
+                isRecommended: false
+            )
+            for (index, band) in response.bands.enumerated() {
+                try insertParametricBand(
+                    presetId: presetId,
+                    bandIndex: index,
+                    band: ParametricBandEntry(filterType: band.type, frequency: band.freq, gain: Float(band.gain), qFactor: Float(band.q))
+                )
+            }
+        }
+    }
+
     private func insertHeadphone(brand: String, model: String, type: String, source: String) throws -> Int {
         let key = [brand, model, source].joined(separator: "\0")
         
@@ -464,11 +515,11 @@ class EQDatabaseBuilder {
         CREATE INDEX idx_presets_recommended ON presets(is_recommended);
         
         CREATE VIRTUAL TABLE headphones_fts USING fts5(
-            brand, model, type, content=headphones, content_rowid=id
+            brand, model, type, source, content=headphones, content_rowid=id
         );
         
-        INSERT INTO headphones_fts(rowid, brand, model, type)
-        SELECT id, brand, model, type FROM headphones;
+        INSERT INTO headphones_fts(rowid, brand, model, type, source)
+        SELECT id, brand, model, type, source FROM headphones;
         """
         
         try executeSQL(indexes)
@@ -530,7 +581,16 @@ class EQDatabaseBuilder {
               let presets = Int(try scalar("SELECT count(*) FROM presets")), presets > 0,
               try scalar("SELECT count(*) FROM metadata") == "4",
               try scalar("SELECT value FROM metadata WHERE key='schema_version'") == "1",
-              try scalar("SELECT count(*) FROM presets p WHERE (SELECT count(*) FROM fixed_band_10 WHERE preset_id=p.id) NOT IN (0,10) OR (SELECT count(*) FROM graphic_eq_31 WHERE preset_id=p.id) NOT IN (0,31) OR ((SELECT count(*) FROM fixed_band_10 WHERE preset_id=p.id)=0 AND (SELECT count(*) FROM graphic_eq_31 WHERE preset_id=p.id)=0)") == "0",
+              try scalar("""
+                SELECT count(*) FROM presets p
+                WHERE (SELECT count(*) FROM fixed_band_10 WHERE preset_id=p.id) NOT IN (0,10)
+                   OR (SELECT count(*) FROM graphic_eq_31 WHERE preset_id=p.id) NOT IN (0,31)
+                   OR (p.source<>'community'
+                       AND NOT EXISTS (SELECT 1 FROM fixed_band_10 WHERE preset_id=p.id)
+                       AND NOT EXISTS (SELECT 1 FROM graphic_eq_31 WHERE preset_id=p.id))
+                   OR (p.source='community'
+                       AND NOT EXISTS (SELECT 1 FROM parametric_bands WHERE preset_id=p.id))
+                """) == "0",
               try scalar("SELECT count(*) FROM fixed_band_10 WHERE band_index<0 OR band_index>=10 OR frequency<=0") == "0",
               try scalar("SELECT count(*) FROM graphic_eq_31 WHERE band_index<0 OR band_index>=31 OR frequency<=0") == "0",
               try scalar("SELECT count(*) FROM parametric_bands WHERE band_index<0 OR frequency<=0 OR q_factor<=0") == "0" else {
@@ -632,7 +692,8 @@ class EQDatabaseBuilder {
             }
         }
         
-        guard bands.count >= 31, bands.first!.freq <= 20, bands.last!.freq >= 20000,
+        // AutoEq's logarithmic GraphicEQ export ends at 19871 Hz.
+        guard bands.count >= 31, bands.first!.freq <= 20, bands.last!.freq >= 19871,
               zip(bands, bands.dropFirst()).allSatisfy({ $0.0.freq < $0.1.freq }) else {
             throw failure("Incomplete graphic EQ: \(path)")
         }
@@ -703,7 +764,7 @@ class EQDatabaseBuilder {
 
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    let allowed: Set<String> = ["--output", "--index", "--autoeq-root"]
+    let allowed: Set<String> = ["--output", "--index", "--autoeq-root", "--community-index"]
     var options: [String: String] = [:]
     var offset = 0
     while offset < arguments.count {
@@ -718,7 +779,8 @@ do {
     let builder = EQDatabaseBuilder(
         dbPath: options["--output"] ?? "SystemEQ for Mac/Resources/EQDatabase.db",
         indexPath: options["--index"],
-        autoEQRoot: options["--autoeq-root"] ?? "AutoEq"
+        autoEQRoot: options["--autoeq-root"] ?? "AutoEq",
+        communityIndex: options["--community-index"].map { URL(fileURLWithPath: $0) }
     )
     try builder.build()
 } catch {

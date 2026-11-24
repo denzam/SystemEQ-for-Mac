@@ -163,6 +163,7 @@ class EQDatabase {
         JOIN headphones_fts fts ON h.id = fts.rowid
         WHERE headphones_fts MATCH ?
         ORDER BY 
+            CASE WHEN lower(h.brand || ' ' || h.model || ' ' || h.source) = lower(?) THEN 0 ELSE 1 END,
             CASE WHEN lower(h.brand || ' ' || h.model) = lower(?) THEN 0 ELSE 1 END,
             bm25(headphones_fts),
             CASE WHEN h.source = 'oratory1990' THEN 0 ELSE 1 END,
@@ -184,7 +185,8 @@ class EQDatabase {
             return []
         }
 
-        guard sqlite3_bind_text(statement, 2, query, -1, SQLITE_TRANSIENT) == SQLITE_OK else { return [] }
+        guard sqlite3_bind_text(statement, 2, query, -1, SQLITE_TRANSIENT) == SQLITE_OK,
+              sqlite3_bind_text(statement, 3, query, -1, SQLITE_TRANSIENT) == SQLITE_OK else { return [] }
 
         var results: [DatabaseHeadphone] = []
         var stepStatus = sqlite3_step(statement)
@@ -509,7 +511,7 @@ class EQDatabase {
         return bands
     }
 
-    func canonicalPreset(presetId: Int) throws -> AutoEQImportedPreset {
+    func canonicalPreset(presetId: Int, legacy: Bool = true) throws -> AutoEQImportedPreset {
         let sql = """
         SELECT b.filter_type, b.frequency, b.gain, b.q_factor, p.preamp_gain
         FROM parametric_bands b JOIN presets p ON p.id = b.preset_id
@@ -552,7 +554,7 @@ class EQDatabase {
             dlog("Canonical AutoEQ read failed: \(status)", level: .error, category: .database)
             throw AutoEQImportError.invalidSource
         }
-        return try AutoEQImportParser.validated(filters, preamp: preamp, legacy: true)
+        return try AutoEQImportParser.validated(filters, preamp: preamp, legacy: legacy)
     }
 
     // MARK: - Version & Updates

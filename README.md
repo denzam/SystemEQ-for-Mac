@@ -192,6 +192,8 @@ SystemEQ for Mac/
 3. Click "⚡ Quick Import"
 4. Adjust bass boost if needed
 
+You can also include a preset author in the search, for example `Beyerdynamic DT 770 Pro X Alpagan Barut`. This community preset is for the standard 2025 model (48 Ω).
+
 ### Calibration
 
 1. Compare test frequencies against the fixed 1000 Hz reference

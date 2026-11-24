@@ -326,6 +326,36 @@ final class AutoEQModelsTests: XCTestCase {
         XCTAssertEqual(AutoEQView.databaseCandidate(rebuiltDatabaseRow).path, candidate.path)
     }
 
+    func testQuickImportPrefersTheRequestedModelAndAuthor() {
+        let model = "DT 770 PRO X"
+        let standard = AutoEQView.databaseCandidate(
+            DatabaseHeadphone(id: 1, brand: "Beyerdynamic", model: model, type: "over-ear", source: "Alpagan Barut")
+        )
+        let limited = AutoEQView.databaseCandidate(
+            DatabaseHeadphone(
+                id: 2,
+                brand: "Beyerdynamic",
+                model: model + " Limited Edition",
+                type: "over-ear",
+                source: "oratory1990"
+            )
+        )
+        let candidates = [limited, standard]
+
+        XCTAssertEqual(
+            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X Alpagan Barut")?.path,
+            standard.path
+        )
+        XCTAssertEqual(
+            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X")?.path,
+            standard.path
+        )
+        XCTAssertEqual(
+            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X Limited Edition")?.path,
+            limited.path
+        )
+    }
+
     func testFallbackIndexRejectsEmptyOrUnrelatedResponses() {
         for text in ["", " \n\t", "# Unavailable", "[Help](https://example.com)", "[Docs](./docs/README.md)"] {
             XCTAssertThrowsError(try AutoEQLegacyRepository.fallbackIndexEntries(from: Data(text.utf8))) { error in
