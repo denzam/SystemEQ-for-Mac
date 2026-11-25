@@ -128,9 +128,11 @@ class EQDatabaseBuilderTests(unittest.TestCase):
                            ('"Alpagan" AND "Barut"',)).fetchall(),
                 [("Beyerdynamic", "DT 770 Pro X", "Alpagan Barut")],
             )
-            preset_id, source, author, name, preamp = db.execute(
-                "SELECT id, source, author, target_curve, preamp_gain FROM presets WHERE source='community'"
-            ).fetchone()
+            preset_id, source, author, name, preamp = db.execute("""
+                SELECT p.id, p.source, p.author, p.target_curve, p.preamp_gain
+                FROM presets p JOIN headphones h ON h.id = p.headphone_id
+                WHERE p.source = 'community' AND h.brand = ? AND h.model = ? AND p.author = ?
+            """, ("Beyerdynamic", "DT 770 Pro X", "Alpagan Barut")).fetchone()
             self.assertEqual((source, author, name, preamp),
                              ("community", "Alpagan Barut", "Music listening (2025 standard model, 48 Ω)", -2.0))
             bands = db.execute(
