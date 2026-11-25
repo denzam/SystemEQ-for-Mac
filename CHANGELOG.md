@@ -12,6 +12,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Accept AutoEq GraphicEQ exports ending at 19,871 Hz when rebuilding the catalog.
 
+### Changed
+- Run EQ database builder tests in pull request CI and cover multiple community presets for the same headphone model.
+
 ## [1.4.9] — 2026-11-04
 
 Optional automatic profile headroom adjustment and safer test tones on multichannel audio interfaces.
