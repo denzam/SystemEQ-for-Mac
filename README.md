@@ -3,7 +3,7 @@
 **Free, open-source system-wide parametric equalizer for macOS 13+**
 
 Tune every sound on your Mac — Spotify, YouTube, Apple Music, anything.
-10/31-band parametric EQ with an 8,665-headphone AutoEQ database, hearing
+10/31-band parametric EQ with an 8,666-headphone AutoEQ database, hearing
 calibration, room-tuning tools, and a real-time visualizer. No subscriptions,
 no telemetry.
 
@@ -35,7 +35,7 @@ no telemetry.
 ### Core Features
 
 - **10/31-band Parametric EQ** — Professional-grade audio processing with biquad filters
-- **AutoEQ Database** — 8,665 headphone models, 8,850 presets (SQLite, 18 MiB)
+- **AutoEQ Database** — 8,666 headphone models, 8,851 presets (SQLite, 18 MiB)
 - **Real-time Visualization** — Spectrum, Waveform, Particles, Psychedelic
 - **Calibration Module** — Hearing test + custom profiles + A/B comparison
 - **Subjective Room Tuning** — Tune your room response by ear
@@ -148,7 +148,7 @@ Fallback:     System Audio → BlackHole 2ch → vDSP Biquad EQ → Physical Out
 - **CoreAudioEngine**: Low-level AUHAL dual I/O, lock-free ring buffer
 - **BiquadFilterVDSP**: Batched filtering uses Apple Accelerate vDSP.
 - **SPSCRingBuffer**: Lock-free SPSC buffer with C11 atomics
-- **EQDatabase**: SQLite, 18 MiB, 8,665 headphone models
+- **EQDatabase**: SQLite, 18 MiB, 8,666 headphone models
 
 ## 📁 Project Structure
 
@@ -187,7 +187,7 @@ SystemEQ for Mac/
 
 ### AutoEQ Presets
 
-1. Search for your headphone model (8,665 available)
+1. Search for your headphone model (8,666 available)
 2. Choose a preset (oratory1990, Crinacle, etc.)
 3. Click "⚡ Quick Import"
 4. Adjust bass boost if needed
@@ -215,6 +215,8 @@ mode applies all 31 adjustments. Choose 31-band mode to use the full profile.
 
 - Use **Subjective Room Tuning** to tune your room response by ear
 - Use **Resonance Finder** to sweep for boomy or ringing frequencies, then create a corrective notch filter
+
+> **Note**: Level matching and resonance evaluation are performed by the user by ear, specifically using test tones and during sweeps. SystemEQ does not perform automated room impulse response or acoustic frequency response measurements with a calibration microphone.
 
 ### Output-Specific Presets
 

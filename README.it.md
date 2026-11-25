@@ -3,7 +3,7 @@
 Equalizzatore parametrico gratuito e open source a livello di sistema per macOS 13+
 
 Regola ogni suono del Mac — Spotify, YouTube, Apple Music e altro.
-EQ a 10/31 bande, database AutoEQ per 8.665 modelli di cuffie, calibrazione
+EQ a 10/31 bande, database AutoEQ per 8.666 modelli di cuffie, calibrazione
 dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abbonamento o telemetria.
 
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos/)
@@ -34,7 +34,7 @@ dell'udito, strumenti per l'ambiente e visualizzatore in tempo reale. Nessun abb
 ### Funzioni principali
 
 - **EQ Parametrico 10/31 bande** — Elaborazione audio professionale con filtri biquad
-- **Database AutoEQ** — 8.665 modelli di cuffie, 8.850 preset (SQLite, 18 MiB)
+- **Database AutoEQ** — 8.666 modelli di cuffie, 8.851 preset (SQLite, 18 MiB)
 - **Visualizzazione in tempo reale** — Spettro, Forma d'onda, Particelle, Psichedelico
 - **Modulo di calibrazione** — Test dell'udito + profili personalizzati + confronto A/B
 - **Regolazione Soggettiva Stanza** — Regola la risposta della stanza a orecchio
@@ -148,7 +148,7 @@ Fallback:     Audio di sistema → BlackHole 2ch → EQ Biquad vDSP → Uscita f
 - **CoreAudioEngine**: AUHAL dual I/O di basso livello, ring buffer lock-free
 - **BiquadFilterVDSP**: L’elaborazione batch dei filtri usa Apple Accelerate vDSP.
 - **SPSCRingBuffer**: buffer SPSC lock-free con atomiche C11
-- **EQDatabase**: SQLite, 18 MiB, 8.665 modelli di cuffie
+- **EQDatabase**: SQLite, 18 MiB, 8.666 modelli di cuffie
 
 ## 📁 Struttura del progetto
 
@@ -187,7 +187,7 @@ SystemEQ for Mac/
 
 ### Preset AutoEQ
 
-1. Cerca il modello delle tue cuffie (8.665 disponibili)
+1. Cerca il modello delle tue cuffie (8.666 disponibili)
 2. Scegli un preset (oratory1990, Crinacle, ecc.)
 3. Clicca "⚡ Quick Import"
 4. Regola il boost dei bassi se necessario
@@ -211,6 +211,8 @@ Puoi includere nella ricerca anche il nome dell’autore del preset, ad esempio 
 
 - Usa **Regolazione Soggettiva Stanza** per impostare la risposta della stanza a orecchio
 - Usa **Trova Risonanze** per trovare frequenze rimbombanti o squillanti e creare un filtro notch correttivo
+
+> **Nota**: Il livellamento e la valutazione delle risonanze vengono eseguiti dall’utente a orecchio, in particolare tramite toni di prova e durante lo sweep. SystemEQ non esegue misurazioni automatiche dell’acustica ambientale o della risposta all’impulso tramite microfono di calibrazione.
 
 ### Preset per uscita
 
