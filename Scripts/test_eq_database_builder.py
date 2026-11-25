@@ -5,6 +5,7 @@ import os
 from contextlib import closing
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -118,33 +119,54 @@ class EQDatabaseBuilderTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone(), ("1",))
             self.assertEqual(db.execute("SELECT preamp_gain FROM presets").fetchone(), (-2.0,))
 
-    def test_community_preset_is_searchable_and_preserves_the_source_filters(self):
-        manifest = self.root / "Scripts/CommunityPresets/index.json"
+    def test_community_presets_are_searchable_and_preserve_their_source_filters(self):
+        community = self.work / "CommunityPresets"
+        shutil.copytree(self.root / "Scripts/CommunityPresets", community)
+        manifest = community / "index.json"
+        entries = json.loads(manifest.read_text(encoding="utf-8"))
+        brand, model = "Beyerdynamic", "DT 770 Pro X"
+        fixture = dict(brand=brand, model=model, type="over-ear", author="Fixture Author",
+                       name="Test preset", file="test-community-preset.txt")
+        (community / fixture["file"]).write_text(
+            "Preamp: -3.5 dB\nFilter 1: ON PK Fc 750 Hz Gain -0.75 dB Q 1.25\n",
+            encoding="utf-8",
+        )
+        manifest.write_text(json.dumps([fixture, *entries]), encoding="utf-8")
+
         result = self.run_builder(None, "--community-index", str(manifest))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        with closing(sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)) as db:
-            self.assertEqual(
-                db.execute("SELECT brand, model, source FROM headphones_fts WHERE headphones_fts MATCH ?",
-                           ('"Alpagan" AND "Barut"',)).fetchall(),
-                [("Beyerdynamic", "DT 770 Pro X", "Alpagan Barut")],
-            )
-            preset_id, source, author, name, preamp = db.execute("""
-                SELECT p.id, p.source, p.author, p.target_curve, p.preamp_gain
-                FROM presets p JOIN headphones h ON h.id = p.headphone_id
-                WHERE p.source = 'community' AND h.brand = ? AND h.model = ? AND p.author = ?
-            """, ("Beyerdynamic", "DT 770 Pro X", "Alpagan Barut")).fetchone()
-            self.assertEqual((source, author, name, preamp),
-                             ("community", "Alpagan Barut", "Music listening (2025 standard model, 48 Ω)", -2.0))
-            bands = db.execute(
-                "SELECT filter_type,frequency,gain,q_factor FROM parametric_bands WHERE preset_id=? ORDER BY band_index",
-                (preset_id,),
-            ).fetchall()
-            self.assertEqual([(kind, freq, round(gain, 2), round(q, 2)) for kind, freq, gain, q in bands], [
+        expected_presets = (
+            ("Fixture Author", "Test preset", -3.5, [("PK", 750, -0.75, 1.25)]),
+            ("Alpagan Barut", "Music listening (2025 standard model, 48 Ω)", -2.0, [
                 ("LS", 55, 0.45, 0.71), ("PK", 115, -1.1, 1.4), ("PK", 235, 1.1, 1.55),
                 ("PK", 1550, 0.3, 1.1), ("PK", 3100, 1.05, 1.25), ("PK", 4400, 0.95, 2.1),
                 ("PK", 5600, -0.65, 2.3), ("PK", 6500, -2.55, 2.15),
                 ("PK", 10500, -1.65, 2.05), ("HS", 14200, -0.3, 0.71),
-            ])
+            ]),
+        )
+        with closing(sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)) as db:
+            for author, target, preamp, expected_bands in expected_presets:
+                with self.subTest(author=author):
+                    self.assertIn(
+                        (brand, model, author),
+                        db.execute("SELECT brand, model, source FROM headphones_fts WHERE headphones_fts MATCH ?",
+                                   (f'"{author}"',)).fetchall(),
+                    )
+                    presets = db.execute("""
+                        SELECT p.id, p.target_curve, p.preamp_gain
+                        FROM presets p JOIN headphones h ON h.id = p.headphone_id
+                        WHERE p.source = 'community' AND h.brand = ? AND h.model = ? AND p.author = ?
+                    """, (brand, model, author)).fetchall()
+                    self.assertEqual([(name, gain) for _, name, gain in presets], [(target, preamp)])
+                    (preset_id, _, _), = presets
+                    bands = db.execute("""
+                        SELECT filter_type, frequency, gain, q_factor
+                        FROM parametric_bands WHERE preset_id = ? ORDER BY band_index
+                    """, (preset_id,)).fetchall()
+                    self.assertEqual(
+                        [(kind, freq, round(gain, 2), round(q, 2)) for kind, freq, gain, q in bands],
+                        expected_bands,
+                    )
             self.assertEqual(db.execute("SELECT count(*) FROM presets WHERE source='source'").fetchone(), (1,))
 
     def test_invalid_community_input_preserves_database(self):
