@@ -362,8 +362,8 @@ class EQDatabaseBuilder {
             guard headphones[key] == nil else { throw failure("Duplicate community preset: \(entry.model) · \(entry.author)") }
 
             let file = root.appendingPathComponent(entry.file)
-            guard let response = try parseParametricEQFile(path: file.path),
-                  let preamp = response.preamp, abs(preamp) <= 40,
+            guard let response = try parseParametricEQFile(path: file.path, strict: true),
+                  let preamp = response.preamp, (-20...0).contains(preamp),
                   response.bands.count <= 256,
                   response.bands.allSatisfy({ (20...20000).contains($0.freq) && abs($0.gain) <= 30 && (0.1...20).contains($0.q) })
             else { throw failure("Invalid community preset: \(entry.file)") }
@@ -589,7 +589,8 @@ class EQDatabaseBuilder {
                        AND NOT EXISTS (SELECT 1 FROM fixed_band_10 WHERE preset_id=p.id)
                        AND NOT EXISTS (SELECT 1 FROM graphic_eq_31 WHERE preset_id=p.id))
                    OR (p.source='community'
-                       AND NOT EXISTS (SELECT 1 FROM parametric_bands WHERE preset_id=p.id))
+                       AND (NOT EXISTS (SELECT 1 FROM parametric_bands WHERE preset_id=p.id)
+                            OR p.preamp_gain < -20 OR p.preamp_gain > 0))
                 """) == "0",
               try scalar("SELECT count(*) FROM fixed_band_10 WHERE band_index<0 OR band_index>=10 OR frequency<=0") == "0",
               try scalar("SELECT count(*) FROM graphic_eq_31 WHERE band_index<0 OR band_index>=31 OR frequency<=0") == "0",
@@ -700,24 +701,27 @@ class EQDatabaseBuilder {
         return (bands: bands, preamp: preamp)
     }
     
-    private func parseParametricEQFile(path: String) throws -> (bands: [(type: String, freq: Double, gain: Double, q: Double)], preamp: Double?)? {
+    private func parseParametricEQFile(path: String, strict: Bool = false) throws -> (bands: [(type: String, freq: Double, gain: Double, q: Double)], preamp: Double?)? {
         guard let content = try readEQFile(path) else { return nil }
         
         var bands: [(type: String, freq: Double, gain: Double, q: Double)] = []
         var preamp: Double?
         
-        for line in content.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        for rawLine in content.components(separatedBy: .newlines) {
+            let line = strict ? rawLine.components(separatedBy: "#")[0] : rawLine
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if strict && (trimmed.isEmpty || trimmed.hasPrefix(";")) { continue }
             
             // Parse preamp
             if trimmed.hasPrefix("Preamp:") {
+                if strict && preamp != nil { throw failure("Duplicate preamp: \(path)") }
                 let parts = trimmed.split(separator: " ")
                 guard parts.count >= 2, let value = Double(parts[1]), value.isFinite else { throw failure("Invalid preamp: \(path)") }
                 preamp = value
             }
             
             // Parse filter: "Filter 1: ON PK Fc 105 Hz Gain 6.5 dB Q 0.69"
-            if trimmed.hasPrefix("Filter") {
+            else if trimmed.hasPrefix("Filter") {
                 let parts = trimmed.split(separator: " ")
                 var filterType = "PK"
                 var freq: Double?
@@ -745,6 +749,8 @@ class EQDatabaseBuilder {
                     throw failure("Invalid parametric band: \(path)")
                 }
                 bands.append((type: filterType, freq: f, gain: g, q: qVal))
+            } else if strict {
+                throw failure("Invalid parametric EQ line: \(path)")
             }
         }
         

@@ -159,8 +159,16 @@ class EQDatabaseBuilderTests(unittest.TestCase):
                 manifest.write_bytes(payload)
                 self.assert_builder_rejected(None, "--community-index", str(manifest))
         manifest.write_text(json.dumps([entry]))
-        profile.write_text("Filter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7")
-        self.assert_builder_rejected(None, "--community-index", str(manifest))
+        for bad_profile in (
+            "Filter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7",
+            "Preamp: -25 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7",
+            "Preamp: 3 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7",
+            "Preamp: -2 dB\nPreamp: -3 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7",
+            "Preamp: -2 dB\nChannel: L\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 0.7",
+        ):
+            with self.subTest(bad_profile=bad_profile):
+                profile.write_text(bad_profile)
+                self.assert_builder_rejected(None, "--community-index", str(manifest))
 
     def test_missing_malformed_empty_index_preserves_database(self):
         for value in (b"", b"[]", b"not json", b"\xff", b"{}"):
