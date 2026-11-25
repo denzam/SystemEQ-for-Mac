@@ -73,7 +73,18 @@ final class EQDatabaseFixtureTests: XCTestCase {
     func testMissingFTSTableFallsBackToLike() throws {
         try withFixture { database in
             XCTAssertEqual(database.searchHeadphones("AirPods Pro").first?.id, 1)
+            XCTAssertEqual(database.searchHeadphones("fixture").first?.id, 1)
             XCTAssertEqual(database.readVersion(), "2026-10-03")
+        }
+    }
+
+    func testDatabaseServiceTargetCurveReadsPresetTarget() throws {
+        try withFixture(fts: true) { database in
+            let service = AutoEQDatabaseService(database: database)
+            let candidate = AutoEQDatabaseService.candidate(
+                DatabaseHeadphone(id: 1, brand: "Apple", model: "AirPods Pro (2nd gen)", type: "", source: "fixture")
+            )
+            XCTAssertEqual(service.targetCurve(for: candidate), AppConstants.EQ.defaultTarget)
         }
     }
 
@@ -340,19 +351,37 @@ final class AutoEQModelsTests: XCTestCase {
                 source: "oratory1990"
             )
         )
-        let candidates = [limited, standard]
+        let classic = AutoEQView.databaseCandidate(
+            DatabaseHeadphone(
+                id: 3,
+                brand: "Beyerdynamic",
+                model: "DT 770 Pro",
+                type: "over-ear",
+                source: "oratory1990"
+            )
+        )
+        let candidates = [classic, limited, standard]
 
-        XCTAssertEqual(
-            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X Alpagan Barut")?.path,
-            standard.path
-        )
-        XCTAssertEqual(
-            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X")?.path,
-            standard.path
-        )
+        for query in [
+            "Beyerdynamic DT 770 PRO X Alpagan Barut",
+            "DT 770 PRO X Alpagan Barut",
+            "Alpagan Barut Beyerdynamic DT 770 PRO X",
+            "Beyerdynamic DT 770 PRO X Alpagan",
+            "Beyerdynamic DT 770 PRO X",
+            "DT 770 PRO X"
+        ] {
+            let ranked = AutoEQView.rankCandidates(candidates, query: query)
+            XCTAssertEqual(ranked.first?.path, standard.path, query)
+            XCTAssertEqual(AutoEQView.quickImportCandidate(ranked, query: query)?.path, standard.path, query)
+        }
+
         XCTAssertEqual(
             AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 PRO X Limited Edition")?.path,
             limited.path
+        )
+        XCTAssertEqual(
+            AutoEQView.quickImportCandidate(candidates, query: "Beyerdynamic DT 770 Pro")?.path,
+            classic.path
         )
     }
 

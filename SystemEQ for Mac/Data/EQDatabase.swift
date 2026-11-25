@@ -212,6 +212,7 @@ class EQDatabase {
         WHERE brand || ' ' || model LIKE ?
            OR model LIKE ?
            OR brand LIKE ?
+           OR source LIKE ?
         ORDER BY 
             CASE WHEN source = 'oratory1990' THEN 0 ELSE 1 END,
             brand, model
@@ -227,7 +228,7 @@ class EQDatabase {
         defer { sqlite3_finalize(statement) }
 
         let likePattern = "%\(query)%"
-        for index in 1...3 {
+        for index in 1...4 {
             let bindStatus = sqlite3_bind_text(statement, Int32(index), likePattern, -1, SQLITE_TRANSIENT)
             guard bindStatus == SQLITE_OK else {
                 logSQLiteError("LIKE bind", status: bindStatus)

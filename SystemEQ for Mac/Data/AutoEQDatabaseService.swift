@@ -7,6 +7,8 @@ struct AutoEQDatabaseImport {
 }
 
 struct AutoEQDatabaseService {
+    static let candidatePrefix = "database:"
+
     let database: EQDatabase
 
     func search(_ query: String) -> [DatabaseHeadphone] {
@@ -32,5 +34,56 @@ struct AutoEQDatabaseService {
         else { throw AutoEQImportError.invalidSource }
         let input = try database.canonicalPreset(presetId: preset.id, legacy: preset.source != "community")
         return (preset, input)
+    }
+
+    static func candidate(_ headphone: DatabaseHeadphone) -> SearchCandidate {
+        let identity = [headphone.source, headphone.brand, headphone.model]
+            .map { Data($0.utf8).base64EncodedString() }
+            .joined(separator: ":")
+        return SearchCandidate(
+            path: candidatePrefix + identity,
+            name: String(headphone.id),
+            display: "\(headphone.displayName) · \(headphone.source)",
+            isParametric: false
+        )
+    }
+
+    func searchCandidates(for query: String) -> [SearchCandidate] {
+        var candidates: [SearchCandidate] = []
+        for headphone in search(query) {
+            candidates.append(Self.candidate(headphone))
+        }
+        return candidates
+    }
+
+    static func source(from candidate: SearchCandidate) -> String? {
+        identity(from: candidate.path)?.source
+    }
+
+    static func identity(from path: String) -> (source: String, brand: String, model: String)? {
+        guard path.hasPrefix(candidatePrefix) else { return nil }
+        let encoded = path.dropFirst(candidatePrefix.count).split(separator: ":")
+        guard encoded.count == 3 else { return nil }
+        let values = encoded.compactMap { component -> String? in
+            guard let data = Data(base64Encoded: String(component)) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        guard values.count == 3 else { return nil }
+        return (values[0], values[1], values[2])
+    }
+
+    func headphoneID(from candidate: SearchCandidate) -> Int? {
+        guard candidate.path.hasPrefix(Self.candidatePrefix) else { return nil }
+        guard let identity = Self.identity(from: candidate.path) else { return nil }
+        return headphoneID(
+            brand: identity.brand,
+            model: identity.model,
+            source: identity.source
+        )
+    }
+
+    func targetCurve(for candidate: SearchCandidate) -> String? {
+        guard let id = headphoneID(from: candidate) else { return nil }
+        return database.getRecommendedPreset(for: id)?.targetCurve
     }
 }

@@ -58,7 +58,7 @@ private func autoEQPanel(@ViewBuilder content: () -> some View) -> some View {
 }
 
 struct AutoEQView: View {
-    static let databaseCandidatePrefix = "database:"
+    static let databaseCandidatePrefix = AutoEQDatabaseService.candidatePrefix
     private let databaseService = AutoEQDatabaseService(database: .shared)
     @StateObject private var legacyRepository = AutoEQLegacyRepository()
 
@@ -994,15 +994,7 @@ struct AutoEQView: View {
     }
 
     static func databaseCandidate(_ headphone: DatabaseHeadphone) -> SearchCandidate {
-        let identity = [headphone.source, headphone.brand, headphone.model]
-            .map { Data($0.utf8).base64EncodedString() }
-            .joined(separator: ":")
-        return SearchCandidate(
-            path: databaseCandidatePrefix + identity,
-            name: String(headphone.id),
-            display: "\(headphone.displayName) · \(headphone.source)",
-            isParametric: false
-        )
+        AutoEQDatabaseService.candidate(headphone)
     }
 
     static func directBands(centers: [Double], gains: [Float]) -> [ParsedBand]? {
@@ -1013,37 +1005,19 @@ struct AutoEQView: View {
     }
 
     private func databaseCandidates(for query: String) -> [SearchCandidate] {
-        var candidates: [SearchCandidate] = []
-        for headphone in databaseService.search(query) {
-            candidates.append(Self.databaseCandidate(headphone))
-        }
-        return candidates
+        databaseService.searchCandidates(for: query)
     }
 
     static func databaseSource(from candidate: SearchCandidate) -> String? {
-        databaseIdentity(from: candidate.path)?.source
+        AutoEQDatabaseService.source(from: candidate)
     }
 
     static func databaseIdentity(from path: String) -> (source: String, brand: String, model: String)? {
-        guard path.hasPrefix(databaseCandidatePrefix) else { return nil }
-        let encoded = path.dropFirst(databaseCandidatePrefix.count).split(separator: ":")
-        guard encoded.count == 3 else { return nil }
-        let values = encoded.compactMap { component -> String? in
-            guard let data = Data(base64Encoded: String(component)) else { return nil }
-            return String(data: data, encoding: .utf8)
-        }
-        guard values.count == 3 else { return nil }
-        return (values[0], values[1], values[2])
+        AutoEQDatabaseService.identity(from: path)
     }
 
     private func databaseHeadphoneID(from candidate: SearchCandidate) -> Int? {
-        guard candidate.path.hasPrefix(Self.databaseCandidatePrefix) else { return nil }
-        guard let identity = Self.databaseIdentity(from: candidate.path) else { return nil }
-        return databaseService.headphoneID(
-            brand: identity.brand,
-            model: identity.model,
-            source: identity.source
-        )
+        databaseService.headphoneID(from: candidate)
     }
 
     private func buildOrUpdateIndex() async {
@@ -1304,13 +1278,24 @@ struct AutoEQView: View {
     }
 
     private func rank(_ input: [SearchCandidate], query: String) -> [SearchCandidate] {
-        let q = Self.sanitize(query)
-        let queryTokens = q.split(separator: " ").map(String.init)
+        Self.rankCandidates(input, query: query)
+    }
+
+    static func rankCandidates(_ input: [SearchCandidate], query: String) -> [SearchCandidate] {
+        let queryTokens = tokens(query)
         let scored = input.map { candidate in
-            let sanitizedCandidate = Self.sanitize(candidate.display + " " + candidate.path)
+            let text = candidate.path.hasPrefix(databaseCandidatePrefix)
+                ? candidate.display
+                : "\(candidate.display) \(candidate.path)"
+            let sanitizedCandidate = sanitize(text)
+            let candidateTokens = sanitizedCandidate.split(separator: " ").map(String.init)
             var score = 0
             for token in queryTokens {
-                if sanitizedCandidate.contains(token) { score += 2 }
+                if candidateTokens.contains(token) {
+                    score += 3
+                } else if sanitizedCandidate.contains(token) {
+                    score += 2
+                }
                 if sanitizedCandidate.hasPrefix(token) { score += 1 }
             }
             if candidate.isParametric { score += 1 }
@@ -1533,17 +1518,54 @@ struct AutoEQView: View {
 
     static func quickImportCandidate(_ ranked: [SearchCandidate], query: String) -> SearchCandidate? {
         let queryTokens = tokens(query)
+        guard !queryTokens.isEmpty else { return ranked.first }
+
+        func preferredOrFirst(_ candidates: [SearchCandidate]) -> SearchCandidate? {
+            candidates.first { databaseSource(from: $0)?.localizedCaseInsensitiveContains("oratory") == true }
+                ?? candidates.first
+        }
+
         if let exact = ranked.first(where: { tokens($0.display) == queryTokens }) {
             return exact
         }
 
-        let exactModels = ranked.filter { candidate in
+        let querySet = Set(queryTokens)
+        let unorderedExact = ranked.filter { Set(tokens($0.display)) == querySet }
+        if !unorderedExact.isEmpty {
+            return preferredOrFirst(unorderedExact)
+        }
+
+        let exactBrandModel = ranked.filter { candidate in
             guard let identity = databaseIdentity(from: candidate.path) else { return false }
             return tokens("\(identity.brand) \(identity.model)") == queryTokens
         }
-        let matches = exactModels.isEmpty ? ranked : exactModels
-        return matches.first { databaseSource(from: $0)?.localizedCaseInsensitiveContains("oratory") == true }
-            ?? matches.first
+        if !exactBrandModel.isEmpty {
+            return preferredOrFirst(exactBrandModel)
+        }
+
+        let exactModelOnly = ranked.filter { candidate in
+            guard let identity = databaseIdentity(from: candidate.path) else { return false }
+            return tokens(identity.model) == queryTokens
+        }
+        if !exactModelOnly.isEmpty {
+            return preferredOrFirst(exactModelOnly)
+        }
+
+        let fullTokenMatches = ranked.filter { candidate in
+            let displayTokens = tokens(candidate.display)
+            return queryTokens.allSatisfy { q in displayTokens.contains { $0 == q || $0.hasPrefix(q) } }
+        }
+        if !fullTokenMatches.isEmpty {
+            return preferredOrFirst(fullTokenMatches)
+        }
+
+        func matchCount(_ candidate: SearchCandidate) -> Int {
+            let displayTokens = tokens(candidate.display)
+            return queryTokens.count { q in displayTokens.contains { $0 == q || $0.hasPrefix(q) } }
+        }
+        let bestCount = ranked.map(matchCount).max() ?? 0
+        let bestMatches = ranked.filter { matchCount($0) == bestCount }
+        return preferredOrFirst(bestMatches)
     }
 
     @MainActor
@@ -1715,7 +1737,9 @@ struct AutoEQView: View {
                 path: candidate.path,
                 name: candidate.display,
                 source: Self.databaseSource(from: candidate),
-                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix) ? targetProfile : nil
+                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix)
+                    ? (databaseService.targetCurve(for: candidate) ?? targetProfile)
+                    : nil
             )
         }
     }
