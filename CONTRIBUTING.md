@@ -62,6 +62,20 @@ Do not replace it with the scalar `BiquadFilterChain` fallback.
 `SPSCRingBuffer` is lock-free with C11 atomics. Do not change its size or
 its memory ordering without a benchmark.
 
+## Community EQ presets
+
+1. Add a UTF-8 AutoEq parametric `.txt` file to `Scripts/CommunityPresets/`
+   with a `Preamp:` line and at least one enabled filter. Use the
+   [DT 770 Pro X preset](Scripts/CommunityPresets/Beyerdynamic%20DT%20770%20Pro%20X%20%C2%B7%20Alpagan%20Barut.txt)
+   as an example.
+2. Add an entry to the [catalog index](Scripts/CommunityPresets/index.json)
+   with the preset's filename in `file`. Use the exact headphone model and
+   note the edition or impedance in `name` when relevant. Each combination
+   of `brand`, `model`, and `author` can appear once.
+3. From the repository root, run `python3 Scripts/test_eq_database_builder.py -v`
+   on macOS before opening the PR. The scheduled database rebuild picks up
+   merged presets.
+
 ## Pull requests
 
 1. Fork → branch (`feature/your-feature` or `fix/short-description`).
