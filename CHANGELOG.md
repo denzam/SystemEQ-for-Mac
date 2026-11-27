@@ -6,14 +6,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-11-27
+
+Direct parametric EQ, community presets and clearer diagnostics for missing system audio.
+
 ### Added
-- Support bundled community EQ presets in the catalog and preserve their declared preamp during import.
+- Apply compatible AutoEQ presets with their original parametric filters and see the calculated EQ response, including preamp, output boost and room correction. Automatic import continues to use the selected 10 or 31 fixed bands.
+- Browse bundled community AutoEQ presets and retain each preset’s declared preamp when importing.
+- See whether BlackHole has microphone access and whether system audio reaches the input and post-EQ stages. The diagnostic report includes the permission state, the last BlackHole input read error and separate test-tone results.
+- Inspect Native callback timing in optional real-time diagnostics.
 
 ### Fixed
-- Accept AutoEq GraphicEQ exports ending at 19,871 Hz when rebuilding the catalog.
+- Improve Native recovery when USB audio devices disconnect, reappear, or report temporarily unavailable audio metadata.
+- Protect BlackHole resampling against overshoot and nonfinite samples, and report audio-thread scheduling failures.
+- Improve headroom estimates for high-shelf filters and support compatible AutoEQ presets at sample rates such as 32 kHz.
+- Fix Quick Import selection and fallback author search. Show a catalog preset’s target curve when it is supplied by the preset metadata.
+- Accept AutoEq GraphicEQ exports that end just below 20 kHz when rebuilding the catalog.
 
 ### Changed
-- Run EQ database builder tests in pull request CI and cover multiple community presets for the same headphone model.
+- Update Sparkle to 2.10.1.
+- Expand database tests to cover multiple community presets for the same headphone model and run the builder tests in pull request CI.
 
 ## [1.4.9] — 2026-11-04
 
