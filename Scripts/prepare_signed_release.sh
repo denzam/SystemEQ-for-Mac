@@ -21,7 +21,7 @@ HELPER = Path("Contents/Helpers/ProjectMHelper.app")
 LIBRARIES = ("libprojectM-4.4.dylib", "libprojectM-4-playlist.4.dylib")
 SPARKLE = Path("Contents/Frameworks/Sparkle.framework")
 SPARKLE_BASE = SPARKLE / "Versions/B"
-SPARKLE_VERSION = "2.10.0"
+SPARKLE_VERSION = "2.10.1"
 SPARKLE_COMPONENTS = (
     SPARKLE_BASE / "XPCServices/Installer.xpc",
     SPARKLE_BASE / "XPCServices/Downloader.xpc",

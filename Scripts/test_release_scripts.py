@@ -485,7 +485,7 @@ elif name == "xcodebuild":
     for metadata, binary, executable in nested:
         metadata.parent.mkdir(parents=True, exist_ok=True)
         binary.parent.mkdir(parents=True, exist_ok=True)
-        metadata.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "2.10.0", "CFBundleExecutable": executable}))
+        metadata.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "2.10.1", "CFBundleExecutable": executable}))
         binary.write_bytes(bytes.fromhex("cafebabe") + b"sparkle fixture")
     (sparkle / "Autoupdate").write_bytes(bytes.fromhex("cafebabe") + b"autoupdate fixture")
     if mode == "extra-code": (app / "Contents/MacOS/Unexpected").write_bytes(bytes.fromhex("cafebabe"))

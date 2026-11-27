@@ -353,7 +353,7 @@
         A51000000000000000000003 /* Sparkle */ = {
             isa = XCRemoteSwiftPackageReference;
             repositoryURL = "https://github.com/sparkle-project/Sparkle";
-            requirement = {kind = exactVersion; version = 2.10.0;};
+            requirement = {kind = exactVersion; version = 2.10.1;};
         };
 /* End XCRemoteSwiftPackageReference section */
 /* Begin XCSwiftPackageProductDependency section */
