@@ -669,6 +669,16 @@ class RoutingWakeLifecycleTests(unittest.TestCase):
             "@MainActor\nfinal class RoutingWakeRecovery {",
             "enum RoutingRequestReason: String, CaseIterable {",
             "enum AudioRoutingRequestPolicy {",
+            "public struct AudioDevice: Identifiable, Equatable {",
+            "enum AudioOutputSelectionPolicy {",
+            "enum DefaultOutputChangeAction: Equatable {",
+            "enum DefaultOutputChangePolicy {",
+            "enum NativeTopologyChangeAction: Equatable {",
+            "enum NativeTopologyChangePolicy {",
+            "enum PendingMetadataRetryDefaultOutputAction: Equatable {",
+            "enum PendingMetadataRetryTopologyAction: Equatable {",
+            "enum PendingMetadataRetryPolicy {",
+            "@MainActor\nfinal class NativeMetadataRetryRecovery {",
         ))
         methods = "\n".join(extract(signature) for signature in (
             "    public var isRoutingOwned: Bool {",
@@ -692,8 +702,8 @@ class RoutingWakeLifecycleTests(unittest.TestCase):
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
 
-    def run_scenario(self, scenario):
-        for backend in ("blackHole", "native"):
+    def run_scenario(self, scenario, backends=("blackHole", "native")):
+        for backend in backends:
             with self.subTest(scenario=scenario, backend=backend):
                 result = subprocess.run([str(self.binary), scenario, backend], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -728,19 +738,41 @@ class RoutingWakeLifecycleTests(unittest.TestCase):
     def test_failed_resource_release_does_not_restore_device_rates(self):
         self.run_scenario("release-failure")
 
+    def test_sleep_cancels_pending_metadata_retry_without_losing_wake_intent(self):
+        self.run_scenario("metadata-retry-sleep", backends=("native",))
+
     TEMPLATE = r'''import Foundation
 
-typealias AudioDeviceID = UInt32
-struct AudioDevice {
+public typealias AudioDeviceID = UInt32
+let kAudioObjectUnknown: AudioDeviceID = 0
+extension AudioDevice {
+    init(id: AudioDeviceID, name: String, uid: String) {
+        self.init(id: id, name: name, uid: uid, isInput: uid == "blackhole", isOutput: true)
+    }
+}
+struct DeviceInfo {
     let id: AudioDeviceID
     let name: String
     let uid: String
+    let hasInput: Bool
+    let hasOutput: Bool
 }
 enum ActiveAudioRoutingBackend: String { case none, native, blackHole }
 enum LogLevel { case info, warning, error }
 enum LogCategory { case routing }
 func dlog(_ message: String, level: LogLevel = .info, category: LogCategory) {}
-enum AppConstants { enum DeviceNames { static let blackHoleLowercase = "blackhole" } }
+enum AppConstants {
+    enum DeviceNames {
+        static let blackHoleLowercase = "blackhole"
+        static let priorityDevices: [String] = []
+    }
+}
+@MainActor final class AudioEngine {
+    static let shared = AudioEngine()
+    var resolvedEnables: [Bool] = []
+    func cancelDeferredEnableWithoutClearingIntent() {}
+    func resolveDeferredEnable(succeeded: Bool) { resolvedEnables.append(succeeded) }
+}
 final class UserDefaults {
     static let standard = UserDefaults()
     var values: [String: Any] = ["eqWasEnabled": true]
@@ -787,6 +819,8 @@ __DECLARATIONS__
     let isTestHost = false
     let eventHandler: ((SystemEvent) -> Void)? = nil
     let wakeRecovery = RoutingWakeRecovery()
+    let metadataRetry = NativeMetadataRetryRecovery()
+    static var liveOutputs: [AudioDevice] = []
     var deviceChangeDebounceTask: Task<Void, Never>?
     var defaultOutputChangeTask: Task<Void, Never>?
     var activeBackend = ActiveAudioRoutingBackend.blackHole
@@ -801,6 +835,7 @@ __DECLARATIONS__
     var processTapEngineStorage: AnyObject?
     var systemOutput = AudioDevice(id: 1, name: "BlackHole", uid: "blackhole")
     var hardwareReady = true
+    var metadataUnavailable = false
     var starts: [RoutingRequestReason] = []
     var refreshCount = 0
     var outputRestores = 0
@@ -808,13 +843,38 @@ __DECLARATIONS__
     var virtualOutput: AudioDevice? { AudioDevice(id: 1, name: "BlackHole", uid: "blackhole") }
     func blackHoleOutputDevice() -> AudioDevice? { virtualOutput }
     func currentSystemOutputDevice() -> AudioDevice? { systemOutput }
-    func findBestPhysicalOutputDevice() -> AudioDevice? { outputDevices.first }
+    static func getDevices(isOutput: Bool) -> [DeviceInfo] {
+        guard isOutput else { return [] }
+        return liveOutputs.map {
+            DeviceInfo(id: $0.id, name: $0.name, uid: $0.uid, hasInput: $0.isInput, hasOutput: $0.isOutput)
+        }
+    }
+    func preferredOutputDevice() -> AudioDevice? {
+        AudioOutputSelectionPolicy.preferred(
+            in: outputDevices, preferredUID: preferredOutputUID,
+            selectedUID: selectedOutputDevice?.uid, activeUID: activeOutputUID
+        )
+    }
+    func findBestPhysicalOutputDevice() -> AudioDevice? { AudioOutputSelectionPolicy.bestAvailable(in: outputDevices) }
     func removeBlackHoleVolumeListeners() {}
-    func restoreOriginalSystemOutputDevice() { outputRestores += 1 }
+    @discardableResult
+    func restoreOriginalSystemOutputDevice() -> AudioDevice? {
+        outputRestores += 1
+        return originalSystemOutputDevice
+    }
     func refreshDevices() async { refreshCount += 1; if let gate { await gate.wait() } }
     func startEQRouting(forceRestart: Bool, persistEnabledStateOnFailure: Bool,
-                        reason: RoutingRequestReason, blackHoleSampleRate: Double?) -> Bool {
+                        reason: RoutingRequestReason, blackHoleSampleRate: Double?,
+                        allowMetadataRetry: Bool, onAttemptedOutput: (String) -> Void,
+                        onRetryableMetadataFailure: () -> Void,
+                        onRollbackDefaultOutput: (String) -> Void) -> Bool {
         starts.append(reason)
+        if let target = preferredOutputDevice() { onAttemptedOutput(target.uid) }
+        if metadataUnavailable {
+            CoreAudioEngine.shared.stop()
+            if allowMetadataRetry { onRetryableMetadataFailure() }
+            return false
+        }
         guard hardwareReady else { return false }
         CoreAudioEngine.shared.isRunning = true
         CoreAudioEngine.shared.isEnabled = true
@@ -934,6 +994,20 @@ __DECLARATIONS__
             expect(core.rateRestores == 0, "Failed resource release restored sample rates")
             expect(!core.isRunning && !core.isEnabled, "Disable retained active processing")
             expect(NativeVolumeControl.shared.stopCalls == 1, "Disable retained native volume control")
+        case "metadata-retry-sleep":
+            router.metadataUnavailable = true
+            AudioRouter.liveOutputs = router.outputDevices
+            expect(!router.enableEQRouting(reason: .deviceRecovery), "Unavailable metadata reported success")
+            expect(router.metadataRetry.isPending && !core.isRunning, "Metadata retry was not pending")
+            router.handleSystemEvent(.willSleep)
+            expect(!router.metadataRetry.isPending && router.wakeRecovery.shouldResume, "Sleep lost retry intent")
+            router.metadataUnavailable = false
+            try await Task.sleep(nanoseconds: NativeMetadataRetryRecovery.retryDelayNanoseconds * 2)
+            expect(router.starts == [.deviceRecovery], "Cancelled metadata retry started while asleep")
+            router.handleSystemEvent(.didWake)
+            try await waitUntil { !router.wakeRecovery.isSuspended }
+            expect(router.starts == [.deviceRecovery, .wake] && core.isRunning, "Wake did not restart exactly once")
+            expect(AudioEngine.shared.resolvedEnables == [true], "Wake did not resolve deferred enable")
         case "wake-failure":
             router.handleSystemEvent(.willSleep)
             router.hardwareReady = false
