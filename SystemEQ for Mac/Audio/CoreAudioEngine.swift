@@ -41,6 +41,12 @@ enum AudioSampleRateNegotiation {
         case deviceUnavailable
     }
 
+    struct RestoreResult {
+        let pending: [String: Double]
+        let failures: [String: Failure]
+        let retryableMetadataFailures: Set<String>
+    }
+
     static func originalRate(
         uid: String?,
         saved: [String: Double],
@@ -102,8 +108,26 @@ enum AudioSampleRateNegotiation {
         set: (AudioDeviceID, Double) -> Bool,
         pause: () -> Void
     ) -> (pending: [String: Double], failures: [String: Failure]) {
+        let result = restoreDetailed(
+            saved: saved,
+            resolveDevice: resolveDevice,
+            read: read,
+            set: set,
+            pause: pause
+        )
+        return (result.pending, result.failures)
+    }
+
+    static func restoreDetailed(
+        saved: [String: Double],
+        resolveDevice: (String) throws -> AudioDeviceID?,
+        read: (AudioDeviceID) -> Double?,
+        set: (AudioDeviceID, Double) -> Bool,
+        pause: () -> Void
+    ) -> RestoreResult {
         var pending = saved
         var failures: [String: Failure] = [:]
+        var retryableMetadataFailures: Set<String> = []
         for uid in saved.keys.sorted() {
             guard let rate = saved[uid], rate.isFinite, rate > 0 else {
                 failures[uid] = .invalidMetadata
@@ -118,10 +142,12 @@ enum AudioSampleRateNegotiation {
                 device = resolved
             } catch {
                 failures[uid] = .invalidMetadata
+                retryableMetadataFailures.insert(uid)
                 continue
             }
             guard let observed = read(device), observed.isFinite, observed > 0 else {
                 failures[uid] = .invalidMetadata
+                retryableMetadataFailures.insert(uid)
                 continue
             }
             guard abs(observed - rate) < 1 || set(device, rate) else {
@@ -135,9 +161,40 @@ enum AudioSampleRateNegotiation {
                 pending.removeValue(forKey: uid)
             case let .failure(reason):
                 failures[uid] = reason
+                if reason == .invalidMetadata {
+                    retryableMetadataFailures.insert(uid)
+                }
             }
         }
-        return (pending, failures)
+        return RestoreResult(
+            pending: pending,
+            failures: failures,
+            retryableMetadataFailures: retryableMetadataFailures
+        )
+    }
+}
+
+nonisolated enum SampleRateRestorationOutcome: Equatable {
+    case succeeded
+    case retryableMetadataFailure
+    case failed
+
+    static func evaluate(
+        failures: [String: AudioSampleRateNegotiation.Failure],
+        retryableMetadataFailures: Set<String>,
+        requiredDeviceUID: String?
+    ) -> Self {
+        let succeeded = failures.allSatisfy { uid, reason in
+            reason == .deviceUnavailable && uid != requiredDeviceUID
+        }
+        if succeeded {
+            return .succeeded
+        }
+        let canRetry = !retryableMetadataFailures.isEmpty && failures.allSatisfy { uid, reason in
+            (reason == .deviceUnavailable && uid != requiredDeviceUID) ||
+                (reason == .invalidMetadata && retryableMetadataFailures.contains(uid))
+        }
+        return canRetry ? .retryableMetadataFailure : .failed
     }
 }
 
@@ -1199,11 +1256,15 @@ public final class CoreAudioEngine: ObservableObject {
 
     @discardableResult
     public func restoreDeviceSampleRates(requiredDeviceUID: String? = nil) -> Bool {
+        restoreDeviceSampleRatesResult(requiredDeviceUID: requiredDeviceUID) == .succeeded
+    }
+
+    func restoreDeviceSampleRatesResult(requiredDeviceUID: String? = nil) -> SampleRateRestorationOutcome {
         guard !isRunning, inputUnit == nil, outputUnit == nil else {
             DiagnosticEventStore.shared.record("engine.restoreRate.failed", details: ["reason": "activeUnits"])
-            return false
+            return .failed
         }
-        let result = AudioSampleRateNegotiation.restore(
+        let result = AudioSampleRateNegotiation.restoreDetailed(
             saved: originalDeviceSampleRates,
             resolveDevice: { try self.findDeviceID(uid: $0) },
             read: { self.getDeviceSampleRate($0) },
@@ -1218,9 +1279,11 @@ public final class CoreAudioEngine: ObservableObject {
             )
         }
         persistOriginalDeviceSampleRates()
-        return result.failures.allSatisfy { uid, reason in
-            reason == .deviceUnavailable && uid != requiredDeviceUID
-        }
+        return SampleRateRestorationOutcome.evaluate(
+            failures: result.failures,
+            retryableMetadataFailures: result.retryableMetadataFailures,
+            requiredDeviceUID: requiredDeviceUID
+        )
     }
 
     func releaseDeviceResources() -> Bool {

@@ -162,6 +162,82 @@ enum DefaultOutputVerificationPolicy {
     }
 }
 
+enum DefaultOutputChangeAction: Equatable {
+    case ignore
+    case switchOutput(updatePreferredOutput: Bool, reason: RoutingRequestReason)
+}
+
+enum DefaultOutputChangePolicy {
+    nonisolated static func action(
+        activeBackend: ActiveAudioRoutingBackend,
+        systemOutput: AudioDevice?,
+        outputDevices: [AudioDevice],
+        activeOutputUID: String?,
+        preferredOutputUID: String?,
+        engineOutputDeviceID: AudioDeviceID
+    ) -> DefaultOutputChangeAction {
+        guard let systemOutput, systemOutput.canBeProcessedOutput else {
+            return .ignore
+        }
+
+        if activeBackend == .native,
+           activeOutputUID == systemOutput.uid,
+           engineOutputDeviceID == systemOutput.id {
+            return .ignore
+        }
+
+        guard activeBackend == .native else {
+            return .switchOutput(updatePreferredOutput: true, reason: .systemOutputChanged)
+        }
+
+        let activeDevice = activeOutputUID.flatMap { uid in
+            outputDevices.first(where: { $0.uid == uid })
+        }
+        let activeOutputPresent = activeDevice != nil
+        let activeOutputStable = activeDevice?.id == engineOutputDeviceID
+        let preferredOutputPresent = preferredOutputUID == nil ||
+            outputDevices.contains(where: { $0.uid == preferredOutputUID })
+
+        return .switchOutput(
+            updatePreferredOutput: activeOutputStable && preferredOutputPresent,
+            reason: activeOutputPresent ? .systemOutputChanged : .outputDisconnected
+        )
+    }
+}
+
+enum NativeTopologyChangeAction: Equatable {
+    case none
+    case restart(reason: RoutingRequestReason)
+    case stopRouting
+}
+
+enum NativeTopologyChangePolicy {
+    nonisolated static func action(
+        outputDevices: [AudioDevice],
+        activeOutputUID: String?,
+        preferredOutputUID: String?,
+        engineIsRunning: Bool,
+        engineOutputDeviceID: AudioDeviceID
+    ) -> NativeTopologyChangeAction {
+        guard let outputUID = activeOutputUID else { return .none }
+        if let wantedUID = preferredOutputUID,
+           wantedUID != outputUID,
+           outputDevices.contains(where: { $0.uid == wantedUID && $0.canBeProcessedOutput }) {
+            return .restart(reason: .preferredOutputReturned)
+        }
+        guard let output = outputDevices.first(where: { $0.uid == outputUID }) else {
+            guard AudioOutputSelectionPolicy.bestAvailable(in: outputDevices) != nil else {
+                return .stopRouting
+            }
+            return .restart(reason: .outputDisconnected)
+        }
+        if !engineIsRunning || engineOutputDeviceID != output.id {
+            return .restart(reason: .deviceRecovery)
+        }
+        return .none
+    }
+}
+
 enum NativeRoutingFailureRecovery {
     case none
     case restore(AudioDevice)
@@ -330,6 +406,7 @@ enum AudioRoutingStartPolicy {
         persistEnabledStateOnFailure: Bool,
         prepareNative: () -> Bool = { true },
         native: (Bool) -> Bool,
+        shouldFallbackAfterNativeFailure: () -> Bool = { true },
         blackHole: (Bool) -> Bool,
         onFallback: () -> Void
     ) -> Bool {
@@ -342,6 +419,7 @@ enum AudioRoutingStartPolicy {
         case .automatic:
             guard prepareNative() else { return false }
             if native(false) { return true }
+            guard shouldFallbackAfterNativeFailure() else { return false }
             onFallback()
             return blackHole(persistEnabledStateOnFailure)
         }
@@ -395,6 +473,191 @@ final class RoutingSampleRateRecovery {
         }
         pending = task
         return task
+    }
+}
+
+enum PendingMetadataRetryDefaultOutputAction: Equatable {
+    case ignore
+    case switchOutput(AudioDevice)
+    case cancelRetry
+}
+
+enum PendingMetadataRetryTopologyAction: Equatable {
+    case keepPending
+    case cancelRetry
+}
+
+enum PendingMetadataRetryPolicy {
+    nonisolated static func defaultOutputAction(
+        systemOutput: AudioDevice?,
+        outputDevices: [AudioDevice],
+        targetOutputUID: String,
+        ignoredRollbackUID: String?
+    ) -> PendingMetadataRetryDefaultOutputAction {
+        guard let systemOutput, systemOutput.canBeProcessedOutput else {
+            return .ignore
+        }
+        if systemOutput.uid == targetOutputUID {
+            return .ignore
+        }
+        let targetStillPresent = outputDevices.contains {
+            $0.uid == targetOutputUID && $0.canBeProcessedOutput
+        }
+        guard targetStillPresent else {
+            return .cancelRetry
+        }
+        if systemOutput.uid == ignoredRollbackUID {
+            return .ignore
+        }
+        return .switchOutput(systemOutput)
+    }
+
+    nonisolated static func topologyAction(
+        outputDevices: [AudioDevice],
+        targetOutputUID: String
+    ) -> PendingMetadataRetryTopologyAction {
+        let targetStillPresent = outputDevices.contains {
+            $0.uid == targetOutputUID && $0.canBeProcessedOutput
+        }
+        return targetStillPresent ? .keepPending : .cancelRetry
+    }
+}
+
+@MainActor
+final class NativeMetadataRetryRecovery {
+    static let retryDelayNanoseconds: UInt64 = 250_000_000
+
+    private(set) var generation: UInt64 = 0
+    private(set) var targetOutputUID: String?
+    private(set) var ignoredRollbackUID: String?
+    private(set) var persistEnabledStateOnFailure = false
+    private(set) var wasEQEnabled = false
+    private var task: Task<Void, Never>?
+
+    var isPending: Bool {
+        task != nil
+    }
+
+    func cancel() {
+        generation &+= 1
+        task?.cancel()
+        task = nil
+        targetOutputUID = nil
+        ignoredRollbackUID = nil
+        persistEnabledStateOnFailure = false
+        wasEQEnabled = false
+    }
+
+    @discardableResult
+    func schedule(
+        wait: @escaping @MainActor () async throws -> Void = {
+            try await Task.sleep(nanoseconds: NativeMetadataRetryRecovery.retryDelayNanoseconds)
+        },
+        retry: @escaping @MainActor () -> Void
+    ) -> Task<Void, Never>? {
+        cancel()
+        let expectedGeneration = generation
+        let pending = Task { @MainActor [weak self] in
+            defer {
+                if self?.generation == expectedGeneration {
+                    self?.task = nil
+                    self?.targetOutputUID = nil
+                    self?.ignoredRollbackUID = nil
+                    self?.persistEnabledStateOnFailure = false
+                    self?.wasEQEnabled = false
+                }
+            }
+            do {
+                try await wait()
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, let self, self.generation == expectedGeneration else { return }
+            self.task = nil
+            self.targetOutputUID = nil
+            self.ignoredRollbackUID = nil
+            self.persistEnabledStateOnFailure = false
+            self.wasEQEnabled = false
+            self.generation &+= 1
+            retry()
+        }
+        task = pending
+        return pending
+    }
+
+    @discardableResult
+    func scheduleRetryIfNeeded(
+        started: Bool,
+        allowRetry: Bool,
+        retryableMetadataFailure: Bool,
+        targetOutputUID: String?,
+        ignoredRollbackUID: String? = nil,
+        persistEnabledStateOnFailure: Bool = false,
+        wasEQEnabled: Bool,
+        isWakeSuspended: @escaping @MainActor () -> Bool,
+        setEQEnabled: @escaping @MainActor (Bool) -> Void,
+        canRetryTarget: @escaping @MainActor (String) -> Bool = { _ in true },
+        wait: @escaping @MainActor () async throws -> Void = {
+            try await Task.sleep(nanoseconds: NativeMetadataRetryRecovery.retryDelayNanoseconds)
+        },
+        retryAttempt: @escaping @MainActor () -> Bool,
+        onTargetUnavailable: @escaping @MainActor () -> Void = {},
+        onRetryResult: @escaping @MainActor (_ succeeded: Bool, _ persistFailure: Bool) -> Void = { _, _ in }
+    ) -> Bool {
+        guard !started, allowRetry, retryableMetadataFailure, let targetOutputUID, !targetOutputUID.isEmpty else {
+            return false
+        }
+        cancel()
+        self.targetOutputUID = targetOutputUID
+        self.ignoredRollbackUID = ignoredRollbackUID
+        self.persistEnabledStateOnFailure = persistEnabledStateOnFailure
+        self.wasEQEnabled = wasEQEnabled
+        let expectedGeneration = generation
+        let pending = Task { @MainActor [weak self] in
+            defer {
+                if self?.generation == expectedGeneration {
+                    self?.task = nil
+                    self?.targetOutputUID = nil
+                    self?.ignoredRollbackUID = nil
+                    self?.persistEnabledStateOnFailure = false
+                    self?.wasEQEnabled = false
+                }
+            }
+            do {
+                try await wait()
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, let self, self.generation == expectedGeneration else { return }
+            let targetUID = self.targetOutputUID
+            let persistFailure = self.persistEnabledStateOnFailure
+            let restoreEQ = self.wasEQEnabled
+            self.task = nil
+            self.targetOutputUID = nil
+            self.ignoredRollbackUID = nil
+            self.persistEnabledStateOnFailure = false
+            self.wasEQEnabled = false
+            self.generation &+= 1
+
+            guard !isWakeSuspended() else { return }
+            guard let targetUID, canRetryTarget(targetUID) else {
+                if restoreEQ {
+                    setEQEnabled(false)
+                }
+                onTargetUnavailable()
+                return
+            }
+            if restoreEQ {
+                setEQEnabled(true)
+            }
+            let retried = retryAttempt()
+            if !retried, restoreEQ {
+                setEQEnabled(false)
+            }
+            onRetryResult(retried, persistFailure)
+        }
+        task = pending
+        return true
     }
 }
 
@@ -472,6 +735,7 @@ public final class AudioRouter: ObservableObject {
 
     /// Set when sleep interrupted an active routing session, so wake restores it.
     private let wakeRecovery = RoutingWakeRecovery()
+    private let metadataRetry = NativeMetadataRetryRecovery()
 
     /// Whether we are the reason the system default output is BlackHole — true even
     /// while the engine is stopped (between sleep and the wake restart, or after a
@@ -480,6 +744,11 @@ public final class AudioRouter: ObservableObject {
     public var isRoutingOwned: Bool {
         guard !isTestHost else { return false }
         return activeBackend != .none || activeInputUID != nil || CoreAudioEngine.shared.isRunning
+    }
+
+    var isMetadataRetryPending: Bool {
+        guard !isTestHost else { return false }
+        return metadataRetry.isPending
     }
 
     public static let shared = AudioRouter()
@@ -523,11 +792,16 @@ public final class AudioRouter: ObservableObject {
     func setBackendPreference(_ preference: AudioRoutingBackendPreference) {
         guard !isTestHost else { return }
         guard backendPreference != preference else { return }
+        let wasRetryPending = metadataRetry.isPending
+        metadataRetry.cancel()
         backendPreference = preference
         UserDefaults.standard.set(preference.rawValue, forKey: Self.backendPreferenceKey)
         updateStatus()
-        if isRoutingOwned {
-            enableEQRouting(forceRestart: true, reason: .backendPreferenceChanged)
+        if isRoutingOwned || wasRetryPending {
+            let switched = enableEQRouting(forceRestart: true, reason: .backendPreferenceChanged)
+            if wasRetryPending, switched || !metadataRetry.isPending {
+                AudioEngine.shared.resolveDeferredEnable(succeeded: switched)
+            }
         }
     }
 
@@ -799,6 +1073,8 @@ public final class AudioRouter: ObservableObject {
             dlog("Device cannot be selected as the processed output", level: .warning, category: .routing)
             return
         }
+        let wasRetryPending = metadataRetry.isPending
+        metadataRetry.cancel()
         selectedOutputDevice = device
         preferredOutputUID = device.uid
         dlog("Selected output: \(device.name)", category: .routing)
@@ -811,9 +1087,12 @@ public final class AudioRouter: ObservableObject {
         )
 
         updateStatus()
-        if isRoutingOwned {
+        if isRoutingOwned || wasRetryPending {
             wakeRecovery.cancel()
-            enableEQRouting(forceRestart: true, reason: .outputSelected)
+            let switched = enableEQRouting(forceRestart: true, reason: .outputSelected)
+            if wasRetryPending, switched || !metadataRetry.isPending {
+                AudioEngine.shared.resolveDeferredEnable(succeeded: switched)
+            }
         }
     }
 
@@ -850,7 +1129,8 @@ public final class AudioRouter: ObservableObject {
         forceRestart: Bool = false,
         persistEnabledStateOnFailure: Bool = true,
         reason: RoutingRequestReason = .request,
-        blackHoleSampleRate: Double? = nil
+        blackHoleSampleRate: Double? = nil,
+        allowMetadataRetry: Bool = true
     ) -> Bool {
         guard !isTestHost else { return false }
         if wakeRecovery.isSuspended {
@@ -862,9 +1142,14 @@ public final class AudioRouter: ObservableObject {
             }
             wakeRecovery.cancel()
         }
+        metadataRetry.cancel()
+        let wasEQEnabled = CoreAudioEngine.shared.isEnabled
         let previouslyOwnedBlackHole = activeBackend == .blackHole
         let previousVirtualOutputID = previouslyOwnedBlackHole ? blackHoleOutputDevice()?.id : nil
-        return AudioRoutingRequestPolicy.start(
+        var metadataRestorationRetryable = false
+        var attemptedOutputUID: String?
+        var rollbackDefaultOutputUID: String?
+        let started = AudioRoutingRequestPolicy.start(
             reason: reason,
             persistEnabledStateOnFailure: persistEnabledStateOnFailure,
             operation: { persistFailure in
@@ -872,11 +1157,16 @@ public final class AudioRouter: ObservableObject {
                     forceRestart: forceRestart,
                     persistEnabledStateOnFailure: persistFailure,
                     reason: reason,
-                    blackHoleSampleRate: blackHoleSampleRate
+                    blackHoleSampleRate: blackHoleSampleRate,
+                    allowMetadataRetry: allowMetadataRetry,
+                    onAttemptedOutput: { attemptedOutputUID = $0 },
+                    onRetryableMetadataFailure: { metadataRestorationRetryable = true },
+                    onRollbackDefaultOutput: { rollbackDefaultOutputUID = $0 }
                 )
             },
             cleanup: { persistFailure in
-                if self.isRoutingOwned || CoreAudioEngine.shared.isEnabled {
+                if !(allowMetadataRetry && metadataRestorationRetryable),
+                   self.isRoutingOwned || CoreAudioEngine.shared.isEnabled {
                     self.disableEQRouting(persistEnabledState: persistFailure)
                 }
             },
@@ -889,13 +1179,71 @@ public final class AudioRouter: ObservableObject {
             },
             restoreOutput: { self.restoreOriginalSystemOutputDevice() }
         )
+        let effectivePersistFailure = reason == .request ? persistEnabledStateOnFailure : false
+        if metadataRetry.scheduleRetryIfNeeded(
+            started: started,
+            allowRetry: allowMetadataRetry,
+            retryableMetadataFailure: metadataRestorationRetryable,
+            targetOutputUID: attemptedOutputUID,
+            ignoredRollbackUID: rollbackDefaultOutputUID,
+            persistEnabledStateOnFailure: effectivePersistFailure,
+            wasEQEnabled: wasEQEnabled,
+            isWakeSuspended: { [weak self] in self?.wakeRecovery.isSuspended ?? true },
+            setEQEnabled: { CoreAudioEngine.shared.setEnabled($0) },
+            canRetryTarget: { [weak self] targetUID in
+                guard let self else { return false }
+                let cachedMatch = self.outputDevices.contains(where: {
+                    $0.uid == targetUID && $0.canBeProcessedOutput
+                }) && self.preferredOutputDevice()?.uid == targetUID
+                guard cachedMatch else { return false }
+                return Self.getDevices(isOutput: true).contains { info in
+                    info.uid == targetUID && AudioDevice(
+                        id: info.id,
+                        name: info.name,
+                        uid: info.uid,
+                        isInput: info.hasInput,
+                        isOutput: info.hasOutput
+                    ).canBeProcessedOutput
+                }
+            },
+            retryAttempt: { [weak self] in
+                guard let self else { return false }
+                return self.enableEQRouting(
+                    forceRestart: true,
+                    persistEnabledStateOnFailure: effectivePersistFailure,
+                    reason: reason,
+                    blackHoleSampleRate: blackHoleSampleRate,
+                    allowMetadataRetry: false
+                )
+            },
+            onTargetUnavailable: {
+                AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+            },
+            onRetryResult: { succeeded, _ in
+                if succeeded || reason == .request {
+                    AudioEngine.shared.resolveDeferredEnable(succeeded: succeeded)
+                } else {
+                    AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+                }
+            }
+        ) {
+            DiagnosticEventStore.shared.record(
+                "routing.enable.retryScheduled",
+                details: ["backend": "native", "trigger": reason.rawValue]
+            )
+        }
+        return started
     }
 
     private func startEQRouting(
         forceRestart: Bool,
         persistEnabledStateOnFailure: Bool,
         reason: RoutingRequestReason,
-        blackHoleSampleRate: Double?
+        blackHoleSampleRate: Double?,
+        allowMetadataRetry: Bool,
+        onAttemptedOutput: (String) -> Void = { _ in },
+        onRetryableMetadataFailure: () -> Void = {},
+        onRollbackDefaultOutput: (String) -> Void = { _ in }
     ) -> Bool {
         guard let physicalOutput = preferredOutputDevice() else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: [
@@ -904,6 +1252,7 @@ public final class AudioRouter: ObservableObject {
             errorLog("No physical output device found!", category: .routing)
             return false
         }
+        onAttemptedOutput(physicalOutput.uid)
 
         DiagnosticEventStore.shared.record(
             "routing.enable.request",
@@ -946,27 +1295,54 @@ public final class AudioRouter: ObservableObject {
             return false
         }
 
+        var nativeMetadataRetryable = false
         return AudioRoutingStartPolicy.start(
             preference: preservesBlackHoleOutput ? .blackHole : backendPreference,
             persistEnabledStateOnFailure: persistEnabledStateOnFailure,
             prepareNative: {
-                guard engine.releaseDeviceResources(),
-                      engine.restoreDeviceSampleRates(requiredDeviceUID: physicalOutput.uid) else {
+                guard engine.releaseDeviceResources() else {
                     DiagnosticEventStore.shared.record(
                         "routing.enable.failed", details: ["backend": "native", "reason": "blackHoleCleanup"]
                     )
                     self.disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
                     return false
                 }
-                return true
+                switch engine.restoreDeviceSampleRatesResult(requiredDeviceUID: physicalOutput.uid) {
+                case .failed:
+                    DiagnosticEventStore.shared.record(
+                        "routing.enable.failed", details: ["backend": "native", "reason": "blackHoleCleanup"]
+                    )
+                    self.disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
+                    return false
+                case .retryableMetadataFailure:
+                    onRetryableMetadataFailure()
+                    DiagnosticEventStore.shared.record(
+                        "routing.enable.failed", details: ["backend": "native", "reason": "blackHoleCleanup"]
+                    )
+                    if allowMetadataRetry {
+                        self.activeOutputUID = nil
+                    } else {
+                        self.disableEQRouting(persistEnabledState: persistEnabledStateOnFailure)
+                    }
+                    return false
+                case .succeeded:
+                    return true
+                }
             },
             native: { persistFailure in self.startNativeRouting(
                 output: physicalOutput,
-                persistEnabledStateOnFailure: persistFailure
+                persistEnabledStateOnFailure: persistFailure,
+                allowMetadataRetry: allowMetadataRetry,
+                onRetryableMetadataFailure: {
+                    nativeMetadataRetryable = true
+                    onRetryableMetadataFailure()
+                },
+                onRollbackDefaultOutput: onRollbackDefaultOutput
             ) },
+            shouldFallbackAfterNativeFailure: { !(allowMetadataRetry && nativeMetadataRetryable) },
             blackHole: { persistFailure in self.startBlackHoleRouting(
                 output: physicalOutput,
-                persistEnabledStateOnFailure: persistFailure,
+                persistEnabledStateOnFailure: persistFailure && !(allowMetadataRetry && nativeMetadataRetryable),
                 preferredSampleRate: blackHoleSampleRate,
                 preservedVirtualVolume: preservedBlackHoleVolume
             ) },
@@ -978,7 +1354,10 @@ public final class AudioRouter: ObservableObject {
 
     private func startNativeRouting(
         output: AudioDevice,
-        persistEnabledStateOnFailure: Bool
+        persistEnabledStateOnFailure: Bool,
+        allowMetadataRetry: Bool = false,
+        onRetryableMetadataFailure: () -> Void = {},
+        onRollbackDefaultOutput: (String) -> Void = { _ in }
     ) -> Bool {
         guard #available(macOS 14.4, *) else {
             DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "nativeUnavailable"])
@@ -1044,14 +1423,20 @@ public final class AudioRouter: ObservableObject {
                 break
             case let .restore(outputToRestore):
                 setAsDefaultOutputDevice(outputToRestore)
+                onRollbackDefaultOutput(outputToRestore.uid)
             case .recoverPhysicalOutput:
-                restoreOriginalSystemOutputDevice()
+                if let restoredUID = restoreOriginalSystemOutputDevice()?.uid {
+                    onRollbackDefaultOutput(restoredUID)
+                }
             }
             DiagnosticEventStore.shared.record(
                 "routing.enable.failed",
                 details: ["backend": "native", "reason": String(describing: error)]
             )
-            if persistEnabledStateOnFailure {
+            if error.isRetryableMetadataFailure {
+                onRetryableMetadataFailure()
+            }
+            if persistEnabledStateOnFailure, !(allowMetadataRetry && error.isRetryableMetadataFailure) {
                 UserDefaults.standard.set(false, forKey: "eqWasEnabled")
             }
             return false
@@ -1088,6 +1473,8 @@ public final class AudioRouter: ObservableObject {
             }
         )
         guard virtualVolumeReady else {
+            activeInputUID = nil
+            activeOutputUID = nil
             DiagnosticEventStore.shared.record(
                 "routing.enable.failed",
                 details: ["backend": "blackHole", "reason": "virtualVolume"]
@@ -1098,6 +1485,8 @@ public final class AudioRouter: ObservableObject {
         let engine = CoreAudioEngine.shared
         engine.stop()
         guard !engine.isRunning else {
+            activeInputUID = nil
+            activeOutputUID = nil
             DiagnosticEventStore.shared.record("routing.enable.failed", details: ["reason": "engineStop"])
             return false
         }
@@ -1321,6 +1710,11 @@ public final class AudioRouter: ObservableObject {
 
     func disableEQRouting(persistEnabledState: Bool = true) {
         guard !isTestHost else { return }
+        let hadPendingIntent = metadataRetry.isPending || wakeRecovery.isSuspended
+        metadataRetry.cancel()
+        if hadPendingIntent {
+            AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+        }
         let previousBackend = activeBackend
         DiagnosticEventStore.shared.record(
             "routing.disable.request",
@@ -1516,8 +1910,9 @@ public final class AudioRouter: ObservableObject {
         return inputDevices.first(where: { $0.id == deviceID })
     }
 
-    func restoreOriginalSystemOutputDevice() {
-        guard !isTestHost else { return }
+    @discardableResult
+    func restoreOriginalSystemOutputDevice() -> AudioDevice? {
+        guard !isTestHost else { return nil }
         // Only attempt a device that is actually enumerated right now — trying
         // one that just vanished (e.g. the USB DAC we're disabling EQ because
         // of) always fails and pops the "manual setup required" alert for a
@@ -1526,7 +1921,7 @@ public final class AudioRouter: ObservableObject {
            let currentDevice = outputDevices.first(where: { $0.uid == originalDevice.uid }) {
             dlog("Restoring original system output: \(currentDevice.name)", category: .routing)
             restoreSystemOutput(to: currentDevice)
-            return
+            return currentDevice
         }
 
         // Fallback: recover by persisted UID (e.g. after a crash left no in-memory value).
@@ -1537,7 +1932,7 @@ public final class AudioRouter: ObservableObject {
            }) {
             dlog("Restoring original system output by UID: \(recovered.name)", category: .routing)
             restoreSystemOutput(to: recovered)
-            return
+            return recovered
         }
 
         // Last resort: any non-BlackHole physical output so the user keeps hearing sound.
@@ -1548,12 +1943,14 @@ public final class AudioRouter: ObservableObject {
                 category: .routing
             )
             restoreSystemOutput(to: physical)
+            return physical
         } else {
             dlog(
                 "No original system output device saved and no physical fallback found",
                 level: .warning,
                 category: .routing
             )
+            return nil
         }
     }
 
@@ -2106,23 +2503,57 @@ public final class AudioRouter: ObservableObject {
     @MainActor
     private func handleDefaultOutputChange() {
         guard !isTestHost, !wakeRecovery.isSuspended else { return }
-        guard isRoutingOwned,
-              let device = currentSystemOutputDevice(),
-              !device.name.lowercased().contains(AppConstants.DeviceNames.blackHoleLowercase) else { return }
-
-        if activeBackend == .native,
-           activeOutputUID == device.uid,
-           CoreAudioEngine.shared.currentOutputDeviceID == device.id {
-            return
+        if !isRoutingOwned {
+            guard metadataRetry.isPending,
+                  let targetUID = metadataRetry.targetOutputUID else { return }
+            switch PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: currentSystemOutputDevice(),
+                outputDevices: outputDevices,
+                targetOutputUID: targetUID,
+                ignoredRollbackUID: metadataRetry.ignoredRollbackUID
+            ) {
+            case .ignore:
+                return
+            case .cancelRetry:
+                metadataRetry.cancel()
+                AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+                CoreAudioEngine.shared.restoreDeviceSampleRates()
+                return
+            case let .switchOutput(device):
+                metadataRetry.cancel()
+                wakeRecovery.cancel()
+                originalSystemOutputDevice = device
+                UserDefaults.standard.set(device.uid, forKey: originalOutputUIDKey)
+                preferredOutputUID = device.uid
+                selectedOutputDevice = device
+                dlog("System output changed to \(device.name) — rebuilding EQ routing", category: .routing)
+                let switched = enableEQRouting(forceRestart: true, reason: .systemOutputChanged)
+                if switched || !metadataRetry.isPending {
+                    AudioEngine.shared.resolveDeferredEnable(succeeded: switched)
+                }
+                return
+            }
         }
+        guard let device = currentSystemOutputDevice() else { return }
+
+        guard case let .switchOutput(updatePreferredOutput, reason) = DefaultOutputChangePolicy.action(
+            activeBackend: activeBackend,
+            systemOutput: device,
+            outputDevices: outputDevices,
+            activeOutputUID: activeOutputUID,
+            preferredOutputUID: preferredOutputUID,
+            engineOutputDeviceID: CoreAudioEngine.shared.currentOutputDeviceID
+        ) else { return }
 
         wakeRecovery.cancel()
         originalSystemOutputDevice = device
         UserDefaults.standard.set(device.uid, forKey: originalOutputUIDKey)
-        preferredOutputUID = device.uid
+        if updatePreferredOutput {
+            preferredOutputUID = device.uid
+        }
         selectedOutputDevice = device
         dlog("System output changed to \(device.name) — rebuilding EQ routing", category: .routing)
-        enableEQRouting(forceRestart: true, reason: .systemOutputChanged)
+        enableEQRouting(forceRestart: true, reason: reason)
     }
 
     /// Runs after every debounced device-list change. Catches the states that kill
@@ -2135,24 +2566,23 @@ public final class AudioRouter: ObservableObject {
     private func handleDeviceTopologyChange() {
         guard !isTestHost, !wakeRecovery.isSuspended else { return }
         if activeBackend == .native {
-            guard let outputUID = activeOutputUID else { return }
-            if let wantedUID = preferredOutputUID,
-               wantedUID != outputUID,
-               outputDevices.contains(where: { $0.uid == wantedUID }) {
-                enableEQRouting(forceRestart: true, reason: .preferredOutputReturned)
-                return
-            }
-            guard let output = outputDevices.first(where: { $0.uid == outputUID }) else {
-                activeOutputUID = nil
-                guard findBestPhysicalOutputDevice() != nil else {
-                    AudioRoutingRequestPolicy.stop(cleanup: disableEQRouting(persistEnabledState:))
-                    return
+            switch NativeTopologyChangePolicy.action(
+                outputDevices: outputDevices,
+                activeOutputUID: activeOutputUID,
+                preferredOutputUID: preferredOutputUID,
+                engineIsRunning: CoreAudioEngine.shared.isRunning,
+                engineOutputDeviceID: CoreAudioEngine.shared.currentOutputDeviceID
+            ) {
+            case .none:
+                break
+            case let .restart(reason):
+                if reason == .outputDisconnected {
+                    activeOutputUID = nil
                 }
-                enableEQRouting(forceRestart: true, reason: .outputDisconnected)
-                return
-            }
-            if !CoreAudioEngine.shared.isRunning || CoreAudioEngine.shared.currentOutputDeviceID != output.id {
-                enableEQRouting(forceRestart: true, reason: .deviceRecovery)
+                enableEQRouting(forceRestart: true, reason: reason)
+            case .stopRouting:
+                activeOutputUID = nil
+                AudioRoutingRequestPolicy.stop(cleanup: disableEQRouting(persistEnabledState:))
             }
             return
         }
@@ -2160,6 +2590,15 @@ public final class AudioRouter: ObservableObject {
         guard let inputUID = activeInputUID,
               let outputUID = activeOutputUID else {
             if !isRoutingOwned {
+                if metadataRetry.isPending,
+                   let targetUID = metadataRetry.targetOutputUID,
+                   PendingMetadataRetryPolicy.topologyAction(
+                       outputDevices: outputDevices,
+                       targetOutputUID: targetUID
+                   ) == .cancelRetry {
+                    metadataRetry.cancel()
+                    AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+                }
                 CoreAudioEngine.shared.restoreDeviceSampleRates()
             }
             return
@@ -2241,11 +2680,13 @@ public final class AudioRouter: ObservableObject {
     }
 
     private func suspendRoutingForSleep() {
+        let wasRetryPending = metadataRetry.isPending
+        metadataRetry.cancel()
         // A pending wake restart means a previous sleep is still being recovered
         // from (e.g. the lid closed again inside the 2.5s post-wake wait). Cancel
         // it and treat this as "was routing" too, or the intent to resume gets
         // silently dropped and wake never restores audio.
-        guard wakeRecovery.suspend(isActive: CoreAudioEngine.shared.isRunning) else { return }
+        guard wakeRecovery.suspend(isActive: CoreAudioEngine.shared.isRunning || wasRetryPending) else { return }
 
         deviceChangeDebounceTask?.cancel()
         deviceChangeDebounceTask = nil
@@ -2283,7 +2724,12 @@ public final class AudioRouter: ObservableObject {
         }, restart: { [weak self] in
             guard let self else { return }
             dlog("Wake — restoring EQ routing", level: .info, category: .routing)
-            self.enableEQRouting(forceRestart: true, reason: .wake)
+            let restored = self.enableEQRouting(forceRestart: true, reason: .wake)
+            if restored {
+                AudioEngine.shared.resolveDeferredEnable(succeeded: true)
+            } else if !self.metadataRetry.isPending {
+                AudioEngine.shared.cancelDeferredEnableWithoutClearingIntent()
+            }
         })
     }
 

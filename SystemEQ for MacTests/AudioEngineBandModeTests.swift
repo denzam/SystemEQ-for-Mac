@@ -1889,6 +1889,841 @@ final class AudioEngineBandModeTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testNativeDefaultBeforeTopologyPreservesPreferredOutputAndReturnsUnderNewID() throws {
+        let scarlettInitial = AudioDevice(
+            id: 10, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let benq = AudioDevice(
+            id: 20, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+        let builtIn = AudioDevice(
+            id: 30, name: "MacBook Pro Speakers", uid: "builtin-uid", isInput: false, isOutput: true
+        )
+
+        var preferredUID: String? = scarlettInitial.uid
+        var selectedDevice: AudioDevice? = scarlettInitial
+        var activeUID: String? = scarlettInitial.uid
+        var engineOutputID = scarlettInitial.id
+
+        let unpluggedDevices = [benq, builtIn]
+        let defaultAction = DefaultOutputChangePolicy.action(
+            activeBackend: .native,
+            systemOutput: benq,
+            outputDevices: unpluggedDevices,
+            activeOutputUID: activeUID,
+            preferredOutputUID: preferredUID,
+            engineOutputDeviceID: engineOutputID
+        )
+        XCTAssertEqual(defaultAction, .switchOutput(updatePreferredOutput: false, reason: .outputDisconnected))
+
+        if case let .switchOutput(updatePreferredOutput, _) = defaultAction {
+            if updatePreferredOutput { preferredUID = benq.uid }
+            selectedDevice = benq
+        }
+        let fallback = try XCTUnwrap(AudioOutputSelectionPolicy.preferred(
+            in: unpluggedDevices,
+            preferredUID: preferredUID,
+            selectedUID: selectedDevice?.uid,
+            activeUID: activeUID
+        ))
+        XCTAssertEqual(fallback, benq)
+        XCTAssertEqual(preferredUID, scarlettInitial.uid)
+
+        activeUID = fallback.uid
+        selectedDevice = fallback
+        engineOutputID = fallback.id
+
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: unpluggedDevices,
+                activeOutputUID: activeUID,
+                preferredOutputUID: preferredUID,
+                engineIsRunning: true,
+                engineOutputDeviceID: engineOutputID
+            ),
+            .none
+        )
+
+        let scarlettReplugged = AudioDevice(
+            id: 50, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let repluggedDevices = [scarlettReplugged, benq, builtIn]
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: repluggedDevices,
+                activeOutputUID: activeUID,
+                preferredOutputUID: preferredUID,
+                engineIsRunning: true,
+                engineOutputDeviceID: engineOutputID
+            ),
+            .restart(reason: .preferredOutputReturned)
+        )
+
+        let returned = try XCTUnwrap(AudioOutputSelectionPolicy.preferred(
+            in: repluggedDevices,
+            preferredUID: preferredUID,
+            selectedUID: selectedDevice?.uid,
+            activeUID: activeUID
+        ))
+        XCTAssertEqual(returned.id, scarlettReplugged.id)
+        XCTAssertEqual(returned.uid, scarlettReplugged.uid)
+
+        XCTAssertEqual(
+            DefaultOutputChangePolicy.action(
+                activeBackend: .native,
+                systemOutput: scarlettReplugged,
+                outputDevices: repluggedDevices,
+                activeOutputUID: returned.uid,
+                preferredOutputUID: preferredUID,
+                engineOutputDeviceID: scarlettReplugged.id
+            ),
+            .ignore
+        )
+    }
+
+    @MainActor
+    func testNativeTopologyBeforeDefaultPreservesPreferredOutputAndReturnsUnderNewID() throws {
+        let scarlettInitial = AudioDevice(
+            id: 10, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let builtIn = AudioDevice(
+            id: 30, name: "MacBook Pro Speakers", uid: "builtin-uid", isInput: false, isOutput: true
+        )
+        let benq = AudioDevice(
+            id: 20, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+
+        var preferredUID: String? = scarlettInitial.uid
+        var selectedDevice: AudioDevice? = scarlettInitial
+        var activeUID: String? = scarlettInitial.uid
+        var engineOutputID = scarlettInitial.id
+
+        let unpluggedDevices = [builtIn, benq]
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: unpluggedDevices,
+                activeOutputUID: activeUID,
+                preferredOutputUID: preferredUID,
+                engineIsRunning: true,
+                engineOutputDeviceID: engineOutputID
+            ),
+            .restart(reason: .outputDisconnected)
+        )
+
+        activeUID = nil
+        let fallback = try XCTUnwrap(AudioOutputSelectionPolicy.preferred(
+            in: unpluggedDevices,
+            preferredUID: preferredUID,
+            selectedUID: selectedDevice?.uid,
+            activeUID: activeUID
+        ))
+        XCTAssertEqual(fallback, builtIn)
+        activeUID = fallback.uid
+        selectedDevice = fallback
+        engineOutputID = fallback.id
+        XCTAssertEqual(preferredUID, scarlettInitial.uid)
+
+        XCTAssertEqual(
+            DefaultOutputChangePolicy.action(
+                activeBackend: .native,
+                systemOutput: fallback,
+                outputDevices: unpluggedDevices,
+                activeOutputUID: activeUID,
+                preferredOutputUID: preferredUID,
+                engineOutputDeviceID: engineOutputID
+            ),
+            .ignore
+        )
+
+        let delayedMacOSDefault = DefaultOutputChangePolicy.action(
+            activeBackend: .native,
+            systemOutput: benq,
+            outputDevices: unpluggedDevices,
+            activeOutputUID: activeUID,
+            preferredOutputUID: preferredUID,
+            engineOutputDeviceID: engineOutputID
+        )
+        XCTAssertEqual(delayedMacOSDefault, .switchOutput(updatePreferredOutput: false, reason: .systemOutputChanged))
+        if case let .switchOutput(updatePreferredOutput, _) = delayedMacOSDefault {
+            if updatePreferredOutput { preferredUID = benq.uid }
+            selectedDevice = benq
+            activeUID = benq.uid
+            engineOutputID = benq.id
+        }
+        XCTAssertEqual(preferredUID, scarlettInitial.uid)
+
+        let scarlettReplugged = AudioDevice(
+            id: 55, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let repluggedDevices = [scarlettReplugged, builtIn, benq]
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: repluggedDevices,
+                activeOutputUID: activeUID,
+                preferredOutputUID: preferredUID,
+                engineIsRunning: true,
+                engineOutputDeviceID: engineOutputID
+            ),
+            .restart(reason: .preferredOutputReturned)
+        )
+        XCTAssertEqual(
+            AudioOutputSelectionPolicy.preferred(
+                in: repluggedDevices,
+                preferredUID: preferredUID,
+                selectedUID: selectedDevice?.uid,
+                activeUID: activeUID
+            ),
+            scarlettReplugged
+        )
+    }
+
+    @MainActor
+    func testNativeManualDefaultChangeWithPresentActiveOutputUpdatesPreferredOutput() throws {
+        let scarlett = AudioDevice(
+            id: 10, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let benq = AudioDevice(
+            id: 20, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+        let devices = [scarlett, benq]
+
+        let action = DefaultOutputChangePolicy.action(
+            activeBackend: .native,
+            systemOutput: benq,
+            outputDevices: devices,
+            activeOutputUID: scarlett.uid,
+            preferredOutputUID: scarlett.uid,
+            engineOutputDeviceID: scarlett.id
+        )
+        XCTAssertEqual(action, .switchOutput(updatePreferredOutput: true, reason: .systemOutputChanged))
+
+        var preferredUID = scarlett.uid
+        if case let .switchOutput(updatePreferredOutput, _) = action, updatePreferredOutput {
+            preferredUID = benq.uid
+        }
+        XCTAssertEqual(preferredUID, benq.uid)
+
+        let benqReplugged = AudioDevice(
+            id: 60, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: [scarlett, benqReplugged],
+                activeOutputUID: scarlett.uid,
+                preferredOutputUID: preferredUID,
+                engineIsRunning: true,
+                engineOutputDeviceID: scarlett.id
+            ),
+            .restart(reason: .preferredOutputReturned)
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(AudioOutputSelectionPolicy.preferred(
+                in: [scarlett, benqReplugged],
+                preferredUID: preferredUID,
+                selectedUID: scarlett.uid,
+                activeUID: scarlett.uid
+            )),
+            benqReplugged
+        )
+    }
+
+    @MainActor
+    func testNativeQuickUSBReplugUnderNewIDRecoversWithoutLosingPreferredOutput() {
+        let benq = AudioDevice(
+            id: 20, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+        let scarlettReplugged = AudioDevice(
+            id: 50, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let devices = [scarlettReplugged, benq]
+
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: devices,
+                activeOutputUID: scarlettReplugged.uid,
+                preferredOutputUID: scarlettReplugged.uid,
+                engineIsRunning: true,
+                engineOutputDeviceID: 10
+            ),
+            .restart(reason: .deviceRecovery)
+        )
+
+        let defaultRace = DefaultOutputChangePolicy.action(
+            activeBackend: .native,
+            systemOutput: benq,
+            outputDevices: devices,
+            activeOutputUID: scarlettReplugged.uid,
+            preferredOutputUID: scarlettReplugged.uid,
+            engineOutputDeviceID: 10
+        )
+        XCTAssertEqual(defaultRace, .switchOutput(updatePreferredOutput: false, reason: .systemOutputChanged))
+        XCTAssertEqual(
+            AudioOutputSelectionPolicy.preferred(
+                in: devices,
+                preferredUID: scarlettReplugged.uid,
+                selectedUID: benq.uid,
+                activeUID: scarlettReplugged.uid
+            ),
+            scarlettReplugged
+        )
+
+        XCTAssertEqual(
+            DefaultOutputChangePolicy.action(
+                activeBackend: .native,
+                systemOutput: scarlettReplugged,
+                outputDevices: devices,
+                activeOutputUID: scarlettReplugged.uid,
+                preferredOutputUID: scarlettReplugged.uid,
+                engineOutputDeviceID: 10
+            ),
+            .switchOutput(updatePreferredOutput: false, reason: .systemOutputChanged)
+        )
+    }
+
+    @MainActor
+    func testDefaultOutputAndTopologyPoliciesPreserveStableVirtualAndBlackHoleBehavior() {
+        let scarlett = AudioDevice(
+            id: 10, name: "Scarlett Solo USB", uid: "scarlett-uid", isInput: true, isOutput: true
+        )
+        let benq = AudioDevice(
+            id: 20, name: "BenQ Display Audio", uid: "benq-uid", isInput: false, isOutput: true
+        )
+        let blackHole = AudioDevice(
+            id: 40, name: "BlackHole 2ch", uid: "BlackHole2ch_UID", isInput: true, isOutput: true
+        )
+        let internalNative = AudioDevice(
+            id: 41, name: "SystemEQ Native", uid: "com.denzam.SystemEQ.native.test", isInput: true, isOutput: true
+        )
+
+        XCTAssertEqual(
+            DefaultOutputChangePolicy.action(
+                activeBackend: .native,
+                systemOutput: scarlett,
+                outputDevices: [scarlett, benq],
+                activeOutputUID: scarlett.uid,
+                preferredOutputUID: scarlett.uid,
+                engineOutputDeviceID: scarlett.id
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: [scarlett, benq],
+                activeOutputUID: scarlett.uid,
+                preferredOutputUID: scarlett.uid,
+                engineIsRunning: true,
+                engineOutputDeviceID: scarlett.id
+            ),
+            .none
+        )
+
+        for nonPhysical in [nil, blackHole, internalNative] {
+            XCTAssertEqual(
+                DefaultOutputChangePolicy.action(
+                    activeBackend: .native,
+                    systemOutput: nonPhysical,
+                    outputDevices: [scarlett, benq, blackHole],
+                    activeOutputUID: scarlett.uid,
+                    preferredOutputUID: scarlett.uid,
+                    engineOutputDeviceID: scarlett.id
+                ),
+                .ignore
+            )
+        }
+
+        XCTAssertEqual(
+            DefaultOutputChangePolicy.action(
+                activeBackend: .blackHole,
+                systemOutput: benq,
+                outputDevices: [benq, blackHole],
+                activeOutputUID: scarlett.uid,
+                preferredOutputUID: scarlett.uid,
+                engineOutputDeviceID: scarlett.id
+            ),
+            .switchOutput(updatePreferredOutput: true, reason: .systemOutputChanged)
+        )
+
+        XCTAssertEqual(
+            NativeTopologyChangePolicy.action(
+                outputDevices: [blackHole],
+                activeOutputUID: scarlett.uid,
+                preferredOutputUID: scarlett.uid,
+                engineIsRunning: true,
+                engineOutputDeviceID: scarlett.id
+            ),
+            .stopRouting
+        )
+    }
+
+    func testSampleRateRestorationOutcome_distinguishesRetryableMetadataFromPermanentAndUnavailable() {
+        let corrupted = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": -1, "nan": .nan, "inf": .infinity],
+            resolveDevice: { _ in 10 },
+            read: { _ in 48000 },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertTrue(corrupted.retryableMetadataFailures.isEmpty)
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: corrupted.failures,
+                retryableMetadataFailures: corrupted.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .failed
+        )
+
+        let thrownResolve = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": 48000],
+            resolveDevice: { _ in throw NSError(domain: "CoreAudio", code: 1) },
+            read: { _ in 48000 },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(thrownResolve.retryableMetadataFailures, ["scarlett"])
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: thrownResolve.failures,
+                retryableMetadataFailures: thrownResolve.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .retryableMetadataFailure
+        )
+
+        let nilRead = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": 48000, "other": 44100],
+            resolveDevice: { uid in uid == "scarlett" ? 10 : nil },
+            read: { _ in nil },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: nilRead.failures,
+                retryableMetadataFailures: nilRead.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .retryableMetadataFailure
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: nilRead.failures,
+                retryableMetadataFailures: nilRead.retryableMetadataFailures,
+                requiredDeviceUID: "other"
+            ),
+            .failed
+        )
+
+        var waitReads = 0
+        let waitInvalid = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": 48000],
+            resolveDevice: { _ in 10 },
+            read: { _ in
+                waitReads += 1
+                return waitReads == 1 ? 44100 : nil
+            },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: waitInvalid.failures,
+                retryableMetadataFailures: waitInvalid.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .retryableMetadataFailure
+        )
+
+        let setterRejected = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": 48000],
+            resolveDevice: { _ in 10 },
+            read: { _ in 44100 },
+            set: { _, _ in false },
+            pause: {}
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: setterRejected.failures,
+                retryableMetadataFailures: setterRejected.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .failed
+        )
+
+        let didNotSettle = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["scarlett": 48000],
+            resolveDevice: { _ in 10 },
+            read: { _ in 44100 },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: didNotSettle.failures,
+                retryableMetadataFailures: didNotSettle.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .failed
+        )
+
+        let unrelatedUnavailable = AudioSampleRateNegotiation.restoreDetailed(
+            saved: ["other": 48000],
+            resolveDevice: { _ in nil },
+            read: { _ in 48000 },
+            set: { _, _ in true },
+            pause: {}
+        )
+        XCTAssertEqual(
+            SampleRateRestorationOutcome.evaluate(
+                failures: unrelatedUnavailable.failures,
+                retryableMetadataFailures: unrelatedUnavailable.retryableMetadataFailures,
+                requiredDeviceUID: "scarlett"
+            ),
+            .succeeded
+        )
+    }
+
+    func testProcessTapStartError_onlyLiveMetadataErrorsAreRetryable() throws {
+        guard #available(macOS 14.4, *) else { throw XCTSkip("Process Tap requires macOS 14.4") }
+        XCTAssertTrue(ProcessTapEngine.StartError.deviceUID.isRetryableMetadataFailure)
+        XCTAssertTrue(ProcessTapEngine.StartError.sampleRate.isRetryableMetadataFailure)
+        XCTAssertFalse(ProcessTapEngine.StartError.createTap(0).isRetryableMetadataFailure)
+        XCTAssertFalse(ProcessTapEngine.StartError.createAggregate(0).isRetryableMetadataFailure)
+        XCTAssertFalse(ProcessTapEngine.StartError.unsupportedTopology.isRetryableMetadataFailure)
+        XCTAssertFalse(ProcessTapEngine.StartError.createIOProc(0).isRetryableMetadataFailure)
+        XCTAssertFalse(ProcessTapEngine.StartError.startDevice(0).isRetryableMetadataFailure)
+    }
+
+    @MainActor
+    func testNativeMetadataRetryRecovery_retriesOnceAndRespectsCancellationAndTargetPresence() async {
+        let recovery = NativeMetadataRetryRecovery()
+        XCTAssertFalse(recovery.scheduleRetryIfNeeded(
+            started: true,
+            allowRetry: true,
+            retryableMetadataFailure: true,
+            targetOutputUID: "scarlett",
+            wasEQEnabled: true,
+            isWakeSuspended: { false },
+            setEQEnabled: { _ in },
+            retryAttempt: { XCTFail("Must not retry when already started"); return true }
+        ))
+        XCTAssertFalse(recovery.scheduleRetryIfNeeded(
+            started: false,
+            allowRetry: false,
+            retryableMetadataFailure: true,
+            targetOutputUID: "scarlett",
+            wasEQEnabled: true,
+            isWakeSuspended: { false },
+            setEQEnabled: { _ in },
+            retryAttempt: { XCTFail("Must not retry when allowRetry is false"); return true }
+        ))
+
+        final class AsyncGate {
+            let entered: XCTestExpectation
+            private var continuation: CheckedContinuation<Void, Never>?
+
+            init(name: String) {
+                entered = XCTestExpectation(description: name + " entered")
+            }
+
+            func wait() async {
+                await withCheckedContinuation { continuation in
+                    self.continuation = continuation
+                    entered.fulfill()
+                }
+            }
+
+            func release() {
+                continuation?.resume()
+                continuation = nil
+            }
+        }
+
+        let gate = AsyncGate(name: "retry wait")
+        let retryDone = expectation(description: "retry completed")
+        var eqStates: [Bool] = []
+        var retryCalls = 0
+        var resolvedResults: [(Bool, Bool)] = []
+        let scheduled = recovery.scheduleRetryIfNeeded(
+            started: false,
+            allowRetry: true,
+            retryableMetadataFailure: true,
+            targetOutputUID: "scarlett",
+            ignoredRollbackUID: "benq",
+            persistEnabledStateOnFailure: true,
+            wasEQEnabled: true,
+            isWakeSuspended: { false },
+            setEQEnabled: { eqStates.append($0) },
+            canRetryTarget: { $0 == "scarlett" },
+            wait: { await gate.wait() },
+            retryAttempt: {
+                retryCalls += 1
+                return false
+            },
+            onRetryResult: {
+                resolvedResults.append(($0, $1))
+                retryDone.fulfill()
+            }
+        )
+        XCTAssertTrue(scheduled)
+        XCTAssertTrue(recovery.isPending)
+        XCTAssertEqual(recovery.targetOutputUID, "scarlett")
+        XCTAssertEqual(recovery.ignoredRollbackUID, "benq")
+        await fulfillment(of: [gate.entered], timeout: 2)
+        gate.release()
+        await fulfillment(of: [retryDone], timeout: 2)
+        XCTAssertFalse(recovery.isPending)
+        XCTAssertEqual(retryCalls, 1)
+        XCTAssertEqual(eqStates, [true, false])
+        XCTAssertEqual(resolvedResults.count, 1)
+        XCTAssertEqual(resolvedResults[0].0, false)
+        XCTAssertEqual(resolvedResults[0].1, true)
+
+        let unavailableGate = AsyncGate(name: "unavailable target")
+        let unavailableDone = expectation(description: "unavailable handled")
+        var unavailableCallbacks = 0
+        eqStates.removeAll()
+        XCTAssertTrue(recovery.scheduleRetryIfNeeded(
+            started: false,
+            allowRetry: true,
+            retryableMetadataFailure: true,
+            targetOutputUID: "scarlett",
+            wasEQEnabled: true,
+            isWakeSuspended: { false },
+            setEQEnabled: { eqStates.append($0) },
+            canRetryTarget: { _ in false },
+            wait: { await unavailableGate.wait() },
+            retryAttempt: { XCTFail("Must not retry missing target"); return true },
+            onTargetUnavailable: {
+                unavailableCallbacks += 1
+                unavailableDone.fulfill()
+            },
+            onRetryResult: { _, _ in XCTFail("Missing target must not report retry result") }
+        ))
+        await fulfillment(of: [unavailableGate.entered], timeout: 2)
+        unavailableGate.release()
+        await fulfillment(of: [unavailableDone], timeout: 2)
+        XCTAssertEqual(eqStates, [false])
+        XCTAssertEqual(unavailableCallbacks, 1)
+
+        let cancelGate = AsyncGate(name: "cancelled retry")
+        XCTAssertTrue(recovery.scheduleRetryIfNeeded(
+            started: false,
+            allowRetry: true,
+            retryableMetadataFailure: true,
+            targetOutputUID: "scarlett",
+            wasEQEnabled: true,
+            isWakeSuspended: { false },
+            setEQEnabled: { _ in XCTFail("Cancelled retry must not mutate EQ") },
+            wait: { await cancelGate.wait() },
+            retryAttempt: { XCTFail("Cancelled retry must not execute"); return true }
+        ))
+        await fulfillment(of: [cancelGate.entered], timeout: 2)
+        recovery.cancel()
+        XCTAssertFalse(recovery.isPending)
+        XCTAssertNil(recovery.targetOutputUID)
+        XCTAssertNil(recovery.ignoredRollbackUID)
+        cancelGate.release()
+        await Task.yield()
+        await Task.yield()
+    }
+
+    @MainActor
+    func testPendingMetadataRetryPolicy_crosstalkForDefaultOutputAndTopology() {
+        let scarlett = AudioDevice(id: 10, name: "Scarlett Solo USB", uid: "scarlett", isInput: true, isOutput: true)
+        let benq = AudioDevice(id: 20, name: "BenQ Display Audio", uid: "benq", isInput: false, isOutput: true)
+        let builtIn = AudioDevice(id: 30, name: "Speakers", uid: "builtin", isInput: false, isOutput: true)
+        let blackHole = AudioDevice(
+            id: 40,
+            name: "BlackHole 2ch",
+            uid: "BlackHole2ch_UID",
+            isInput: true,
+            isOutput: true
+        )
+
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: nil, outputDevices: [scarlett, benq], targetOutputUID: "scarlett", ignoredRollbackUID: nil
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: blackHole, outputDevices: [scarlett, benq, blackHole],
+                targetOutputUID: "scarlett", ignoredRollbackUID: nil
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: scarlett, outputDevices: [scarlett, benq],
+                targetOutputUID: "scarlett", ignoredRollbackUID: nil
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: benq, outputDevices: [scarlett, benq],
+                targetOutputUID: "scarlett", ignoredRollbackUID: "benq"
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: builtIn, outputDevices: [scarlett, benq, builtIn],
+                targetOutputUID: "scarlett", ignoredRollbackUID: "benq"
+            ),
+            .switchOutput(builtIn)
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: benq, outputDevices: [benq, builtIn],
+                targetOutputUID: "scarlett", ignoredRollbackUID: nil
+            ),
+            .cancelRetry
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.defaultOutputAction(
+                systemOutput: benq, outputDevices: [benq, builtIn],
+                targetOutputUID: "scarlett", ignoredRollbackUID: "benq"
+            ),
+            .cancelRetry
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.topologyAction(
+                outputDevices: [scarlett, benq], targetOutputUID: "scarlett"
+            ),
+            .keepPending
+        )
+        XCTAssertEqual(
+            PendingMetadataRetryPolicy.topologyAction(
+                outputDevices: [benq, builtIn], targetOutputUID: "scarlett"
+            ),
+            .cancelRetry
+        )
+    }
+
+    func testAudioRoutingStartPolicy_automaticSkipsBlackHoleFallbackOnRetryableNativeMetadata() {
+        var calls: [String] = []
+        let firstAttempt = AudioRoutingStartPolicy.start(
+            preference: .automatic,
+            persistEnabledStateOnFailure: true,
+            native: { _ in
+                calls.append("native")
+                return false
+            },
+            shouldFallbackAfterNativeFailure: { false },
+            blackHole: { _ in
+                calls.append("blackHole")
+                return true
+            },
+            onFallback: {
+                calls.append("fallback")
+            }
+        )
+        XCTAssertFalse(firstAttempt)
+        XCTAssertEqual(calls, ["native"])
+
+        calls.removeAll()
+        let secondAttempt = AudioRoutingStartPolicy.start(
+            preference: .automatic,
+            persistEnabledStateOnFailure: true,
+            native: { _ in
+                calls.append("native")
+                return false
+            },
+            shouldFallbackAfterNativeFailure: { true },
+            blackHole: { _ in
+                calls.append("blackHole")
+                return true
+            },
+            onFallback: {
+                calls.append("fallback")
+            }
+        )
+        XCTAssertTrue(secondAttempt)
+        XCTAssertEqual(calls, ["native", "fallback", "blackHole"])
+    }
+
+    @MainActor
+    func testAudioEngineSetEnabled_pendingRetryPreservesIntentAndResolvesOnSuccessOrFailure() throws {
+        let suiteName = "AudioEngineBandModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let previousPersistenceDefaults = PresetPersistence.defaults
+        PresetPersistence.defaults = defaults
+        defer {
+            PresetPersistence.defaults = previousPersistenceDefaults
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        var retryPending = true
+        let engine = AudioEngine(
+            defaults: defaults,
+            coreAudioEngine: self.coreAudioEngine,
+            enableRouting: { _ in false },
+            disableRouting: { _ in },
+            isRoutingRetryPending: { retryPending }
+        )
+        defaults.set(false, forKey: "eqWasEnabled")
+
+        var eqStateNotifications: [Bool] = []
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("EQStateChanged"),
+            object: nil,
+            queue: nil
+        ) { note in
+            if let enabled = note.userInfo?["enabled"] as? Bool {
+                eqStateNotifications.append(enabled)
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        XCTAssertFalse(engine.setEnabled(true, persistState: true))
+        XCTAssertTrue(self.coreAudioEngine.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+
+        retryPending = false
+        engine.resolveDeferredEnable(succeeded: true)
+        XCTAssertEqual(eqStateNotifications, [true])
+        XCTAssertTrue(self.coreAudioEngine.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+        XCTAssertNotNil(PresetPersistence.loadPlaybackState(in: defaults))
+
+        retryPending = true
+        XCTAssertFalse(engine.setEnabled(true, persistState: true))
+        retryPending = false
+        engine.resolveDeferredEnable(succeeded: false)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
+        XCTAssertFalse(defaults.bool(forKey: "eqWasEnabled"))
+
+        defaults.set(true, forKey: "eqWasEnabled")
+        retryPending = true
+        XCTAssertFalse(engine.setEnabled(true, persistState: false))
+        XCTAssertTrue(self.coreAudioEngine.isEnabled)
+        retryPending = false
+        engine.resolveDeferredEnable(succeeded: false)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+
+        retryPending = true
+        XCTAssertFalse(engine.setEnabled(true, persistState: true))
+        engine.cancelDeferredEnableWithoutClearingIntent()
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+        engine.resolveDeferredEnable(succeeded: true)
+        XCTAssertFalse(self.coreAudioEngine.isEnabled)
+        XCTAssertEqual(eqStateNotifications, [true])
+
+        retryPending = true
+        XCTAssertFalse(engine.setEnabled(true, persistState: true))
+        retryPending = false
+        engine.resolveDeferredEnable(succeeded: true)
+        XCTAssertEqual(eqStateNotifications, [true, true])
+        engine.resolveDeferredEnable(succeeded: false)
+        XCTAssertTrue(defaults.bool(forKey: "eqWasEnabled"))
+    }
+
     func testProcessTapTestToneRestartResetsPhaseAndStopBypassesGeneration() {
         let engine = self.coreAudioEngine
         engine.stop()

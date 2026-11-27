@@ -836,6 +836,107 @@ final class BiquadFilterTests: XCTestCase {
         XCTAssertFalse(outInterleaved[1].isNaN)
     }
 
+    func testMaximumCombinedGainDB_extremeTenBandHighShelfPeakMatchesDenseSweep() throws {
+        let gains = [Float](repeating: 20, count: EQBandMode.tenBand.bandCount)
+        let bands = FixedBandEQDefinition.bands(mode: .tenBand, gains: gains)
+        let rate: Double = 48000
+        let coefficients = BiquadResponseCalculator.preparedCoefficients(bands: bands, sampleRate: Float(rate))
+        var densePeak = 0.0
+        for index in 0...16384 {
+            let frequency = Double(index) / 16384.0 * (rate / 2.0)
+            let gain = try coefficients.reduce(0.0) {
+                try $0 + EQConverter.response($1, frequency: frequency, rate: rate)
+            }
+            densePeak = max(densePeak, gain)
+        }
+        let estimated = Double(BiquadResponseCalculator.maximumCombinedGainDB(bands: bands, sampleRate: Float(rate)))
+        XCTAssertGreaterThan(densePeak, 40.5)
+        XCTAssertEqual(estimated, densePeak, accuracy: 0.05)
+    }
+
+    func testSPSCRingBuffer_activeResampler_planarAndInterleavedWraparoundAndNaNRecovery() {
+        for interleaved in [false, true] {
+            for excessFill in [true, false] {
+                let rb = SPSCRingBuffer()
+                rb.allocate(capacityFrames: 1024)
+                let sampleRate = 48000.0
+                let toneFreq = 1000.0
+                let blockFrames = 128
+                let targetFill = 256
+                let initialFill = excessFill ? 640 : 200
+                var writePhase = 0
+                var collectedL: [Float] = []
+                var collectedR: [Float] = []
+
+                func feed(_ count: Int, injectNaNAt indexToPoison: Int? = nil) {
+                    var inL = (0..<count).map { idx in
+                        Float(0.25 * sin(2 * Double.pi * toneFreq * Double(writePhase + idx) / sampleRate))
+                    }
+                    var inR = inL
+                    if let indexToPoison, indexToPoison < count {
+                        inL[indexToPoison] = .nan
+                        inR[indexToPoison] = .infinity
+                    }
+                    writePhase += count
+                    _ = rb.write(inL: inL, inR: inR, frameCount: count)
+                }
+
+                feed(initialFill)
+
+                for block in 0..<40 {
+                    feed(blockFrames, injectNaNAt: block == 28 ? 16 : nil)
+                    if interleaved {
+                        var out = [Float](repeating: 0, count: blockFrames * 2)
+                        rb.readInterleavedResampled(
+                            outPtr: &out,
+                            framesRequested: blockFrames,
+                            targetFillFrames: targetFill
+                        )
+                        for idx in 0..<blockFrames {
+                            collectedL.append(out[idx * 2])
+                            collectedR.append(out[idx * 2 + 1])
+                        }
+                    } else {
+                        var outL = [Float](repeating: 0, count: blockFrames)
+                        var outR = [Float](repeating: 0, count: blockFrames)
+                        rb.readNonInterleavedResampled(
+                            outL: &outL,
+                            outR: &outR,
+                            framesRequested: blockFrames,
+                            targetFillFrames: targetFill
+                        )
+                        collectedL.append(contentsOf: outL)
+                        collectedR.append(contentsOf: outR)
+                    }
+                }
+
+                XCTAssertEqual(collectedL.count, 40 * blockFrames)
+                XCTAssertTrue(collectedL.allSatisfy(\.isFinite))
+                XCTAssertTrue(collectedR.allSatisfy(\.isFinite))
+                XCTAssertNotEqual(rb.prototypeCorrection, 0, "Resampler drift correction must stay active")
+                if excessFill {
+                    XCTAssertGreaterThan(rb.prototypeCorrection, 0)
+                } else {
+                    XCTAssertLessThan(rb.prototypeCorrection, 0)
+                }
+
+                // Check steady-state clean region before NaN injection (frames 512..3072) across wraparounds.
+                let steady = collectedL[512..<3072]
+                let rms = sqrt(steady.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(steady.count))
+                XCTAssertEqual(rms, 0.25 / sqrt(2.0), accuracy: 0.01)
+                let expectedMaxStep = Float(0.25 * 2 * Double.pi * toneFreq / sampleRate)
+                for index in (steady.startIndex + 1)..<steady.endIndex {
+                    XCTAssertLessThan(abs(collectedL[index] - collectedL[index - 1]), expectedMaxStep * 1.35)
+                }
+
+                // Check clean recovery after block 28 NaN injection.
+                let tail = collectedL[(35 * blockFrames)..<(40 * blockFrames)]
+                let tailRMS = sqrt(tail.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(tail.count))
+                XCTAssertEqual(tailRMS, 0.25 / sqrt(2.0), accuracy: 0.01)
+            }
+        }
+    }
+
     func testCoreAudioEngine_activeEQFilter_rebuildsOnSampleRateChange() {
         let engine = CoreAudioEngine()
         let testGains: [Float] = [1, 2, 3, 4, 5, -1, -2, -3, -4, -5]

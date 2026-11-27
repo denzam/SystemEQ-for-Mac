@@ -181,38 +181,54 @@ nonisolated enum BiquadResponseCalculator {
     static func maximumCombinedGainDB(
         bands: [ParametricBand],
         sampleRate: Float,
-        pointCount: Int = 512
+        pointCount: Int = 1024
     ) -> Float {
         let filterCoefficients = preparedCoefficients(bands: bands, sampleRate: sampleRate)
         guard !filterCoefficients.isEmpty, sampleRate.isFinite, sampleRate > 0, pointCount > 1 else { return 0 }
-        let maximumFrequency = min(20000, sampleRate * 0.49)
-        let minimumFrequency = min(20, maximumFrequency)
+        let maximumFrequency = sampleRate * 0.499
+        let minimumFrequency = min(1, maximumFrequency)
         let logMinimum = log(minimumFrequency)
         let logRange = log(maximumFrequency) - logMinimum
         var maximumGain: Float = 0
 
-        for index in 0..<pointCount {
-            let fraction = Float(index) / Float(pointCount - 1)
-            let frequency = exp(logMinimum + logRange * fraction)
-            let omega = 2 * Float.pi * frequency / sampleRate
+        func combinedGain(atOmega omega: Double) -> Double {
             let cos1 = cos(omega)
             let sin1 = sin(omega)
             let cos2 = cos(2 * omega)
             let sin2 = sin(2 * omega)
-            var combinedGain: Float = 0
+            var combinedGain = 0.0
 
             for coefficient in filterCoefficients {
-                let numeratorReal = coefficient.b0 + coefficient.b1 * cos1 + coefficient.b2 * cos2
-                let numeratorImaginary = -(coefficient.b1 * sin1 + coefficient.b2 * sin2)
-                let denominatorReal = 1 + coefficient.a1 * cos1 + coefficient.a2 * cos2
-                let denominatorImaginary = -(coefficient.a1 * sin1 + coefficient.a2 * sin2)
+                let b0 = Double(coefficient.b0)
+                let b1 = Double(coefficient.b1)
+                let b2 = Double(coefficient.b2)
+                let a1 = Double(coefficient.a1)
+                let a2 = Double(coefficient.a2)
+                let numeratorReal = b0 + b1 * cos1 + b2 * cos2
+                let numeratorImaginary = -(b1 * sin1 + b2 * sin2)
+                let denominatorReal = 1 + a1 * cos1 + a2 * cos2
+                let denominatorImaginary = -(a1 * sin1 + a2 * sin2)
                 let numeratorPower = numeratorReal * numeratorReal + numeratorImaginary * numeratorImaginary
                 let denominatorPower = denominatorReal * denominatorReal + denominatorImaginary * denominatorImaginary
                 guard numeratorPower > 0, denominatorPower > 0 else { continue }
                 combinedGain += 10 * log10(numeratorPower / denominatorPower)
             }
-            if combinedGain.isFinite, combinedGain > maximumGain {
-                maximumGain = combinedGain
+            return combinedGain
+        }
+
+        for boundaryOmega in [0.0, Double.pi] {
+            let gain = combinedGain(atOmega: boundaryOmega)
+            if gain.isFinite, Float(gain) > maximumGain {
+                maximumGain = Float(gain)
+            }
+        }
+
+        for index in 0..<pointCount {
+            let fraction = Double(index) / Double(pointCount - 1)
+            let frequency = exp(Double(logMinimum) + Double(logRange) * fraction)
+            let gain = combinedGain(atOmega: 2 * Double.pi * frequency / Double(sampleRate))
+            if gain.isFinite, Float(gain) > maximumGain {
+                maximumGain = Float(gain)
             }
         }
 

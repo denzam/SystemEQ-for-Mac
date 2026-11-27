@@ -370,11 +370,21 @@ nonisolated public final class SPSCRingBuffer {
     ) -> SIMD2<Float> {
         let center = (base + offset) & mask
         let next = (center + 1) & mask
-        let anchor = SIMD2(l[center], r[center])
-        let linear: SIMD2<Float> = if fraction <= 1e-7 {
-            anchor
+        let rawAnchor = SIMD2(l[center], r[center])
+        let anchor = SIMD2(
+            rawAnchor.x.isFinite ? rawAnchor.x : 0,
+            rawAnchor.y.isFinite ? rawAnchor.y : 0
+        )
+        let linear: SIMD2<Float>
+        if fraction <= 1e-7 {
+            linear = anchor
         } else {
-            anchor + (SIMD2(l[next], r[next]) - anchor) * fraction
+            let rawNext = SIMD2(l[next], r[next])
+            let nextPair = SIMD2(
+                rawNext.x.isFinite ? rawNext.x : anchor.x,
+                rawNext.y.isFinite ? rawNext.y : anchor.y
+            )
+            linear = anchor + (nextPair - anchor) * fraction
         }
 
         let first = offset - 23

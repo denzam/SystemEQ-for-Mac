@@ -82,6 +82,20 @@ final class ProcessTapEngine {
         case sampleRate
         case createIOProc(OSStatus)
         case startDevice(OSStatus)
+
+        var isRetryableMetadataFailure: Bool {
+            switch self {
+            case .deviceUID,
+                 .sampleRate:
+                true
+            case .createAggregate,
+                 .createIOProc,
+                 .createTap,
+                 .startDevice,
+                 .unsupportedTopology:
+                false
+            }
+        }
     }
 
     private let processor: CoreAudioEngine

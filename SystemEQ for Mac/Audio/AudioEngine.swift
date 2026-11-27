@@ -190,6 +190,8 @@ public final class AudioEngine: ObservableObject {
     private var restoringPlayback = false
     private let enableRouting: (Bool) -> Bool
     private let disableRouting: (Bool) -> Void
+    private let isRoutingRetryPending: () -> Bool
+    private var pendingDeferredEnablePersistState: Bool?
     private static let outputBoostGainKey = "outputBoostGain"
 
     // MARK: - Singleton
@@ -208,12 +210,16 @@ public final class AudioEngine: ObservableObject {
         },
         disableRouting: @escaping (Bool) -> Void = { persistEnabledState in
             AudioRouter.shared.disableEQRouting(persistEnabledState: persistEnabledState)
+        },
+        isRoutingRetryPending: @escaping () -> Bool = {
+            AudioRouter.shared.isMetadataRetryPending
         }
     ) {
         self.defaults = defaults
         self.coreAudioEngine = coreAudioEngine
         self.enableRouting = enableRouting
         self.disableRouting = disableRouting
+        self.isRoutingRetryPending = isRoutingRetryPending
         autoNormalizeCalibrationProfiles = defaults.bool(forKey: "autoNormalizeCalibrationProfiles")
         outputBoostGain = Self.sanitizedOutputBoost(defaults.float(forKey: Self.outputBoostGainKey))
         setupEQBands()
@@ -416,11 +422,20 @@ public final class AudioEngine: ObservableObject {
 
         // Enable/disable routing based on EQ state
         if enabled {
+            pendingDeferredEnablePersistState = nil
             // First sync EQ bands to create filters (must be synchronous
             // so filters exist before routing starts pulling audio).
             syncToCoreAudioEngineImmediate()
             // Then enable routing
             guard enableRouting(false) else {
+                if isRoutingRetryPending() {
+                    pendingDeferredEnablePersistState = persistState
+                    if persistState {
+                        persistCurrentPlaybackState()
+                        defaults.set(true, forKey: "eqWasEnabled")
+                    }
+                    return false
+                }
                 coreAudioEngine.setEnabled(false)
                 if persistState {
                     defaults.set(false, forKey: "eqWasEnabled")
@@ -433,6 +448,7 @@ public final class AudioEngine: ObservableObject {
             }
             DiagnosticEventStore.shared.record("eq.enabled", details: diagnosticStateDetails())
         } else {
+            pendingDeferredEnablePersistState = nil
             if persistState {
                 persistCurrentPlaybackState()
             }
@@ -445,6 +461,38 @@ public final class AudioEngine: ObservableObject {
             defaults.set(enabled, forKey: "eqWasEnabled")
         }
         return true
+    }
+
+    @MainActor
+    func resolveDeferredEnable(succeeded: Bool) {
+        let deferredPersistState = pendingDeferredEnablePersistState
+        pendingDeferredEnablePersistState = nil
+        if succeeded {
+            syncToCoreAudioEngineImmediate()
+            if let deferredPersistState {
+                if deferredPersistState {
+                    persistCurrentPlaybackState()
+                    defaults.set(true, forKey: "eqWasEnabled")
+                }
+                DiagnosticEventStore.shared.record("eq.enabled", details: diagnosticStateDetails())
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("EQStateChanged"),
+                    object: nil,
+                    userInfo: ["enabled": true]
+                )
+            }
+        } else {
+            coreAudioEngine.setEnabled(false)
+            if deferredPersistState == true {
+                defaults.set(false, forKey: "eqWasEnabled")
+            }
+        }
+    }
+
+    @MainActor
+    func cancelDeferredEnableWithoutClearingIntent() {
+        pendingDeferredEnablePersistState = nil
+        coreAudioEngine.setEnabled(false)
     }
 
     func setPreampGain(_ gain: Float) {
