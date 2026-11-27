@@ -300,7 +300,7 @@ class EQDatabaseBuilder {
                     headphoneId: headphoneId,
                     source: entry.source,
                     author: entry.source,
-                    targetCurve: "JM-1 with Harman filters",
+                    targetCurve: "",
                     preampGain: preampGain,
                     isHandCrafted: isHandCrafted,
                     isRecommended: isHandCrafted

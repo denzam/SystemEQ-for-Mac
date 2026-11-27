@@ -98,12 +98,18 @@ final class AutoEQImportTests: XCTestCase {
         let headphone = try XCTUnwrap(headphones.first { $0.source.lowercased() == "oratory1990" })
         let input = try AutoEQDatabaseService(database: database).loadCanonical(headphoneID: headphone.id).input
         XCTAssertTrue(input.legacyPreamp)
-        for rate in [48000.0, 96000.0] {
+        for rate in [32000.0, 48000.0, 96000.0] {
             let result = try EQConverter(sampleRate: rate).prepare(input)
             XCTAssertEqual(result.ten.gains.count, 10)
             XCTAssertEqual(result.thirtyOne.gains.count, 31)
             XCTAssertLessThan(result.thirtyOne.rms, 0.4)
             XCTAssertLessThan(result.ten.rms, 0.9)
+            let fixedPreamp = try EQConverter.preampLimit(
+                mode: .tenBand,
+                gains: result.ten.gains,
+                sampleRate: rate
+            )
+            XCTAssertLessThanOrEqual(fixedPreamp, 0)
             for (mode, fit) in [(EQBandMode.tenBand, result.ten), (.thirtyOneBand, result.thirtyOne)] {
                 XCTAssertTrue(fit.gains.allSatisfy { $0.isFinite && abs($0) <= 20 })
                 let coefficients = FixedBandEQDefinition.bands(mode: mode, gains: fit.gains).map {
@@ -131,8 +137,12 @@ final class AutoEQImportTests: XCTestCase {
     }
 
     func testInvalidRateExtremeTrimAndCancellationCannotProducePreparedResult() async throws {
+        let validInput = try AutoEQImportParser.parse("Preamp: -3 dB\nFilter 1: ON PK Fc 1000 Hz Gain 3 dB Q 1")
+        XCTAssertNoThrow(try EQConverter(sampleRate: 32000).prepare(validInput))
+        for invalidRate in [Double.nan, 0, -48000, 16000, 400_000] {
+            XCTAssertThrowsError(try EQConverter(sampleRate: invalidRate).prepare(validInput))
+        }
         let input = try AutoEQImportParser.parse("Preamp: -40 dB\nFilter 1: ON PK Fc 1000 Hz Gain 3 dB Q 1")
-        XCTAssertThrowsError(try EQConverter(sampleRate: .nan).prepare(input))
         XCTAssertThrowsError(try EQConverter(sampleRate: 48000).prepare(input))
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }

@@ -13,7 +13,8 @@ import XCTest
 final class EQDatabaseFixtureTests: XCTestCase {
     private func withFixture(
         fts: Bool = false, bands10: Int = 10, bands31: Int = 31,
-        gain: String = "0", preamp: String = "-3", body: (EQDatabase) -> Void
+        gain: String = "0", preamp: String = "-3", presetSource: String = "NULL",
+        target: String = "NULL", additionalPresets: String = "", body: (EQDatabase) -> Void
     ) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -30,7 +31,8 @@ final class EQDatabaseFixtureTests: XCTestCase {
         CREATE TABLE metadata(key TEXT, value TEXT);
         INSERT INTO metadata VALUES('version', '2026-10-03');
         INSERT INTO headphones VALUES(1, 'Apple', 'AirPods Pro (2nd gen)', NULL, 'fixture');
-        INSERT INTO presets VALUES(1, 1, NULL, NULL, NULL, \(preamp), 0, 1);
+        INSERT INTO presets VALUES(1, 1, \(presetSource), NULL, \(target), \(preamp), 0, 1);
+        \(additionalPresets)
         """
         for index in 0..<bands10 {
             sql += "INSERT INTO fixed_band_10 VALUES(1, \(index), \(gain));\n"
@@ -64,7 +66,8 @@ final class EQDatabaseFixtureTests: XCTestCase {
             let loaded = AutoEQDatabaseService(database: database).load(headphoneID: 1)
             XCTAssertEqual(loaded?.preset.author, "fixture")
             XCTAssertEqual(loaded?.preset.source, "fixture")
-            XCTAssertEqual(loaded?.preset.targetCurve, AppConstants.EQ.defaultTarget)
+            XCTAssertNil(loaded?.preset.targetCurve)
+            XCTAssertEqual(loaded?.preset.displayName, "fixture")
             XCTAssertEqual(loaded?.gains10.count, 10)
             XCTAssertEqual(loaded?.gains31.count, 31)
         }
@@ -78,13 +81,72 @@ final class EQDatabaseFixtureTests: XCTestCase {
         }
     }
 
-    func testDatabaseServiceTargetCurveReadsPresetTarget() throws {
-        try withFixture(fts: true) { database in
-            let service = AutoEQDatabaseService(database: database)
-            let candidate = AutoEQDatabaseService.candidate(
-                DatabaseHeadphone(id: 1, brand: "Apple", model: "AirPods Pro (2nd gen)", type: "", source: "fixture")
-            )
-            XCTAssertEqual(service.targetCurve(for: candidate), AppConstants.EQ.defaultTarget)
+    func testDatabaseSuppressesUnknownAndLegacyPlaceholderTargets() throws {
+        let placeholder = AppConstants.EQ.defaultTarget
+        for target in ["NULL", "''", "char(9, 32, 10)", "'prefix' || char(0) || 'suffix'", "'\(placeholder)'"] {
+            try withFixture(target: target) { database in
+                let service = AutoEQDatabaseService(database: database)
+                let candidate = AutoEQDatabaseService.candidate(
+                    DatabaseHeadphone(
+                        id: 1,
+                        brand: "Apple",
+                        model: "AirPods Pro (2nd gen)",
+                        type: "",
+                        source: "fixture"
+                    )
+                )
+                XCTAssertNil(service.targetCurve(for: candidate.path))
+                let saved = AutoEQState.Identity(
+                    name: "AirPods",
+                    source: "fixture",
+                    path: candidate.path,
+                    rawText: "EQDatabase.db",
+                    target: placeholder
+                )
+                var imported = saved
+                imported.target = nil
+                XCTAssertEqual(service.displayIdentity(saved), imported)
+                XCTAssertEqual(service.displayIdentity(imported), imported)
+            }
+        }
+    }
+
+    func testDatabasePreservesExplicitAndCommunityTargets() throws {
+        let placeholder = AppConstants.EQ.defaultTarget
+        for (source, target) in [("'fixture'", "Documented target"), ("'community'", placeholder)] {
+            try withFixture(presetSource: source, target: "'\(target)'") { database in
+                let service = AutoEQDatabaseService(database: database)
+                let candidate = AutoEQDatabaseService.candidate(
+                    DatabaseHeadphone(
+                        id: 1,
+                        brand: "Apple",
+                        model: "AirPods Pro (2nd gen)",
+                        type: "",
+                        source: "fixture"
+                    )
+                )
+                XCTAssertEqual(service.targetCurve(for: candidate.path), target)
+                let identity = AutoEQState.Identity(
+                    name: "AirPods",
+                    source: "fixture",
+                    path: candidate.path,
+                    rawText: "EQDatabase.db",
+                    target: target
+                )
+                XCTAssertEqual(service.displayIdentity(identity), identity)
+            }
+        }
+    }
+
+    func testDocumentedTargetsRankAheadOfEmptyAndLegacyTargets() throws {
+        try withFixture(target: "''", additionalPresets: """
+        INSERT INTO presets VALUES(2, 1, NULL, NULL, '\(AppConstants.EQ.defaultTarget)', -3, 0, 1);
+        INSERT INTO presets VALUES(3, 1, NULL, NULL, 'Harman 2018', -3, 0, 1);
+        INSERT INTO presets VALUES(4, 1, NULL, NULL, 'JM-1', -3, 0, 1);
+        """) { database in
+            let presets = database.getPresets(for: 1)
+            XCTAssertEqual(presets.prefix(2).map(\.id), [4, 3])
+            XCTAssertEqual(database.getRecommendedPreset(for: 1)?.id, 4)
         }
     }
 
@@ -555,7 +617,7 @@ final class AutoEQModelsTests: XCTestCase {
 
         XCTAssertEqual(preset.source, headphone.source)
         XCTAssertEqual(preset.author, headphone.source)
-        XCTAssertFalse(preset.targetCurve.isEmpty)
+        XCTAssertNil(preset.targetCurve)
         XCTAssertFalse(preset.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 }

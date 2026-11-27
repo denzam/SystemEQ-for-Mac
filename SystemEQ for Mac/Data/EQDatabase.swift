@@ -34,7 +34,7 @@ struct DatabasePreset: Identifiable {
     let headphoneId: Int
     let source: String
     let author: String
-    let targetCurve: String
+    let targetCurve: String?
     let preampGain: Float
     let isHandCrafted: Bool
     let isRecommended: Bool
@@ -43,7 +43,7 @@ struct DatabasePreset: Identifiable {
         if isHandCrafted {
             return "⭐ \(author) (hand-crafted)"
         }
-        return "\(author) - \(targetCurve)"
+        return targetCurve.map { "\(author) - \($0)" } ?? author
     }
 }
 
@@ -369,31 +369,30 @@ class EQDatabase {
     /// Get all presets for a headphone
     func getPresets(for headphoneId: Int) -> [DatabasePreset] {
         let sql = """
-        SELECT p.id, p.headphone_id,
-               CASE WHEN p.source IS NULL OR instr(p.source, char(0)) > 0 OR length(trim(p.source)) = 0
-                    THEN h.source ELSE p.source END,
-               CASE WHEN p.author IS NULL OR instr(p.author, char(0)) > 0 OR length(trim(p.author)) = 0
-                    THEN h.source ELSE p.author END,
-               CASE WHEN p.target_curve IS NULL OR instr(p.target_curve, char(0)) > 0 OR length(trim(p.target_curve)) = 0
-                    THEN '\(AppConstants.EQ.defaultTarget)' ELSE p.target_curve END,
-               p.preamp_gain, p.is_hand_crafted, p.is_recommended
-        FROM presets p
-        JOIN headphones h ON h.id = p.headphone_id
-        WHERE p.headphone_id = ?
-        ORDER BY 
-            p.is_recommended DESC,
-            p.is_hand_crafted DESC,
-            CASE WHEN (p.author IS NULL OR instr(p.author, char(0)) > 0 OR length(trim(p.author)) = 0)
-                          AND h.source = 'oratory1990'
-                      OR p.author = 'oratory1990'
-                 THEN 0 ELSE 1 END,
-            CASE WHEN (p.target_curve IS NULL OR instr(p.target_curve, char(0)) > 0 OR length(trim(p.target_curve)) = 0)
-                          AND '\(AppConstants.EQ.defaultTarget)' LIKE '%JM-1%'
-                      OR p.target_curve LIKE '%JM-1%'
-                      OR p.target_curve LIKE '%JM1%'
-                 THEN 0 ELSE 1 END,
-            CASE WHEN p.source IS NULL OR instr(p.source, char(0)) > 0 OR length(trim(p.source)) = 0
-                 THEN h.source ELSE p.source END
+        WITH candidates AS (
+            SELECT p.id, p.headphone_id,
+                   CASE WHEN p.source IS NULL OR instr(p.source, char(0)) > 0 OR length(trim(p.source)) = 0
+                        THEN h.source ELSE p.source END AS source,
+                   CASE WHEN p.author IS NULL OR instr(p.author, char(0)) > 0 OR length(trim(p.author)) = 0
+                        THEN h.source ELSE p.author END AS author,
+                   CASE WHEN instr(p.target_curve, char(0)) > 0 THEN NULL
+                        ELSE NULLIF(trim(p.target_curve, char(9, 10, 11, 12, 13, 32)), '') END AS stored_target,
+                   p.preamp_gain, p.is_hand_crafted, p.is_recommended
+            FROM presets p
+            JOIN headphones h ON h.id = p.headphone_id
+            WHERE p.headphone_id = ?
+        )
+        SELECT id, headphone_id, source, author,
+               CASE WHEN source != 'community' AND stored_target = '\(AppConstants.EQ.defaultTarget)'
+                    THEN NULL ELSE stored_target END AS target_curve,
+               preamp_gain, is_hand_crafted, is_recommended
+        FROM candidates
+        ORDER BY is_recommended DESC, is_hand_crafted DESC,
+                 CASE WHEN author = 'oratory1990' THEN 0 ELSE 1 END,
+                 CASE WHEN target_curve IS NULL THEN 2
+                      WHEN source != 'community' AND (target_curve LIKE '%JM-1%' OR target_curve LIKE '%JM1%') THEN 0
+                      ELSE 1 END,
+                 source
         """
 
         var statement: OpaquePointer?
@@ -406,12 +405,13 @@ class EQDatabase {
 
         var presets: [DatabasePreset] = []
         while sqlite3_step(statement) == SQLITE_ROW {
+            let storedTarget = columnText(statement, 4).trimmingCharacters(in: .whitespacesAndNewlines)
             let preset = DatabasePreset(
                 id: Int(sqlite3_column_int(statement, 0)),
                 headphoneId: Int(sqlite3_column_int(statement, 1)),
                 source: columnText(statement, 2),
                 author: columnText(statement, 3),
-                targetCurve: columnText(statement, 4),
+                targetCurve: storedTarget.isEmpty ? nil : storedTarget,
                 preampGain: Float(sqlite3_column_double(statement, 5)),
                 isHandCrafted: sqlite3_column_int(statement, 6) == 1,
                 isRecommended: sqlite3_column_int(statement, 7) == 1

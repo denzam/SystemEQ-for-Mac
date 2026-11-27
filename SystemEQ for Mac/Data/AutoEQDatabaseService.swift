@@ -73,8 +73,11 @@ struct AutoEQDatabaseService {
     }
 
     func headphoneID(from candidate: SearchCandidate) -> Int? {
-        guard candidate.path.hasPrefix(Self.candidatePrefix) else { return nil }
-        guard let identity = Self.identity(from: candidate.path) else { return nil }
+        headphoneID(from: candidate.path)
+    }
+
+    private func headphoneID(from path: String) -> Int? {
+        guard let identity = Self.identity(from: path) else { return nil }
         return headphoneID(
             brand: identity.brand,
             model: identity.model,
@@ -82,8 +85,17 @@ struct AutoEQDatabaseService {
         )
     }
 
-    func targetCurve(for candidate: SearchCandidate) -> String? {
-        guard let id = headphoneID(from: candidate) else { return nil }
+    func targetCurve(for path: String) -> String? {
+        guard let id = headphoneID(from: path) else { return nil }
         return database.getRecommendedPreset(for: id)?.targetCurve
+    }
+
+    func displayIdentity(_ identity: AutoEQState.Identity?) -> AutoEQState.Identity? {
+        guard var identity else { return nil }
+        if identity.target == AppConstants.EQ.defaultTarget,
+           let path = identity.path, path.hasPrefix(Self.candidatePrefix) {
+            identity.target = targetCurve(for: path)
+        }
+        return identity
     }
 }

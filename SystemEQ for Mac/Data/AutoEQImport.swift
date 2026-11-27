@@ -444,7 +444,7 @@ extension EQConverter {
     }
 
     nonisolated static func preampLimit(mode: EQBandMode, gains: [Float], sampleRate: Double) throws -> Float {
-        guard sampleRate.isFinite, (40000...384_000).contains(sampleRate), gains.count == mode.bandCount,
+        guard sampleRate.isFinite, (24000...384_000).contains(sampleRate), gains.count == mode.bandCount,
               gains.allSatisfy({ $0.isFinite && abs($0) <= 20 }) else { throw AutoEQImportError.invalidSource }
         return try preampLimit(bands: FixedBandEQDefinition.bands(mode: mode, gains: gains), sampleRate: sampleRate)
     }
@@ -467,8 +467,9 @@ extension EQConverter {
     }
 
     nonisolated func prepare(_ preset: AutoEQImportedPreset) throws -> AutoEQPreparedPreset {
-        guard sampleRate.isFinite, sampleRate >= 40000,
-              sampleRate <= 384_000 else { throw AutoEQImportError.invalidSampleRate }
+        guard sampleRate.isFinite, (24000...384_000).contains(sampleRate) else {
+            throw AutoEQImportError.invalidSampleRate
+        }
         guard preset.preamp.map({ $0.isFinite && abs($0) <= 40 }) ?? true else { throw AutoEQImportError.invalidSource }
         switch preset.response {
         case let .parametric(filters):
@@ -495,7 +496,9 @@ extension EQConverter {
 
     nonisolated private func fit(_ preset: AutoEQImportedPreset, mode: EQBandMode) throws -> AutoEQFitResult {
         try Task.checkCancellation()
-        let grid = (0..<256).map { 20 * pow(1000, Double($0) / 255) }
+        let upperFrequency = min(20000, sampleRate * 0.49)
+        guard upperFrequency > 20 else { throw AutoEQImportError.invalidSampleRate }
+        let grid = (0..<256).map { 20 * pow(upperFrequency / 20, Double($0) / 255) }
         let target = try grid.map { try sourceResponse(preset.response, at: $0) }
         let bases = FixedBandEQDefinition.bands(mode: mode, gains: [Float](repeating: 0, count: mode.bandCount))
         func curve(_ index: Int, _ gain: Float) throws -> [Double] {
@@ -555,16 +558,16 @@ extension EQConverter {
         var squared = 0.0
         var lowCount = 0
         var maximum = 0.0
-        for index in 0...4096 {
+        for index in 0...4097 {
             if index.isMultiple(of: 128) { try Task.checkCancellation() }
-            let frequency = pow(sampleRate * 0.499, Double(index) / 4096)
+            let frequency = index == 0 ? 0 : pow(sampleRate / 2, Double(index - 1) / 4096)
             let actual = try coefficients.reduce(0.0) { try $0 + Self.response(
                 $1,
                 frequency: frequency,
                 rate: sampleRate
             ) }
             peak = max(peak, actual)
-            if frequency >= 20, frequency <= 20000 {
+            if frequency >= 20, frequency <= upperFrequency {
                 let delta = try actual - sourceResponse(preset.response, at: frequency)
                 maximum = max(maximum, abs(delta))
                 if frequency <= 6000 {

@@ -118,6 +118,7 @@ class EQDatabaseBuilderTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT brand FROM headphones_fts WHERE headphones_fts MATCH 'Acme'").fetchone(), ("Acme",))
             self.assertEqual(db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone(), ("1",))
             self.assertEqual(db.execute("SELECT preamp_gain FROM presets").fetchone(), (-2.0,))
+            self.assertEqual(db.execute("SELECT target_curve FROM presets").fetchone(), ("",))
 
     def test_community_presets_are_searchable_and_preserve_their_source_filters(self):
         community = self.work / "CommunityPresets"

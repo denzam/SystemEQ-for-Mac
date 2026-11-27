@@ -122,15 +122,6 @@ struct AutoEQView: View {
         }
     }
 
-    @State private var targetProfile: String = "JM-1 with Harman filters"
-    private let targetProfileVariants: [String] = [
-        "JM-1 with Harman filters",
-        "JM1 with Harman filters",
-        "JM-1 Harman",
-        "JM1 Harman",
-        "JM-1",
-        "JM1"
-    ]
     @State private var indexTruncated: Bool = false
 
     // Optimization: Caching and request management
@@ -272,7 +263,7 @@ struct AutoEQView: View {
                             if let source = presetState.activePresetSource {
                                 Text(source)
                             }
-                            if let target = presetState.activePresetTarget {
+                            if let target = activePresetDisplayIdentity?.target {
                                 Text("•")
                                 Text(target)
                                     .foregroundStyle(.blue)
@@ -434,7 +425,8 @@ struct AutoEQView: View {
                 systemImage: "waveform.path.ecg"
             )
 
-            if let identity = presetState.previewIdentity, identity != presetState.appliedIdentity,
+            if let identity = databaseService.displayIdentity(presetState.previewIdentity),
+               identity != activePresetDisplayIdentity,
                let name = identity.name {
                 Text(name)
                     .font(AppTypography.bodySmall)
@@ -1731,15 +1723,17 @@ struct AutoEQView: View {
         favoritesRepository.contains(path: candidate.path)
     }
 
+    private var activePresetDisplayIdentity: AutoEQState.Identity? {
+        databaseService.displayIdentity(presetState.appliedIdentity)
+    }
+
     private func toggleFavoriteForCandidate(_ candidate: SearchCandidate) {
         updateFavorites {
             try favoritesRepository.togglePath(
                 path: candidate.path,
                 name: candidate.display,
                 source: Self.databaseSource(from: candidate),
-                target: candidate.path.hasPrefix(Self.databaseCandidatePrefix)
-                    ? (databaseService.targetCurve(for: candidate) ?? targetProfile)
-                    : nil
+                target: databaseService.targetCurve(for: candidate.path)
             )
         }
     }
@@ -1771,7 +1765,7 @@ struct AutoEQView: View {
             updateFavorites {
                 try favoritesRepository.togglePath(
                     path: path, name: name,
-                    source: presetState.activePresetSource, target: presetState.activePresetTarget
+                    source: presetState.activePresetSource, target: activePresetDisplayIdentity?.target
                 )
             }
             return
@@ -1783,7 +1777,7 @@ struct AutoEQView: View {
         guard let name = presetState.activePresetName, !presetState.appliedText.isEmpty else { return }
         updateFavorites {
             try favoritesRepository.toggleCustom(
-                name: name, source: presetState.activePresetSource, target: presetState.activePresetTarget,
+                name: name, source: presetState.activePresetSource, target: activePresetDisplayIdentity?.target,
                 rawText: presetState.appliedText, preamp: presetState.preampDB
             )
         }
