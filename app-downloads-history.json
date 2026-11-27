@@ -210,12 +210,12 @@
     },
     {
       "date": "2026-11-27",
-      "total": 3918,
-      "dmg": 3369,
-      "zip": 220,
-      "homebrew": 329,
-      "other": 2375,
-      "total_all_assets": 6293
+      "total": 3931,
+      "dmg": 3377,
+      "zip": 222,
+      "homebrew": 332,
+      "other": 2389,
+      "total_all_assets": 6320
     }
   ]
 }
