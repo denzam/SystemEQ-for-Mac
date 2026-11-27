@@ -439,7 +439,7 @@ struct RoutingView: View {
             return localization.localized(.nativeCaptureActive)
         }
         return audioRouter.blackHoleDetected
-            ? localization.localized(.inputCaptureActive)
+            ? localization.localized(.installed)
             : localization.localized(.blackHoleRequiredForRouting)
     }
 
@@ -534,32 +534,74 @@ struct RoutingView: View {
                 message: audioRouter.selectedOutputDevice?.name ?? localization.localized(.notConfigured)
             )
 
-            // Overall Status
             Divider()
                 .padding(.vertical, 8)
 
-            HStack {
-                Image(systemName: audioRouter
-                    .isRoutingActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundColor(audioRouter.isRoutingActive ? .green : .orange)
-                    .font(AppTypography.displaySmall)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Overall Status")
-                        .font(AppTypography.heading2)
-                    Text(audioRouter.statusMessage)
-                        .font(AppTypography.body)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                routingSignalCard
             }
-            .padding(AppSpacing.lg)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
         }
         .padding(AppSpacing.xl)
+    }
+
+    @ViewBuilder private var routingSignalCard: some View {
+        if !audioRouter.isRoutingActive || !core.isRunning {
+            statusCheckCard(
+                title: localization.localized(.eqShort),
+                status: .info,
+                message: localization.localized(.eqInactive)
+            )
+        } else if audioRouter.activeBackend != .blackHole {
+            statusCheckCard(
+                title: localization.localized(.eqShort),
+                status: .info,
+                message: localization.localized(.nativeCaptureActive)
+            )
+        } else if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            microphoneAccessCard
+        } else if core.isTestToneActive {
+            statusCheckCard(
+                title: localization.localized(.audioLevels),
+                status: .info,
+                message: localization.localized(.testTone)
+            )
+        } else {
+            let signal = core.recentMeteredSignal()
+            let input = localization.localized(.input)
+            let output = localization.localized(.output)
+            let inputLevel = signal.input ? "> −80 dBFS" : "—"
+            let outputLevel = signal.postEQ ? "> −80 dBFS" : "—"
+            statusCheckCard(
+                title: localization.localized(.audioLevels),
+                status: Self.signalCheckStatus(input: signal.input, postEQ: signal.postEQ),
+                message: "\(input) \(inputLevel) · \(output) (EQ) \(outputLevel)"
+            )
+        }
+    }
+
+    private var microphoneAccessCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            statusCheckCard(
+                title: localization.localized(.inputDevice),
+                status: .warning,
+                message: localization.localized(.privacyDesc)
+            )
+            Button {
+                let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                    Task { _ = await AVCaptureDevice.requestAccess(for: .audio) }
+                } else if let settings {
+                    NSWorkspace.shared.open(settings)
+                }
+            } label: {
+                Label(localization.localized(.grantPermission), systemImage: "mic")
+            }
+        }
+    }
+
+    static func signalCheckStatus(input: Bool, postEQ: Bool) -> CheckStatus {
+        guard input else { return .info }
+        return postEQ ? .success : .warning
     }
 
     private func statusCheckCard(title: String, status: CheckStatus, message: String) -> some View {

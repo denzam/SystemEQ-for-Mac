@@ -618,6 +618,7 @@ public final class CoreAudioEngine: ObservableObject {
     fileprivate let diagnosticOutputCallbacks = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticLastInputCallback = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticLastOutputCallback = CoreAudioEngine.makeDiagnosticCounter()
+    fileprivate let diagnosticLastBlackHoleReadError = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticLastInputSignal = CoreAudioEngine.makeDiagnosticCounter()
     fileprivate let diagnosticLastOutputSignal = CoreAudioEngine.makeDiagnosticCounter()
     private let diagnosticNativeCallbacks = CoreAudioEngine.makeDiagnosticCounter()
@@ -1316,6 +1317,7 @@ public final class CoreAudioEngine: ObservableObject {
         diagnosticOutputCallbacks.deallocate()
         diagnosticLastInputCallback.deallocate()
         diagnosticLastOutputCallback.deallocate()
+        diagnosticLastBlackHoleReadError.deallocate()
         diagnosticLastInputSignal.deallocate()
         diagnosticLastOutputSignal.deallocate()
         diagnosticNativeCallbacks.deallocate()
@@ -2088,6 +2090,7 @@ public final class CoreAudioEngine: ObservableObject {
             diagnosticOutputCallbacks,
             diagnosticLastInputCallback,
             diagnosticLastOutputCallback,
+            diagnosticLastBlackHoleReadError,
             diagnosticLastInputSignal,
             diagnosticLastOutputSignal
         ] {
@@ -2286,9 +2289,38 @@ public final class CoreAudioEngine: ObservableObject {
 
     // MARK: - Diagnostics API
 
+    var isTestToneActive: Bool {
+        seq_atomic_int32_load(testToneEnabledAtomic) != 0
+    }
+
+    func recentMeteredSignal() -> (input: Bool, postEQ: Bool) {
+        let input = seq_atomic_int64_load_acquire(diagnosticLastInputSignal)
+        let postEQ = seq_atomic_int64_load_acquire(diagnosticLastOutputSignal)
+        let now = mach_absolute_time()
+        return (Self.isRecentSignal(input, now: now), Self.isRecentSignal(postEQ, now: now))
+    }
+
+    static func isRecentSignal(_ timestamp: Int64, now: UInt64) -> Bool {
+        let observed = UInt64(bitPattern: timestamp)
+        guard observed != 0, observed <= now else { return false }
+        return AudioConvertHostTimeToNanos(now - observed) <= 2_000_000_000
+    }
+
+    private static func microphoneAccessDescription(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: "authorized"
+        case .denied: "denied"
+        case .restricted: "restricted"
+        case .notDetermined: "not determined"
+        @unknown default: "unknown"
+        }
+    }
+
     func diagnosticSummary(backend: ActiveAudioRoutingBackend) -> String {
         let pipeline = vdspFilter != nil ? "vDSP" : "none"
         let now = mach_absolute_time()
+        let microphoneAccess = Self.microphoneAccessDescription(AVCaptureDevice.authorizationStatus(for: .audio))
+        let lastBlackHoleReadError = seq_atomic_int64_load_acquire(diagnosticLastBlackHoleReadError)
         let summary = """
         Setup complete: \(isSetupComplete)
         Engine running: \(isRunning)
@@ -2298,6 +2330,10 @@ public final class CoreAudioEngine: ObservableObject {
         Processing buffer capacity (not latency): \(allocatedFrameCapacity) frames
         Last metered input signal above -80 dBFS: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastInputSignal), now: now))
         Last metered post-EQ signal above -80 dBFS: \(Self.ageDescription(seq_atomic_int64_load_acquire(diagnosticLastOutputSignal), now: now))
+        BlackHole microphone access: \(microphoneAccess)
+        Last BlackHole input read error: \(lastBlackHoleReadError == 0 ? "not observed" : String(lastBlackHoleReadError))
+        Test tone active: \(isTestToneActive)
+        Signal in physical output buffer during last test tone: \(testToneOutputObserved)
         """
         if backend == .native, isRunning {
             let recent = callbackWindow?.recentCounts()
@@ -3082,7 +3118,8 @@ public final class CoreAudioEngine: ObservableObject {
     func processStereoInPlace(
         left: UnsafeMutablePointer<Float>,
         right: UnsafeMutablePointer<Float>,
-        frameCount: Int
+        frameCount: Int,
+        isBlackHoleTestTone: Bool = false
     ) {
         let meterTick = peakMeter.shouldSample(frameCount: frameCount)
         if meterTick {
@@ -3092,7 +3129,7 @@ public final class CoreAudioEngine: ObservableObject {
                 frameCount: frameCount,
                 channelCount: 2
             )
-            if peakMeter.rtInputPeak > 0.0001 {
+            if !isBlackHoleTestTone, peakMeter.rtInputPeak > 0.0001 {
                 seq_atomic_int64_store_release(diagnosticLastInputSignal, Int64(bitPattern: mach_absolute_time()))
             }
         }
@@ -3119,7 +3156,9 @@ public final class CoreAudioEngine: ObservableObject {
                 channelCount: 2
             )
             if peakMeter.rtOutputPeak > 0.0001 {
-                seq_atomic_int64_store_release(diagnosticLastOutputSignal, Int64(bitPattern: mach_absolute_time()))
+                if !isBlackHoleTestTone {
+                    seq_atomic_int64_store_release(diagnosticLastOutputSignal, Int64(bitPattern: mach_absolute_time()))
+                }
                 if seq_atomic_int32_load(testToneEnabledAtomic) != 0 {
                     seq_atomic_int64_store_release(diagnosticTestToneOutputSeen, 1)
                 }
@@ -3446,7 +3485,8 @@ private func inputCaptureCallbackFunction(
     }
 
     // If test tone enabled, synthesize into inABL and bypass AudioUnitRender
-    if seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0 {
+    let isTestTone = seq_atomic_int32_load(engine.testToneEnabledAtomic) != 0
+    if isTestTone {
         let sr = Float(engine.currentSampleRate)
         let twoPi = Float.pi * 2.0
         let command = UInt64(bitPattern: seq_atomic_int64_load_acquire(engine.testToneCommandAtomic))
@@ -3472,6 +3512,7 @@ private func inputCaptureCallbackFunction(
         var ts = tsIn // safe to pass input timeline timestamp
         let status = AudioUnitRender(iu, ioActionFlags, &ts, 1, inNumberFrames, inputBufferList)
         if status != noErr {
+            seq_atomic_int64_store_release(engine.diagnosticLastBlackHoleReadError, Int64(status))
             return status
         }
     }
@@ -3480,7 +3521,7 @@ private func inputCaptureCallbackFunction(
             ? inABL[1].mData?.assumingMemoryBound(to: Float.self)
             : inL
         if let inR {
-            engine.processStereoInPlace(left: inL, right: inR, frameCount: frames)
+            engine.processStereoInPlace(left: inL, right: inR, frameCount: frames, isBlackHoleTestTone: isTestTone)
         }
     }
 
